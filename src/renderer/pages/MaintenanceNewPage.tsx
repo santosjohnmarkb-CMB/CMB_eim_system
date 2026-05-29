@@ -4,7 +4,7 @@ import { useMaintenanceStore } from '../stores/maintenance.store';
 import { useEquipmentStore } from '../stores/equipment.store';
 import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
-import { useToast } from '../hooks';
+import { useToast, useDepartmentFilter } from '../hooks';
 import { Search, X, Plus, Trash2, FileText, Wrench } from 'lucide-react';
 import type { EquipmentWithAsset } from '../../shared/types';
 
@@ -27,7 +27,9 @@ const labelClass = 'block text-xs font-semibold text-gray-600 uppercase tracking
 
 export function MaintenanceNewPage() {
   const { create, addAction } = useMaintenanceStore();
-  const { items, fetchAll } = useEquipmentStore();
+  const { items: allItems, fetchAll } = useEquipmentStore();
+  const { isEquipmentInDepartment } = useDepartmentFilter();
+  const items = useMemo(() => allItems.filter((i) => isEquipmentInDepartment(i.category_id)), [allItems, isEquipmentInDepartment]);
   const user = useAuthStore((s) => s.user);
   const navigate = useNavigate();
   const toast = useToast();

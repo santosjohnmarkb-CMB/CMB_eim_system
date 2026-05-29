@@ -233,3 +233,11 @@ CREATE TABLE IF NOT EXISTS ticket_actions (
 
 ALTER TABLE ticket_actions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow all for ticket_actions" ON ticket_actions FOR ALL USING (true) WITH CHECK (true);
+
+-- ═══════════════════════════════════════════════════
+-- Migration: Department separation
+-- ═══════════════════════════════════════════════════
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS department TEXT;
+ALTER TABLE parts_catalog ADD COLUMN IF NOT EXISTS department TEXT;
+ALTER TABLE vendors ADD COLUMN IF NOT EXISTS department TEXT;

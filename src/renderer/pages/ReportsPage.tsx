@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { BarChart3, Wrench, Box, TrendingUp } from 'lucide-react';
 import { ipcInvoke } from '../lib/ipc';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
+import { useDepartmentStore } from '../stores/department.store';
+import { DEPARTMENT_CONFIG } from '../../shared/constants';
+import type { Department } from '../../shared/constants';
 
 type ReportType = 'fleet' | 'repair' | 'parts' | 'availability';
 
@@ -9,19 +12,21 @@ export function ReportsPage() {
   const [activeReport, setActiveReport] = useState<ReportType>('fleet');
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const activeDepartment = useDepartmentStore((s) => s.activeDepartment);
 
   const loadReport = async (type: ReportType) => {
     setLoading(true);
     setActiveReport(type);
     try {
       const channelMap: Record<ReportType, string> = { fleet: 'reports:fleetUtilization', repair: 'reports:repairCosts', parts: 'reports:partsSpend', availability: 'reports:availabilityTrends' };
-      const result = await ipcInvoke(channelMap[type]);
+      const categoryNames = activeDepartment ? DEPARTMENT_CONFIG[activeDepartment].categories : undefined;
+      const result = await ipcInvoke(channelMap[type], categoryNames);
       setData(result);
     } catch { setData(null); }
     setLoading(false);
   };
 
-  useEffect(() => { loadReport('fleet'); }, []);
+  useEffect(() => { loadReport('fleet'); }, [activeDepartment]);
 
   const tabs = [
     { key: 'fleet' as ReportType, label: 'Fleet Utilization', icon: BarChart3 },
@@ -32,6 +37,11 @@ export function ReportsPage() {
 
   return (
     <div className="space-y-6">
+      {activeDepartment && (
+        <p className="text-xs text-surface-500">
+          Showing reports for <span className="text-surface-300 font-semibold">{DEPARTMENT_CONFIG[activeDepartment].label}</span>
+        </p>
+      )}
       <div className="flex gap-2">
         {tabs.map((tab) => (
           <button key={tab.key} onClick={() => loadReport(tab.key)} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeReport === tab.key ? 'bg-primary-600/15 text-primary-400' : 'text-surface-400 hover:text-surface-200 hover:bg-surface-800/50'}`}>

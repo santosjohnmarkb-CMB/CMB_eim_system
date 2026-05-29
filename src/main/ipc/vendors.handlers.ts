@@ -21,8 +21,8 @@ export function registerVendorHandlers(): void {
     const input = VendorCreateSchema.parse(data);
     const id = uuidv4();
     const now = new Date().toISOString();
-    db.prepare(`INSERT INTO vendors (id, name, contact_person, phone, email, address, payment_terms, notes, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`)
-      .run(id, input.name, input.contact_person || null, input.phone || null, input.email || null, input.address || null, input.payment_terms || null, input.notes || null, now, now);
+    db.prepare(`INSERT INTO vendors (id, name, contact_person, phone, email, address, payment_terms, notes, department, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`)
+      .run(id, input.name, input.contact_person || null, input.phone || null, input.email || null, input.address || null, input.payment_terms || null, input.notes || null, input.department || null, now, now);
     const vendor: any = db.prepare('SELECT * FROM vendors WHERE id = ?').get(id);
     void pushOperationalToCloud('vendors', 'INSERT', vendor);
     return vendor;

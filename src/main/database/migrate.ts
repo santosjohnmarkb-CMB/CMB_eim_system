@@ -68,6 +68,16 @@ const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    id: '005_department_field',
+    up: (db: any) => {
+      for (const table of ['users', 'parts_catalog', 'vendors']) {
+        if (!columnExists(db, table, 'department')) {
+          db.exec(`ALTER TABLE ${table} ADD COLUMN department TEXT`);
+        }
+      }
+    },
+  },
 ];
 
 export function runMigrations(db: any): void {

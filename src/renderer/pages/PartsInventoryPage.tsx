@@ -9,10 +9,13 @@ import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
 import { Input } from '../components/common/Input';
 import { useToast } from '../hooks';
+import { useDepartmentStore } from '../stores/department.store';
 import type { PartsCatalogItem } from '../../shared/types';
 
 export function PartsInventoryPage() {
-  const { items, loading, fetchAll, create } = usePartsStore();
+  const { items: allItems, loading, fetchAll, create } = usePartsStore();
+  const activeDepartment = useDepartmentStore((s) => s.activeDepartment);
+  const items = useMemo(() => allItems.filter((p) => !activeDepartment || !p.department || p.department === activeDepartment), [allItems, activeDepartment]);
   const navigate = useNavigate();
   const toast = useToast();
   const [search, setSearch] = useState('');
@@ -32,7 +35,7 @@ export function PartsInventoryPage() {
   const handleCreate = async () => {
     if (!form.name) { toast.error('Name is required'); return; }
     setSaving(true);
-    try { await create(form); toast.success('Part created'); setShowAdd(false); setForm({ name: '', description: '', category: 'spare', unit_of_measure: 'unit', unit_cost: 0, initial_stock: 0, reorder_point: 5, reorder_qty: 10, location: 'Main Warehouse' }); }
+    try { await create({ ...form, department: activeDepartment }); toast.success('Part created'); setShowAdd(false); setForm({ name: '', description: '', category: 'spare', unit_of_measure: 'unit', unit_cost: 0, initial_stock: 0, reorder_point: 5, reorder_qty: 10, location: 'Main Warehouse' }); }
     catch (err: any) { toast.error(err.message); }
     setSaving(false);
   };

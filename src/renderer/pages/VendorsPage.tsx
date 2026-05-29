@@ -7,10 +7,13 @@ import { Modal } from '../components/common/Modal';
 import { Input } from '../components/common/Input';
 import { SearchBox } from '../components/common/SearchBox';
 import { useToast } from '../hooks';
+import { useDepartmentStore } from '../stores/department.store';
 import type { Vendor } from '../../shared/types';
 
 export function VendorsPage() {
-  const { vendors, loading, fetchAll, create } = useVendorsStore();
+  const { vendors: allVendors, loading, fetchAll, create } = useVendorsStore();
+  const activeDepartment = useDepartmentStore((s) => s.activeDepartment);
+  const vendors = allVendors.filter((v) => !activeDepartment || !v.department || v.department === activeDepartment);
   const toast = useToast();
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
@@ -26,7 +29,7 @@ export function VendorsPage() {
   const handleCreate = async () => {
     if (!form.name) { toast.error('Name is required'); return; }
     setSaving(true);
-    try { await create(form); toast.success('Vendor created'); setShowAdd(false); setForm({ name: '', contact_person: '', phone: '', email: '', address: '', payment_terms: '', notes: '' }); }
+    try { await create({ ...form, department: activeDepartment }); toast.success('Vendor created'); setShowAdd(false); setForm({ name: '', contact_person: '', phone: '', email: '', address: '', payment_terms: '', notes: '' }); }
     catch (err: any) { toast.error(err.message); }
     setSaving(false);
   };

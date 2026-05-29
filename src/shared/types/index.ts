@@ -81,6 +81,7 @@ export interface User {
   full_name: string;
   email: string;
   role: EimUserRole;
+  department: 'camera' | 'lights_grips' | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -203,6 +204,7 @@ export interface PartsCatalogItem {
   unit_of_measure: string;
   unit_cost: number;
   vendor_id: string | null;
+  department: 'camera' | 'lights_grips' | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -277,6 +279,7 @@ export interface Vendor {
   address: string | null;
   payment_terms: string | null;
   notes: string | null;
+  department: 'camera' | 'lights_grips' | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;

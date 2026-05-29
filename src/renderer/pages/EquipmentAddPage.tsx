@@ -3,10 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { useEquipmentStore } from '../stores/equipment.store';
 import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
-import { useToast } from '../hooks';
+import { useToast, useDepartmentFilter } from '../hooks';
 
 export function EquipmentAddPage() {
   const { categories, subcategories, fetchCategories, fetchSubcategories, createEquipment } = useEquipmentStore();
+  const { isEquipmentInDepartment } = useDepartmentFilter();
   const navigate = useNavigate();
   const toast = useToast();
   const [form, setForm] = useState<Record<string, any>>({
@@ -45,7 +46,7 @@ export function EquipmentAddPage() {
             <label className="block text-xs font-medium text-surface-400 mb-1">Category *</label>
             <select value={form.category_id} onChange={(e) => { set('category_id', e.target.value); set('subcategory_id', ''); }} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100" required>
               <option value="">Select category</option>
-              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {categories.filter((c) => isEquipmentInDepartment(c.id)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
           <div>

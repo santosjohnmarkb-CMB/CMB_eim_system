@@ -1,13 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePartsStore } from '../stores/parts.store';
 import { useAuthStore } from '../stores/auth.store';
+import { useDepartmentStore } from '../stores/department.store';
 import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
 import { useToast } from '../hooks';
 
 export function StockAdjustmentPage() {
-  const { items, fetchAll, adjustStock } = usePartsStore();
+  const { items: allItems, fetchAll, adjustStock } = usePartsStore();
+  const activeDepartment = useDepartmentStore((s) => s.activeDepartment);
+  const items = useMemo(() => allItems.filter((p) => !activeDepartment || !p.department || p.department === activeDepartment), [allItems, activeDepartment]);
   const user = useAuthStore((s) => s.user);
   const navigate = useNavigate();
   const toast = useToast();

@@ -249,28 +249,41 @@ export function registerEquipmentHandlers(): void {
     `).all(equipmentId);
   });
 
-  ipcMain.handle('db:equipment:getDashboardStats', () => {
-    const total: any = db.prepare('SELECT COUNT(*) as count FROM equipment_items WHERE is_active = 1').get();
+  ipcMain.handle('db:equipment:getDashboardStats', (_e: any, categoryNames?: string[]) => {
+    const catFilter = categoryNames && categoryNames.length > 0;
+    const catPlaceholders = catFilter ? categoryNames!.map(() => '?').join(', ') : '';
+    const catJoin = catFilter ? 'JOIN categories c ON c.id = e.category_id' : '';
+    const catWhere = catFilter ? `AND c.name IN (${catPlaceholders})` : '';
+    const catParams = catFilter ? categoryNames! : [];
+
+    const total: any = db.prepare(`SELECT COUNT(*) as count FROM equipment_items e ${catJoin} WHERE e.is_active = 1 ${catWhere}`).get(...catParams);
     const statusCounts: any[] = db.prepare(`
       SELECT ea.current_status as status, COUNT(*) as count
-      FROM equipment_assets ea JOIN equipment_items e ON e.id = ea.equipment_id
-      WHERE e.is_active = 1 GROUP BY ea.current_status
-    `).all();
-    const activeTickets: any = db.prepare(
-      "SELECT COUNT(*) as count FROM maintenance_tickets WHERE repair_status NOT IN ('COMPLETED', 'CANCELLED')"
-    ).get();
-    const lowStock: any = db.prepare(`
-      SELECT COUNT(*) as count FROM parts_inventory pi
-      JOIN parts_catalog pc ON pc.id = pi.part_id
-      WHERE pc.is_active = 1 AND pi.qty_on_hand <= pi.reorder_point
-    `).get();
+      FROM equipment_assets ea JOIN equipment_items e ON e.id = ea.equipment_id ${catJoin}
+      WHERE e.is_active = 1 ${catWhere} GROUP BY ea.current_status
+    `).all(...catParams);
+
+    const ticketQuery = catFilter
+      ? `SELECT COUNT(*) as count FROM maintenance_tickets mt JOIN equipment_items e ON e.id = mt.equipment_id JOIN categories c ON c.id = e.category_id WHERE mt.repair_status NOT IN ('COMPLETED', 'CANCELLED') AND c.name IN (${catPlaceholders})`
+      : "SELECT COUNT(*) as count FROM maintenance_tickets WHERE repair_status NOT IN ('COMPLETED', 'CANCELLED')";
+    const activeTickets: any = db.prepare(ticketQuery).get(...catParams);
+
+    const lowStockQuery = catFilter
+      ? `SELECT COUNT(*) as count FROM parts_inventory pi JOIN parts_catalog pc ON pc.id = pi.part_id WHERE pc.is_active = 1 AND pi.qty_on_hand <= pi.reorder_point AND (pc.department IS NULL OR pc.department IN (SELECT CASE WHEN c2.name = 'Camera' THEN 'camera' ELSE 'lights_grips' END FROM categories c2 WHERE c2.name IN (${catPlaceholders})))`
+      : `SELECT COUNT(*) as count FROM parts_inventory pi JOIN parts_catalog pc ON pc.id = pi.part_id WHERE pc.is_active = 1 AND pi.qty_on_hand <= pi.reorder_point`;
+    const lowStock: any = db.prepare(lowStockQuery).get(...catParams);
+
     const overdueSchedules: any = db.prepare(`
-      SELECT COUNT(*) as count FROM preventive_schedules
-      WHERE is_active = 1 AND next_due_date IS NOT NULL AND next_due_date < date('now')
-    `).get();
-    const recentActivity: any[] = db.prepare(
-      'SELECT * FROM asset_status_log ORDER BY changed_at DESC LIMIT 10'
-    ).all();
+      SELECT COUNT(*) as count FROM preventive_schedules ps
+      ${catFilter ? 'JOIN equipment_items e ON e.id = ps.equipment_id ' + catJoin : ''}
+      WHERE ps.is_active = 1 AND ps.next_due_date IS NOT NULL AND ps.next_due_date < date('now')
+      ${catFilter ? catWhere : ''}
+    `).get(...catParams);
+
+    const activityQuery = catFilter
+      ? `SELECT asl.* FROM asset_status_log asl JOIN equipment_items e ON e.id = asl.equipment_id JOIN categories c ON c.id = e.category_id WHERE c.name IN (${catPlaceholders}) ORDER BY asl.changed_at DESC LIMIT 10`
+      : 'SELECT * FROM asset_status_log ORDER BY changed_at DESC LIMIT 10';
+    const recentActivity: any[] = db.prepare(activityQuery).all(...catParams);
 
     const dist: Record<string, number> = {};
     for (const sc of statusCounts) dist[sc.status] = sc.count;

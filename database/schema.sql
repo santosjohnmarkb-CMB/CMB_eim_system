@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS users (
   full_name TEXT NOT NULL,
   email TEXT NOT NULL DEFAULT '',
   role TEXT NOT NULL CHECK (role IN ('admin', 'accounts_manager', 'billing_user', 'payroll_user', 'inventory_manager', 'maintenance_lead', 'technician', 'parts_clerk', 'viewer')),
+  department TEXT CHECK (department IN ('camera', 'lights_grips') OR department IS NULL),
   is_active INTEGER NOT NULL DEFAULT 1,
   version INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -203,6 +204,7 @@ CREATE TABLE IF NOT EXISTS vendors (
   address TEXT,
   payment_terms TEXT,
   notes TEXT,
+  department TEXT CHECK (department IN ('camera', 'lights_grips') OR department IS NULL),
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -218,6 +220,7 @@ CREATE TABLE IF NOT EXISTS parts_catalog (
   unit_of_measure TEXT NOT NULL DEFAULT 'unit',
   unit_cost REAL NOT NULL DEFAULT 0,
   vendor_id TEXT REFERENCES vendors(id),
+  department TEXT CHECK (department IN ('camera', 'lights_grips') OR department IS NULL),
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))

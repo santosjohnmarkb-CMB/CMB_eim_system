@@ -2,8 +2,18 @@ import { useState, useEffect } from 'react';
 import { useSyncStore } from '../stores/sync.store';
 import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
+import { Modal } from '../components/common/Modal';
 import { useToast } from '../hooks';
-import { RefreshCw, Database, Cloud } from 'lucide-react';
+import { RefreshCw, Database, Cloud, Users, Plus, Edit2, Trash2 } from 'lucide-react';
+import { ipcInvoke } from '../lib/ipc';
+import type { User } from '../../shared/types';
+import { DEPARTMENT_CONFIG } from '../../shared/constants';
+import type { Department } from '../../shared/constants';
+
+const ROLES = [
+  'admin', 'accounts_manager', 'billing_user', 'payroll_user',
+  'inventory_manager', 'maintenance_lead', 'technician', 'parts_clerk', 'viewer',
+] as const;
 
 export function SettingsPage() {
   const syncStore = useSyncStore();
@@ -12,12 +22,33 @@ export function SettingsPage() {
   const [anonKey, setAnonKey] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const [users, setUsers] = useState<User[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [showUserModal, setShowUserModal] = useState(false);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [userForm, setUserForm] = useState({
+    username: '', password: '', full_name: '', email: '',
+    role: 'viewer' as string, department: '' as string,
+  });
+  const [savingUser, setSavingUser] = useState(false);
+
   useEffect(() => {
     if (syncStore.config) {
       setUrl(syncStore.config.supabaseUrl || '');
       setAnonKey(syncStore.config.supabaseAnonKey || '');
     }
   }, [syncStore.config]);
+
+  const loadUsers = async () => {
+    setLoadingUsers(true);
+    try {
+      const result = await ipcInvoke<User[]>('db:users:getAll');
+      setUsers(result || []);
+    } catch { /* ignore */ }
+    setLoadingUsers(false);
+  };
+
+  useEffect(() => { loadUsers(); }, []);
 
   const handleSave = async () => {
     if (!url || !anonKey) { toast.error('Please fill in both fields'); return; }
@@ -33,8 +64,118 @@ export function SettingsPage() {
     toast.success('Sync completed');
   };
 
+  const openAddUser = () => {
+    setEditingUser(null);
+    setUserForm({ username: '', password: '', full_name: '', email: '', role: 'viewer', department: '' });
+    setShowUserModal(true);
+  };
+
+  const openEditUser = (user: User) => {
+    setEditingUser(user);
+    setUserForm({
+      username: user.username,
+      password: '',
+      full_name: user.full_name,
+      email: user.email,
+      role: user.role,
+      department: user.department || '',
+    });
+    setShowUserModal(true);
+  };
+
+  const handleSaveUser = async () => {
+    if (!userForm.full_name || !userForm.role) { toast.error('Name and role are required'); return; }
+    setSavingUser(true);
+    try {
+      const deptValue = userForm.department || null;
+      if (editingUser) {
+        const payload: Record<string, any> = {
+          full_name: userForm.full_name,
+          email: userForm.email,
+          role: userForm.role,
+          department: deptValue,
+        };
+        if (userForm.password) payload.password = userForm.password;
+        await ipcInvoke('db:users:update', editingUser.id, payload);
+        toast.success('User updated');
+      } else {
+        if (!userForm.username || !userForm.password) { toast.error('Username and password are required'); setSavingUser(false); return; }
+        await ipcInvoke('db:users:create', {
+          username: userForm.username,
+          password: userForm.password,
+          full_name: userForm.full_name,
+          email: userForm.email,
+          role: userForm.role,
+          department: deptValue,
+        });
+        toast.success('User created');
+      }
+      setShowUserModal(false);
+      loadUsers();
+    } catch (err: any) { toast.error(err.message || 'Failed to save user'); }
+    setSavingUser(false);
+  };
+
+  const handleDeleteUser = async (id: string) => {
+    try {
+      await ipcInvoke('db:users:delete', id);
+      toast.success('User deactivated');
+      loadUsers();
+    } catch { toast.error('Failed to deactivate user'); }
+  };
+
+  const setField = (f: string, v: string) => setUserForm((p) => ({ ...p, [f]: v }));
+
+  const getDeptLabel = (dept: string | null) => {
+    if (!dept) return 'None (Admin)';
+    return DEPARTMENT_CONFIG[dept as Department]?.shortLabel || dept;
+  };
+
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-3xl space-y-6">
+      {/* User Management */}
+      <div className="glass-panel rounded-xl p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <Users size={20} className="text-primary-400" />
+          <h3 className="text-base font-semibold text-surface-200">User Management</h3>
+          <div className="flex-1" />
+          <Button size="sm" onClick={openAddUser}><Plus size={14} /> Add User</Button>
+        </div>
+        {loadingUsers ? (
+          <p className="text-surface-500 text-sm py-4">Loading users...</p>
+        ) : (
+          <div className="space-y-2">
+            {users.map((u) => (
+              <div key={u.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-surface-800/40 hover:bg-surface-800/70 transition-colors">
+                <div className="w-8 h-8 rounded-full bg-primary-600/20 flex items-center justify-center text-primary-400 text-xs font-bold flex-shrink-0">
+                  {u.full_name?.charAt(0)?.toUpperCase() || '?'}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-surface-200">{u.full_name}</p>
+                  <p className="text-2xs text-surface-500">{u.username} &middot; {u.role.replace(/_/g, ' ')}</p>
+                </div>
+                <span className={`text-2xs px-2 py-0.5 rounded-full ${u.department ? 'bg-primary-600/15 text-primary-400' : 'bg-surface-700 text-surface-400'}`}>
+                  {getDeptLabel(u.department)}
+                </span>
+                <span className={`text-2xs ${u.is_active ? 'text-success-400' : 'text-surface-600'}`}>
+                  {u.is_active ? 'Active' : 'Inactive'}
+                </span>
+                <button onClick={() => openEditUser(u)} className="p-1.5 rounded text-surface-500 hover:text-primary-400 hover:bg-surface-700 transition-colors">
+                  <Edit2 size={14} />
+                </button>
+                {u.is_active && (
+                  <button onClick={() => handleDeleteUser(u.id)} className="p-1.5 rounded text-surface-500 hover:text-danger-400 hover:bg-surface-700 transition-colors">
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+            {users.length === 0 && <p className="text-surface-500 text-sm py-4 text-center">No users found</p>}
+          </div>
+        )}
+      </div>
+
+      {/* Supabase Config */}
       <div className="glass-panel rounded-xl p-6">
         <div className="flex items-center gap-3 mb-4">
           <Cloud size={20} className="text-primary-400" />
@@ -47,6 +188,7 @@ export function SettingsPage() {
         </div>
       </div>
 
+      {/* Sync Status */}
       <div className="glass-panel rounded-xl p-6">
         <div className="flex items-center gap-3 mb-4">
           <Database size={20} className="text-primary-400" />
@@ -59,6 +201,37 @@ export function SettingsPage() {
         </div>
         <Button variant="secondary" onClick={handleForceSync} className="mt-4"><RefreshCw size={14} /> Force Sync</Button>
       </div>
+
+      {/* User Modal */}
+      <Modal isOpen={showUserModal} onClose={() => setShowUserModal(false)} title={editingUser ? 'Edit User' : 'Add User'} size="lg">
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <Input label="Full Name *" value={userForm.full_name} onChange={(e) => setField('full_name', e.target.value)} />
+            <Input label="Username *" value={userForm.username} onChange={(e) => setField('username', e.target.value)} disabled={!!editingUser} />
+            <Input label={editingUser ? 'New Password (leave empty to keep)' : 'Password *'} type="password" value={userForm.password} onChange={(e) => setField('password', e.target.value)} />
+            <Input label="Email" value={userForm.email} onChange={(e) => setField('email', e.target.value)} />
+            <div>
+              <label className="block text-xs font-medium text-surface-400 mb-1">Role *</label>
+              <select value={userForm.role} onChange={(e) => setField('role', e.target.value)} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100">
+                {ROLES.map((r) => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-surface-400 mb-1">Department</label>
+              <select value={userForm.department} onChange={(e) => setField('department', e.target.value)} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100">
+                <option value="">None (Admin / Unrestricted)</option>
+                {(Object.keys(DEPARTMENT_CONFIG) as Department[]).map((dept) => (
+                  <option key={dept} value={dept}>{DEPARTMENT_CONFIG[dept].label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setShowUserModal(false)}>Cancel</Button>
+            <Button onClick={handleSaveUser} loading={savingUser}>{editingUser ? 'Update User' : 'Create User'}</Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

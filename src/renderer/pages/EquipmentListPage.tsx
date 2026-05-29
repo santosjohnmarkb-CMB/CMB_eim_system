@@ -9,6 +9,7 @@ import { Badge } from '../components/common/Badge';
 import { EQUIPMENT_STATUS_CONFIG } from '../lib/constants';
 import type { EquipmentWithAsset, EquipmentStatus } from '../../shared/types';
 import { useAuthStore } from '../stores/auth.store';
+import { useDepartmentFilter } from '../hooks';
 
 const statusVariantMap: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'purple' | 'default'> = {
   AVAILABLE: 'success', DEPLOYED: 'info', IN_REPAIR: 'warning', ON_HOLD: 'default',
@@ -19,6 +20,7 @@ export function EquipmentListPage() {
   const { items, categories, subcategories, loading, fetchAll, fetchCategories, fetchSubcategories } = useEquipmentStore();
   const navigate = useNavigate();
   const role = useAuthStore((s) => s.user?.role);
+  const { isEquipmentInDepartment } = useDepartmentFilter();
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [subcategoryFilter, setSubcategoryFilter] = useState('');
@@ -26,7 +28,9 @@ export function EquipmentListPage() {
 
   useEffect(() => { fetchAll(); fetchCategories(); fetchSubcategories(); }, [fetchAll, fetchCategories, fetchSubcategories]);
 
-  const usedCategoryIds = useMemo(() => new Set(items.map((i) => i.category_id)), [items]);
+  const deptItems = useMemo(() => items.filter((i) => isEquipmentInDepartment(i.category_id)), [items, isEquipmentInDepartment]);
+
+  const usedCategoryIds = useMemo(() => new Set(deptItems.map((i) => i.category_id)), [deptItems]);
 
   const deduplicatedCategories = useMemo(() => {
     const seen = new Map<string, typeof categories[0]>();
@@ -52,7 +56,7 @@ export function EquipmentListPage() {
   };
 
   const filtered = useMemo(() => {
-    return items.filter((item) => {
+    return deptItems.filter((item) => {
       if (search) {
         const q = search.toLowerCase();
         if (!item.name.toLowerCase().includes(q) && !item.equipment_code.toLowerCase().includes(q) && !item.brand.toLowerCase().includes(q)) return false;
@@ -62,7 +66,7 @@ export function EquipmentListPage() {
       if (statusFilter && item.asset?.current_status !== statusFilter) return false;
       return true;
     });
-  }, [items, search, categoryFilter, subcategoryFilter, statusFilter]);
+  }, [deptItems, search, categoryFilter, subcategoryFilter, statusFilter]);
 
   const columns: Column<EquipmentWithAsset>[] = [
     { key: 'equipment_code', header: 'Code', className: 'w-24' },
@@ -111,7 +115,7 @@ export function EquipmentListPage() {
       <div className="glass-panel rounded-xl overflow-hidden">
         <DataTable columns={columns} data={filtered} onRowClick={(item) => navigate(`/equipment/${item.id}`)} loading={loading} emptyMessage="No equipment found" />
       </div>
-      <p className="text-xs text-surface-600">{filtered.length} of {items.length} items</p>
+      <p className="text-xs text-surface-600">{filtered.length} of {deptItems.length} items</p>
     </div>
   );
 }

@@ -100,6 +100,30 @@ export const PARTS_CATEGORY_CONFIG: Record<string, { label: string; description:
   accessory:  { label: 'Accessories',  description: 'Add-on items that accompany equipment' },
 };
 
+export type Department = 'camera' | 'lights_grips';
+
+export const DEPARTMENT_CONFIG: Record<Department, { label: string; shortLabel: string; icon: string; categories: string[] }> = {
+  camera: {
+    label: 'Camera Department',
+    shortLabel: 'Camera',
+    icon: 'Camera',
+    categories: ['Camera'],
+  },
+  lights_grips: {
+    label: 'Lights & Grips Department',
+    shortLabel: 'Lights & Grips',
+    icon: 'Lightbulb',
+    categories: ['Lights and Grips', 'Dollies Mounts & Cranes', 'Special Equipment'],
+  },
+};
+
+export const CATEGORY_TO_DEPARTMENT: Record<string, Department> = {
+  'Camera': 'camera',
+  'Lights and Grips': 'lights_grips',
+  'Dollies Mounts & Cranes': 'lights_grips',
+  'Special Equipment': 'lights_grips',
+};
+
 export const CATEGORY_PREFIXES: Record<string, string> = {
   'Camera': 'CAM',
   'Dollies Mounts & Cranes': 'DMC',

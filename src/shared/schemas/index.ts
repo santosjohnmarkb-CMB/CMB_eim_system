@@ -14,6 +14,7 @@ export const UserCreateSchema = z.object({
   email: z.string().email().max(200).optional().default(''),
   role: z.enum(['admin', 'accounts_manager', 'billing_user', 'payroll_user',
     'inventory_manager', 'maintenance_lead', 'technician', 'parts_clerk', 'viewer']),
+  department: z.enum(['camera', 'lights_grips']).nullable().optional(),
 });
 
 export const UserUpdateSchema = z.object({
@@ -23,6 +24,7 @@ export const UserUpdateSchema = z.object({
   email: z.string().email().max(200).optional(),
   role: z.enum(['admin', 'accounts_manager', 'billing_user', 'payroll_user',
     'inventory_manager', 'maintenance_lead', 'technician', 'parts_clerk', 'viewer']).optional(),
+  department: z.enum(['camera', 'lights_grips']).nullable().optional(),
   is_active: z.boolean().optional(),
 });
 
@@ -110,6 +112,7 @@ export const PartCreateSchema = z.object({
   unit_of_measure: z.string().max(50).default('unit'),
   unit_cost: z.number().min(0).max(9999999).default(0),
   vendor_id: z.string().uuid().nullable().optional(),
+  department: z.enum(['camera', 'lights_grips']).nullable().optional(),
   initial_stock: z.number().int().min(0).default(0),
   reorder_point: z.number().int().min(0).default(5),
   reorder_qty: z.number().int().min(1).default(10),
@@ -123,6 +126,7 @@ export const PartUpdateSchema = z.object({
   unit_of_measure: z.string().max(50).optional(),
   unit_cost: z.number().min(0).max(9999999).optional(),
   vendor_id: z.string().uuid().nullable().optional(),
+  department: z.enum(['camera', 'lights_grips']).nullable().optional(),
   is_active: z.boolean().optional(),
 });
 
@@ -143,6 +147,7 @@ export const VendorCreateSchema = z.object({
   address: z.string().max(500).nullable().optional(),
   payment_terms: z.string().max(200).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
+  department: z.enum(['camera', 'lights_grips']).nullable().optional(),
 });
 
 export const VendorUpdateSchema = z.object({
@@ -153,6 +158,7 @@ export const VendorUpdateSchema = z.object({
   address: z.string().max(500).nullable().optional(),
   payment_terms: z.string().max(200).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
+  department: z.enum(['camera', 'lights_grips']).nullable().optional(),
   is_active: z.boolean().optional(),
 });
 

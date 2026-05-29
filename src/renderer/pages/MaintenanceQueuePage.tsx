@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import { useMaintenanceStore } from '../stores/maintenance.store';
+import { useEquipmentStore } from '../stores/equipment.store';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { SearchBox } from '../components/common/SearchBox';
 import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG } from '../lib/constants';
+import { useDepartmentFilter } from '../hooks';
 import type { MaintenanceTicket } from '../../shared/types';
 
 const KANBAN_COLUMNS = ['REPORTED', 'ASSESSED', 'QUEUED', 'IN_PROGRESS', 'TESTING', 'COMPLETED'] as const;
@@ -13,12 +15,22 @@ const severityVariant: Record<string, 'danger' | 'warning' | 'default' | 'info'>
 
 export function MaintenanceQueuePage() {
   const { tickets, loading, fetchAll } = useMaintenanceStore();
+  const { items: equipmentItems, fetchAll: fetchEquipment } = useEquipmentStore();
+  const { isEquipmentInDepartment } = useDepartmentFilter();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => { fetchAll(); fetchEquipment(); }, [fetchAll, fetchEquipment]);
+
+  const equipmentCategoryMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const eq of equipmentItems) map.set(eq.id, eq.category_id);
+    return map;
+  }, [equipmentItems]);
 
   const filtered = tickets.filter((t) => {
+    const catId = equipmentCategoryMap.get(t.equipment_id);
+    if (catId && !isEquipmentInDepartment(catId)) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return t.ticket_number.toLowerCase().includes(q) || (t.equipment_name || '').toLowerCase().includes(q);

@@ -49,8 +49,8 @@ export function registerPartsHandlers(): void {
     const now = new Date().toISOString();
 
     const tx = db.transaction(() => {
-      db.prepare(`INSERT INTO parts_catalog (id, part_code, name, description, category, unit_of_measure, unit_cost, vendor_id, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`)
-        .run(id, partCode, input.name, input.description, input.category, input.unit_of_measure, input.unit_cost, input.vendor_id || null, now, now);
+      db.prepare(`INSERT INTO parts_catalog (id, part_code, name, description, category, unit_of_measure, unit_cost, vendor_id, department, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`)
+        .run(id, partCode, input.name, input.description, input.category, input.unit_of_measure, input.unit_cost, input.vendor_id || null, input.department || null, now, now);
       db.prepare(`INSERT INTO parts_inventory (id, part_id, qty_on_hand, qty_reserved, reorder_point, reorder_qty, location, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?)`)
         .run(invId, id, input.initial_stock || 0, input.reorder_point, input.reorder_qty, input.location, now, now);
       if (input.initial_stock && input.initial_stock > 0) {

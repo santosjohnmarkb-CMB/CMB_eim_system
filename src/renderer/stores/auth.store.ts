@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { ipcInvoke } from '../lib/ipc';
 import type { User } from '../../shared/types';
+import { useDepartmentStore } from './department.store';
 
 interface AuthState {
   user: User | null;
@@ -21,6 +22,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       const user = await ipcInvoke<User | null>('auth:login', username, password);
       if (user) {
         set({ user, isAuthenticated: true, loading: false });
+        useDepartmentStore.getState().initFromUser(user.department);
       } else {
         set({ loading: false });
       }
@@ -36,5 +38,6 @@ export const useAuthStore = create<AuthState>((set) => ({
       await ipcInvoke('auth:logout');
     } catch { /* ignore */ }
     set({ user: null, isAuthenticated: false });
+    useDepartmentStore.getState().initFromUser(null);
   },
 }));

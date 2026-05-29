@@ -11,7 +11,7 @@ interface EquipmentState {
   fetchAll: () => Promise<void>;
   fetchCategories: () => Promise<void>;
   fetchSubcategories: () => Promise<void>;
-  fetchDashboardStats: () => Promise<void>;
+  fetchDashboardStats: (categoryNames?: string[]) => Promise<void>;
   createEquipment: (data: any) => Promise<EquipmentWithAsset>;
   updateEquipment: (id: string, data: any) => Promise<EquipmentWithAsset>;
   deleteEquipment: (id: string) => Promise<void>;
@@ -53,9 +53,9 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
     } catch { /* ignore */ }
   },
 
-  fetchDashboardStats: async () => {
+  fetchDashboardStats: async (categoryNames?: string[]) => {
     try {
-      const stats = await ipcInvoke<DashboardStats>('db:equipment:getDashboardStats');
+      const stats = await ipcInvoke<DashboardStats>('db:equipment:getDashboardStats', categoryNames);
       set({ dashboardStats: stats });
     } catch { /* ignore */ }
   },

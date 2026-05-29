@@ -10,7 +10,7 @@ export function registerUserHandlers(): void {
   ipcMain.handle('db:users:getAll', (event: any) => {
     requireAdmin(event);
     const users: any[] = db.prepare(
-      'SELECT id, username, full_name, email, role, is_active, created_at, updated_at FROM users ORDER BY created_at DESC'
+      'SELECT id, username, full_name, email, role, department, is_active, created_at, updated_at FROM users ORDER BY created_at DESC'
     ).all();
     return users;
   });
@@ -23,12 +23,12 @@ export function registerUserHandlers(): void {
     const passwordHash = hashPassword(input.password);
 
     db.prepare(
-      `INSERT INTO users (id, username, password_hash, full_name, email, role, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`
-    ).run(id, input.username, passwordHash, input.full_name, input.email || '', input.role, now, now);
+      `INSERT INTO users (id, username, password_hash, full_name, email, role, department, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+    ).run(id, input.username, passwordHash, input.full_name, input.email || '', input.role, input.department || null, now, now);
 
     const user: any = db.prepare(
-      'SELECT id, username, full_name, email, role, is_active, created_at, updated_at FROM users WHERE id = ?'
+      'SELECT id, username, full_name, email, role, department, is_active, created_at, updated_at FROM users WHERE id = ?'
     ).get(id);
     return user;
   });
@@ -43,6 +43,7 @@ export function registerUserHandlers(): void {
     if (input.full_name !== undefined) { updates.push('full_name = ?'); values.push(input.full_name); }
     if (input.email !== undefined) { updates.push('email = ?'); values.push(input.email); }
     if (input.role !== undefined) { updates.push('role = ?'); values.push(input.role); }
+    if (input.department !== undefined) { updates.push('department = ?'); values.push(input.department); }
     if (input.is_active !== undefined) { updates.push('is_active = ?'); values.push(input.is_active ? 1 : 0); }
     if (input.password !== undefined) {
       updates.push('password_hash = ?');
@@ -57,7 +58,7 @@ export function registerUserHandlers(): void {
     db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
     const user: any = db.prepare(
-      'SELECT id, username, full_name, email, role, is_active, created_at, updated_at FROM users WHERE id = ?'
+      'SELECT id, username, full_name, email, role, department, is_active, created_at, updated_at FROM users WHERE id = ?'
     ).get(id);
     return user;
   });
