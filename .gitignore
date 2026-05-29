@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dist-main/
+release/
+*.db
+*.db-wal
+*.db-shm
+.env
+sync-config.json
+.DS_Store
