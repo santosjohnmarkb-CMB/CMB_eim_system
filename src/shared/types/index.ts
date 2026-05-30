@@ -171,7 +171,12 @@ export interface MaintenanceTicket {
   updated_at: string;
   equipment_name?: string;
   equipment_code?: string;
+  category_id?: string;
+  category_name?: string;
   notes_count?: number;
+  last_action_date?: string | null;
+  last_action_taken?: string | null;
+  last_action_personnel?: string | null;
 }
 
 export interface TicketAction {

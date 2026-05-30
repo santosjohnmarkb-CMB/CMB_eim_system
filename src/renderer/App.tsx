@@ -6,17 +6,13 @@ import { initRealtimeListeners, cleanupRealtimeListeners } from './stores/realti
 import { Layout } from './components/layout/Layout';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
-import { EquipmentListPage } from './pages/EquipmentListPage';
+import { DepartmentSegmentPage } from './pages/DepartmentSegmentPage';
 import { EquipmentAddPage } from './pages/EquipmentAddPage';
 import { EquipmentDetailPage } from './pages/EquipmentDetailPage';
-import { MaintenanceQueuePage } from './pages/MaintenanceQueuePage';
 import { MaintenanceNewPage } from './pages/MaintenanceNewPage';
 import { MaintenanceDetailPage } from './pages/MaintenanceDetailPage';
-import { PartsInventoryPage } from './pages/PartsInventoryPage';
 import { PartsDetailPage } from './pages/PartsDetailPage';
 import { StockAdjustmentPage } from './pages/StockAdjustmentPage';
-import { VendorsPage } from './pages/VendorsPage';
-import { ReportsPage } from './pages/ReportsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ToastContainer } from './components/common/Toast';
 
@@ -32,6 +28,14 @@ function RoleGuard({ roles, children }: { roles: string[]; children: React.React
     return <Navigate to="/dashboard" replace />;
   }
   return <>{children}</>;
+}
+
+function DefaultRedirect() {
+  const user = useAuthStore((s) => s.user);
+  const isAdmin = user?.role === 'admin';
+  if (isAdmin) return <Navigate to="/dashboard" replace />;
+  const dept = user?.department || 'camera';
+  return <Navigate to={`/dept/${dept}`} replace />;
 }
 
 export default function App() {
@@ -57,21 +61,17 @@ export default function App() {
             <ProtectedRoute>
               <Layout>
                 <Routes>
-                  <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                  <Route path="/" element={<DefaultRedirect />} />
                   <Route path="/dashboard" element={<DashboardPage />} />
-                  <Route path="/equipment" element={<EquipmentListPage />} />
+                  <Route path="/dept/:dept" element={<DepartmentSegmentPage />} />
                   <Route path="/equipment/new" element={<RoleGuard roles={['inventory_manager']}><EquipmentAddPage /></RoleGuard>} />
                   <Route path="/equipment/:id" element={<EquipmentDetailPage />} />
-                  <Route path="/maintenance" element={<RoleGuard roles={['inventory_manager', 'maintenance_lead', 'technician']}><MaintenanceQueuePage /></RoleGuard>} />
                   <Route path="/maintenance/new" element={<RoleGuard roles={['inventory_manager', 'maintenance_lead']}><MaintenanceNewPage /></RoleGuard>} />
                   <Route path="/maintenance/:id" element={<RoleGuard roles={['inventory_manager', 'maintenance_lead', 'technician']}><MaintenanceDetailPage /></RoleGuard>} />
-                  <Route path="/parts" element={<RoleGuard roles={['maintenance_lead', 'parts_clerk']}><PartsInventoryPage /></RoleGuard>} />
                   <Route path="/parts/adjust" element={<RoleGuard roles={['parts_clerk']}><StockAdjustmentPage /></RoleGuard>} />
                   <Route path="/parts/:id" element={<RoleGuard roles={['maintenance_lead', 'parts_clerk']}><PartsDetailPage /></RoleGuard>} />
-                  <Route path="/vendors" element={<RoleGuard roles={['parts_clerk']}><VendorsPage /></RoleGuard>} />
-                  <Route path="/reports" element={<RoleGuard roles={['inventory_manager']}><ReportsPage /></RoleGuard>} />
                   <Route path="/settings" element={<RoleGuard roles={[]}><SettingsPage /></RoleGuard>} />
-                  <Route path="*" element={<Navigate to="/dashboard" replace />} />
+                  <Route path="*" element={<DefaultRedirect />} />
                 </Routes>
               </Layout>
             </ProtectedRoute>

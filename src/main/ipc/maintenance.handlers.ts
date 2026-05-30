@@ -20,10 +20,20 @@ export function registerMaintenanceHandlers(): void {
 
   ipcMain.handle('db:maintenance:getAll', () => {
     return db.prepare(`
-      SELECT mt.*, e.name as equipment_name, e.equipment_code,
-        (SELECT COUNT(*) FROM maintenance_notes mn WHERE mn.ticket_id = mt.id) as notes_count
+      SELECT mt.*, e.name as equipment_name, e.equipment_code, e.category_id,
+        c.name as category_name,
+        (SELECT COUNT(*) FROM maintenance_notes mn WHERE mn.ticket_id = mt.id) as notes_count,
+        ta.action_date as last_action_date,
+        ta.action_taken as last_action_taken,
+        ta.personnel as last_action_personnel
       FROM maintenance_tickets mt
       JOIN equipment_items e ON e.id = mt.equipment_id
+      LEFT JOIN categories c ON c.id = e.category_id
+      LEFT JOIN ticket_actions ta ON ta.id = (
+        SELECT ta2.id FROM ticket_actions ta2
+        WHERE ta2.ticket_id = mt.id
+        ORDER BY ta2.action_date DESC, ta2.created_at DESC LIMIT 1
+      )
       ORDER BY
         CASE mt.severity WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END,
         mt.created_at DESC
