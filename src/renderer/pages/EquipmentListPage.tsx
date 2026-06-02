@@ -108,7 +108,6 @@ export function EquipmentListPage() {
       const color = avail === 0 ? 'text-danger-400' : avail < total ? 'text-warning-400' : 'text-success-400';
       return <span className={color}>{avail}</span>;
     }, className: 'w-14 text-center' },
-    { key: 'condition', header: 'Grade', render: (item) => (<span className="text-surface-400">{item.asset?.condition_grade || '-'}</span>), className: 'w-16' },
     { key: 'base_price', header: 'Rate', render: (item) => (<span className="text-surface-300">P{item.base_price.toLocaleString()}</span>), className: 'w-24 text-right' },
   ];
 

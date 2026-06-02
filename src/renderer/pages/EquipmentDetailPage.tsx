@@ -6,7 +6,7 @@ import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
-import { EQUIPMENT_STATUS_CONFIG, CONDITION_GRADES } from '../lib/constants';
+import { EQUIPMENT_STATUS_CONFIG } from '../lib/constants';
 import { useToast } from '../hooks';
 import { useAuthStore } from '../stores/auth.store';
 import type { EquipmentWithAsset, EquipmentStatus, AssetStatusLogEntry } from '../../shared/types';
@@ -74,7 +74,6 @@ export function EquipmentDetailPage() {
             <span className="text-surface-500">Quantity</span><span className="text-surface-200">{equipment.quantity ?? 1}</span>
             <span className="text-surface-500">Available</span><span className={`${(equipment.available_qty ?? 1) === 0 ? 'text-danger-400' : 'text-surface-200'}`}>{equipment.available_qty ?? 1} of {equipment.quantity ?? 1}</span>
             <span className="text-surface-500">Status</span><Badge variant={statusVariantMap[currentStatus] || 'default'}>{statusConfig?.label}</Badge>
-            <span className="text-surface-500">Condition</span><span className="text-surface-200">{equipment.asset?.condition_grade ? `${equipment.asset.condition_grade} - ${CONDITION_GRADES[equipment.asset.condition_grade as keyof typeof CONDITION_GRADES]?.label}` : '-'}</span>
           </div>
         </div>
 

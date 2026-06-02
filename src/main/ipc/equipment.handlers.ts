@@ -26,7 +26,7 @@ export function registerEquipmentHandlers(): void {
     return db.prepare(`
       SELECT e.*, ea.id as asset_db_id, ea.serial_number, ea.asset_tag, ea.purchase_date,
              ea.purchase_price, ea.vendor_name as asset_vendor, ea.warranty_expiry,
-             ea.condition_grade, ea.current_location, ea.current_status,
+             ea.current_location, ea.current_status,
              ea.last_inspection_date, ea.notes as asset_notes,
              c.name as category_name, sc.name as subcategory_name
       FROM equipment_items e
@@ -42,7 +42,7 @@ export function registerEquipmentHandlers(): void {
         id: row.asset_db_id, equipment_id: row.id, serial_number: row.serial_number,
         asset_tag: row.asset_tag, purchase_date: row.purchase_date,
         purchase_price: row.purchase_price, vendor_name: row.asset_vendor,
-        warranty_expiry: row.warranty_expiry, condition_grade: row.condition_grade,
+        warranty_expiry: row.warranty_expiry,
         current_location: row.current_location, current_status: row.current_status,
         last_inspection_date: row.last_inspection_date, notes: row.asset_notes,
       } : undefined,
@@ -53,7 +53,7 @@ export function registerEquipmentHandlers(): void {
     const row: any = db.prepare(`
       SELECT e.*, ea.id as asset_db_id, ea.serial_number, ea.asset_tag, ea.purchase_date,
              ea.purchase_price, ea.vendor_name as asset_vendor, ea.warranty_expiry,
-             ea.condition_grade, ea.current_location, ea.current_status,
+             ea.current_location, ea.current_status,
              ea.last_inspection_date, ea.retirement_date, ea.retirement_reason, ea.notes as asset_notes,
              c.name as category_name, sc.name as subcategory_name
       FROM equipment_items e
@@ -70,7 +70,7 @@ export function registerEquipmentHandlers(): void {
         id: row.asset_db_id, equipment_id: row.id, serial_number: row.serial_number,
         asset_tag: row.asset_tag, purchase_date: row.purchase_date,
         purchase_price: row.purchase_price, vendor_name: row.asset_vendor,
-        warranty_expiry: row.warranty_expiry, condition_grade: row.condition_grade,
+        warranty_expiry: row.warranty_expiry,
         current_location: row.current_location, current_status: row.current_status,
         last_inspection_date: row.last_inspection_date, retirement_date: row.retirement_date,
         retirement_reason: row.retirement_reason, notes: row.asset_notes,
@@ -123,11 +123,11 @@ export function registerEquipmentHandlers(): void {
         input.pricing_type, input.base_price, input.notes || null, qty, qty, now, now);
 
       db.prepare(`
-        INSERT INTO equipment_assets (id, equipment_id, serial_number, asset_tag, purchase_date, purchase_price, vendor_name, warranty_expiry, condition_grade, current_location, current_status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Warehouse', 'AVAILABLE', ?, ?)
+        INSERT INTO equipment_assets (id, equipment_id, serial_number, asset_tag, purchase_date, purchase_price, vendor_name, warranty_expiry, current_location, current_status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Warehouse', 'AVAILABLE', ?, ?)
       `).run(assetId, equipmentId, input.serial_number || '', input.asset_tag || null,
         input.purchase_date || null, input.purchase_price || 0, input.vendor_name || null,
-        input.warranty_expiry || null, input.condition_grade || 'A', now, now);
+        input.warranty_expiry || null, now, now);
     });
     tx();
 
@@ -145,7 +145,7 @@ export function registerEquipmentHandlers(): void {
     const allowedFields = ['name', 'display_name', 'category_id', 'subcategory_id', 'sub_subcategory',
       'item_type', 'brand', 'model', 'description', 'pricing_type', 'base_price', 'notes', 'quantity', 'available_qty'];
     const assetFields = ['serial_number', 'asset_tag', 'purchase_date', 'purchase_price',
-      'vendor_name', 'warranty_expiry', 'condition_grade', 'current_location'];
+      'vendor_name', 'warranty_expiry', 'current_location'];
     const updates: string[] = [];
     const values: any[] = [];
     const assetUpdates: string[] = [];
@@ -359,12 +359,11 @@ export function registerEquipmentHandlers(): void {
             row['notes'] || null, now, now);
 
           db.prepare(`
-            INSERT INTO equipment_assets (id, equipment_id, serial_number, asset_tag, purchase_date, purchase_price, vendor_name, warranty_expiry, condition_grade, current_location, current_status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Warehouse', 'AVAILABLE', ?, ?)
+            INSERT INTO equipment_assets (id, equipment_id, serial_number, asset_tag, purchase_date, purchase_price, vendor_name, warranty_expiry, current_location, current_status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Warehouse', 'AVAILABLE', ?, ?)
           `).run(assetId, eqId, row['serial_number'] || '', row['asset_tag'] || null,
             row['purchase_date'] || null, parseFloat(row['purchase_price'] || '0'),
-            row['vendor_name'] || null, row['warranty_expiry'] || null,
-            row['condition_grade'] || 'A', now, now);
+            row['vendor_name'] || null, row['warranty_expiry'] || null, now, now);
 
           imported++;
         } catch (err: any) {

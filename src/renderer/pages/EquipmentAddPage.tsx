@@ -14,7 +14,7 @@ export function EquipmentAddPage() {
     name: '', display_name: '', category_id: '', subcategory_id: '', brand: '', model: '',
     description: '', pricing_type: 'per_day', base_price: 0, quantity: 1, serial_number: '',
     purchase_date: '', purchase_price: 0, vendor_name: '', warranty_expiry: '',
-    condition_grade: 'A', notes: '', item_type: 'standalone',
+    notes: '', item_type: 'standalone',
   });
   const [saving, setSaving] = useState(false);
 
@@ -78,12 +78,6 @@ export function EquipmentAddPage() {
           <Input label="Purchase Price" type="number" value={form.purchase_price} onChange={(e) => set('purchase_price', parseFloat(e.target.value) || 0)} />
           <Input label="Vendor" value={form.vendor_name} onChange={(e) => set('vendor_name', e.target.value)} />
           <Input label="Warranty Expiry" type="date" value={form.warranty_expiry} onChange={(e) => set('warranty_expiry', e.target.value)} />
-          <div>
-            <label className="block text-xs font-medium text-surface-400 mb-1">Condition Grade</label>
-            <select value={form.condition_grade} onChange={(e) => set('condition_grade', e.target.value)} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100">
-              <option value="A">A - Excellent</option><option value="B">B - Good</option><option value="C">C - Fair</option><option value="D">D - Poor</option>
-            </select>
-          </div>
         </div>
         <Input label="Notes" value={form.notes} onChange={(e) => set('notes', e.target.value)} />
       </div>

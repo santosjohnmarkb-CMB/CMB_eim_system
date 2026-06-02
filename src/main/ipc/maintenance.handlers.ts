@@ -123,9 +123,8 @@ export function registerMaintenanceHandlers(): void {
       }
 
       if (newStatus === 'COMPLETED' && ticket.asset_id) {
-        const grade = ticket.post_repair_grade || 'B';
-        db.prepare("UPDATE equipment_assets SET current_status = 'AVAILABLE', condition_grade = ?, updated_at = datetime('now') WHERE id = ?")
-          .run(grade, ticket.asset_id);
+        db.prepare("UPDATE equipment_assets SET current_status = 'AVAILABLE', updated_at = datetime('now') WHERE id = ?")
+          .run(ticket.asset_id);
         db.prepare(`INSERT INTO asset_status_log (id, asset_id, equipment_id, previous_status, new_status, changed_by, reason, related_ticket_id) VALUES (?, ?, ?, 'IN_REPAIR', 'AVAILABLE', ?, 'Repair completed', ?)`)
           .run(uuidv4(), ticket.asset_id, ticket.equipment_id, user.full_name, id);
       } else if (newStatus === 'IN_PROGRESS' && ticket.asset_id) {
