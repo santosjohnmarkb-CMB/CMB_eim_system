@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, Wrench, Settings, LogOut,
+  LayoutDashboard, Wrench, Settings, LogOut, Package,
   ChevronRight, ChevronDown, Camera, Lightbulb,
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -20,6 +20,57 @@ const DEPT_COLOR: Record<Department, { active: string; hover: string }> = {
   lights_grips: { active: 'text-amber-400', hover: 'hover:text-amber-300' },
 };
 
+function CollapsibleSection({ icon, label, open, onToggle, isActive, children }: {
+  icon: React.ReactNode; label: string; open: boolean; onToggle: () => void;
+  isActive: boolean; children: React.ReactNode;
+}) {
+  return (
+    <>
+      <button
+        onClick={onToggle}
+        className={clsx(
+          'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150',
+          isActive
+            ? 'text-surface-200'
+            : 'text-surface-400 hover:text-surface-200 hover:bg-surface-800/50',
+        )}
+      >
+        {icon}
+        <span>{label}</span>
+        {open
+          ? <ChevronDown size={14} className="ml-auto opacity-50" />
+          : <ChevronRight size={14} className="ml-auto opacity-50" />
+        }
+      </button>
+      {open && (
+        <div className="ml-5 pl-3 border-l border-surface-800 space-y-0.5">
+          {children}
+        </div>
+      )}
+    </>
+  );
+}
+
+function DeptSubItem({ dept, active, onClick }: {
+  dept: Department; active: boolean; onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={clsx(
+        'w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150',
+        active
+          ? `bg-surface-800/60 ${DEPT_COLOR[dept].active}`
+          : `text-surface-400 ${DEPT_COLOR[dept].hover} hover:bg-surface-800/50`,
+      )}
+    >
+      {DEPT_ICON[dept]}
+      <span>{DEPARTMENT_CONFIG[dept].shortLabel}</span>
+      {active && <ChevronRight size={14} className="ml-auto opacity-50" />}
+    </button>
+  );
+}
+
 export function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -31,6 +82,9 @@ export function Sidebar() {
   const isAdmin = userRole === 'admin';
   const userDept = user?.department as Department | null;
 
+  const [equipmentOpen, setEquipmentOpen] = useState(
+    location.pathname.startsWith('/equipment')
+  );
   const [maintenanceOpen, setMaintenanceOpen] = useState(
     location.pathname.startsWith('/dept/')
   );
@@ -39,6 +93,9 @@ export function Sidebar() {
     await logout();
     navigate('/login');
   };
+
+  const isEquipmentDeptActive = (dept: Department) =>
+    location.pathname === `/equipment/${dept}`;
 
   const isDeptActive = (dept: Department) =>
     location.pathname === `/dept/${dept}` || location.pathname.startsWith(`/dept/${dept}/`);
@@ -52,7 +109,6 @@ export function Sidebar() {
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {/* Admin Dashboard */}
           <NavButton
             icon={<LayoutDashboard size={20} />}
             label="Admin Dashboard"
@@ -60,49 +116,45 @@ export function Sidebar() {
             onClick={() => navigate('/dashboard')}
           />
 
-          {/* Maintenance — collapsible */}
-          <button
-            onClick={() => setMaintenanceOpen(!maintenanceOpen)}
-            className={clsx(
-              'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150',
-              location.pathname.startsWith('/dept/')
-                ? 'text-surface-200'
-                : 'text-surface-400 hover:text-surface-200 hover:bg-surface-800/50',
-            )}
+          {/* Equipment — collapsible */}
+          <CollapsibleSection
+            icon={<Package size={20} />}
+            label="Equipment"
+            open={equipmentOpen}
+            onToggle={() => {
+              if (!equipmentOpen) navigate('/equipment');
+              setEquipmentOpen(!equipmentOpen);
+            }}
+            isActive={location.pathname.startsWith('/equipment')}
           >
-            <Wrench size={20} />
-            <span>Maintenance</span>
-            {maintenanceOpen
-              ? <ChevronDown size={14} className="ml-auto opacity-50" />
-              : <ChevronRight size={14} className="ml-auto opacity-50" />
-            }
-          </button>
+            {(Object.keys(DEPARTMENT_CONFIG) as Department[]).map((dept) => (
+              <DeptSubItem
+                key={dept}
+                dept={dept}
+                active={isEquipmentDeptActive(dept)}
+                onClick={() => navigate(`/equipment/${dept}`)}
+              />
+            ))}
+          </CollapsibleSection>
 
-          {maintenanceOpen && (
-            <div className="ml-5 pl-3 border-l border-surface-800 space-y-0.5">
-              {(Object.keys(DEPARTMENT_CONFIG) as Department[]).map((dept) => {
-                const active = isDeptActive(dept);
-                return (
-                  <button
-                    key={dept}
-                    onClick={() => navigate(`/dept/${dept}`)}
-                    className={clsx(
-                      'w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150',
-                      active
-                        ? `bg-surface-800/60 ${DEPT_COLOR[dept].active}`
-                        : `text-surface-400 ${DEPT_COLOR[dept].hover} hover:bg-surface-800/50`,
-                    )}
-                  >
-                    {DEPT_ICON[dept]}
-                    <span>{DEPARTMENT_CONFIG[dept].shortLabel}</span>
-                    {active && <ChevronRight size={14} className="ml-auto opacity-50" />}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          {/* Maintenance — collapsible */}
+          <CollapsibleSection
+            icon={<Wrench size={20} />}
+            label="Maintenance"
+            open={maintenanceOpen}
+            onToggle={() => setMaintenanceOpen(!maintenanceOpen)}
+            isActive={location.pathname.startsWith('/dept/')}
+          >
+            {(Object.keys(DEPARTMENT_CONFIG) as Department[]).map((dept) => (
+              <DeptSubItem
+                key={dept}
+                dept={dept}
+                active={isDeptActive(dept)}
+                onClick={() => navigate(`/dept/${dept}`)}
+              />
+            ))}
+          </CollapsibleSection>
 
-          {/* Settings */}
           <NavButton
             icon={<Settings size={20} />}
             label="Settings"
@@ -125,7 +177,6 @@ export function Sidebar() {
         <p className="text-2xs text-surface-500 mt-0.5">Equipment Inventory Management</p>
       </div>
 
-      {/* Department badge */}
       <div className="px-3 pt-3 pb-1">
         <div className="flex items-center gap-2 px-3 py-2 bg-surface-900 rounded-lg">
           {DEPT_ICON[dept]}
@@ -137,8 +188,14 @@ export function Sidebar() {
 
       <nav className="flex-1 px-3 py-3 space-y-1 overflow-y-auto">
         <NavButton
-          icon={<LayoutDashboard size={20} />}
-          label="Dashboard"
+          icon={<Package size={20} />}
+          label="Equipment"
+          active={location.pathname === `/equipment/${dept}`}
+          onClick={() => navigate(`/equipment/${dept}`)}
+        />
+        <NavButton
+          icon={<Wrench size={20} />}
+          label="Maintenance"
           active={location.pathname === `/dept/${dept}`}
           onClick={() => navigate(`/dept/${dept}`)}
         />

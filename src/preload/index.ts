@@ -16,6 +16,7 @@ const ALLOWED_CHANNELS = new Set([
   'db:equipment:batchUpdateStatus',
   'db:equipment:getStatusLog',
   'db:equipment:getDashboardStats',
+  'db:equipment:getUseCounts',
   'db:maintenance:getAll',
   'db:maintenance:getById',
   'db:maintenance:create',

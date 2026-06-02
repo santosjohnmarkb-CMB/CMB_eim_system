@@ -108,7 +108,7 @@ function EquipmentTab({ dept }: { dept: Department }) {
         <DataTable
           columns={columns}
           data={filtered}
-          onRowClick={(item) => navigate(`/equipment/${item.id}`)}
+          onRowClick={(item) => navigate(`/equipment/detail/${item.id}`)}
           loading={loading}
           emptyMessage="No equipment found"
         />

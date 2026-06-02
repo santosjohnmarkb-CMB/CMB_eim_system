@@ -55,13 +55,6 @@ export const EQUIPMENT_STATUS_CONFIG: Record<EquipmentStatusType, { label: strin
   FOR_INSPECTION: { label: 'For Inspection', color: 'purple', bgColor: 'bg-purple-500/15',   textColor: 'text-purple-400',   rentable: false },
 };
 
-export const CONDITION_GRADES = {
-  A: { label: 'Excellent', description: 'Like new, no visible wear' },
-  B: { label: 'Good', description: 'Minor wear, fully functional' },
-  C: { label: 'Fair', description: 'Noticeable wear, functional' },
-  D: { label: 'Poor', description: 'Significant wear, needs attention' },
-} as const;
-
 export const REPAIR_STATUS = {
   REPORTED: 'REPORTED',
   ASSESSED: 'ASSESSED',
@@ -124,6 +117,18 @@ export const CATEGORY_TO_DEPARTMENT: Record<string, Department> = {
   'Special Equipment': 'lights_grips',
 };
 
+export const USE_COUNT_SUBCATEGORIES: Record<Department, { label: string; subcategoryNames: string[] }[]> = {
+  camera: [
+    { label: 'Camera Package', subcategoryNames: ['Camera Body', 'Camera Package Components', 'Camera Support'] },
+    { label: 'Lens', subcategoryNames: ['Lens'] },
+    { label: 'Special Rig', subcategoryNames: ['Special Rig'] },
+  ],
+  lights_grips: [
+    { label: 'Lighting', subcategoryNames: ['Lighting'] },
+    { label: 'Cranes & Motorized Dolly', subcategoryNames: ['Crane', 'Motorized Dolly'] },
+  ],
+};
+
 export const CATEGORY_PREFIXES: Record<string, string> = {
   'Camera': 'CAM',
   'Dollies Mounts & Cranes': 'DMC',
@@ -162,6 +167,7 @@ export const IPC_CHANNELS = {
   EQUIPMENT_BATCH_UPDATE_STATUS: 'db:equipment:batchUpdateStatus',
   EQUIPMENT_GET_STATUS_LOG: 'db:equipment:getStatusLog',
   EQUIPMENT_GET_DASHBOARD_STATS: 'db:equipment:getDashboardStats',
+  EQUIPMENT_GET_USE_COUNTS: 'db:equipment:getUseCounts',
 
   // Maintenance
   MAINTENANCE_GET_ALL: 'db:maintenance:getAll',

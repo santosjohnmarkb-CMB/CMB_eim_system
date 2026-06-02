@@ -375,4 +375,26 @@ export function registerEquipmentHandlers(): void {
     tx();
     return { imported, errors };
   });
+
+  ipcMain.handle('db:equipment:getUseCounts', () => {
+    return db.prepare(`
+      SELECT
+        e.id as equipment_id,
+        e.equipment_code,
+        e.name,
+        e.brand,
+        e.model,
+        c.name as category_name,
+        s.name as subcategory_name,
+        COUNT(asl.id) as use_count
+      FROM equipment_items e
+      JOIN categories c ON c.id = e.category_id
+      JOIN subcategories s ON s.id = e.subcategory_id
+      LEFT JOIN asset_status_log asl
+        ON asl.equipment_id = e.id AND asl.new_status = 'DEPLOYED'
+      WHERE e.is_active = 1
+      GROUP BY e.id
+      ORDER BY use_count DESC, e.name ASC
+    `).all();
+  });
 }

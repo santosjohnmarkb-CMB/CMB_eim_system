@@ -94,8 +94,6 @@ export interface User {
 export type EquipmentStatus = 'AVAILABLE' | 'DEPLOYED' | 'IN_REPAIR' | 'ON_HOLD'
   | 'IN_TRANSIT' | 'RETIRED' | 'MISSING' | 'FOR_INSPECTION';
 
-export type ConditionGrade = 'A' | 'B' | 'C' | 'D';
-
 export interface EquipmentAsset {
   id: string;
   equipment_id: string;
@@ -105,7 +103,6 @@ export interface EquipmentAsset {
   purchase_price: number;
   vendor_name: string | null;
   warranty_expiry: string | null;
-  condition_grade: ConditionGrade;
   current_location: string;
   current_status: EquipmentStatus;
   last_inspection_date: string | null;
@@ -161,7 +158,7 @@ export interface MaintenanceTicket {
   parts_consumed: string;
   priority_order: number;
   completion_date: string | null;
-  post_repair_grade: ConditionGrade | null;
+  post_repair_grade: string | null;
   project_name: string | null;
   production_name: string | null;
   project_date: string | null;
@@ -326,6 +323,17 @@ export interface BulkImportError {
 export interface BulkImportResult {
   imported: number;
   errors: BulkImportError[];
+}
+
+export interface EquipmentUseCount {
+  equipment_id: string;
+  equipment_code: string;
+  name: string;
+  brand: string;
+  model: string;
+  category_name: string;
+  subcategory_name: string;
+  use_count: number;
 }
 
 export interface ElectronAPI {

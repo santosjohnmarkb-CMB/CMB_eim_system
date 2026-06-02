@@ -6,13 +6,16 @@ import { initRealtimeListeners, cleanupRealtimeListeners } from './stores/realti
 import { Layout } from './components/layout/Layout';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
-import { DepartmentSegmentPage } from './pages/DepartmentSegmentPage';
+import { EquipmentDashboardPage } from './pages/EquipmentDashboardPage';
+import { EquipmentListPage } from './pages/EquipmentListPage';
 import { EquipmentAddPage } from './pages/EquipmentAddPage';
 import { EquipmentDetailPage } from './pages/EquipmentDetailPage';
+import { DepartmentSegmentPage } from './pages/DepartmentSegmentPage';
 import { MaintenanceNewPage } from './pages/MaintenanceNewPage';
 import { MaintenanceDetailPage } from './pages/MaintenanceDetailPage';
 import { PartsDetailPage } from './pages/PartsDetailPage';
 import { StockAdjustmentPage } from './pages/StockAdjustmentPage';
+import { EquipmentUseCountPage } from './pages/EquipmentUseCountPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ToastContainer } from './components/common/Toast';
 
@@ -63,9 +66,12 @@ export default function App() {
                 <Routes>
                   <Route path="/" element={<DefaultRedirect />} />
                   <Route path="/dashboard" element={<DashboardPage />} />
-                  <Route path="/dept/:dept" element={<DepartmentSegmentPage />} />
+                  <Route path="/equipment" element={<EquipmentDashboardPage />} />
                   <Route path="/equipment/new" element={<RoleGuard roles={['inventory_manager']}><EquipmentAddPage /></RoleGuard>} />
-                  <Route path="/equipment/:id" element={<EquipmentDetailPage />} />
+                  <Route path="/equipment/use-count" element={<EquipmentUseCountPage />} />
+                  <Route path="/equipment/:dept" element={<EquipmentListPage />} />
+                  <Route path="/equipment/detail/:id" element={<EquipmentDetailPage />} />
+                  <Route path="/dept/:dept" element={<DepartmentSegmentPage />} />
                   <Route path="/maintenance/new" element={<RoleGuard roles={['inventory_manager', 'maintenance_lead']}><MaintenanceNewPage /></RoleGuard>} />
                   <Route path="/maintenance/:id" element={<RoleGuard roles={['inventory_manager', 'maintenance_lead', 'technician']}><MaintenanceDetailPage /></RoleGuard>} />
                   <Route path="/parts/adjust" element={<RoleGuard roles={['parts_clerk']}><StockAdjustmentPage /></RoleGuard>} />

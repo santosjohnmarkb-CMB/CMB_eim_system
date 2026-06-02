@@ -1,12 +1,12 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Camera, Lightbulb, AlertTriangle, ClipboardList } from 'lucide-react';
+import { Camera, Lightbulb, AlertTriangle, ClipboardList, BarChart3 } from 'lucide-react';
 import { useMaintenanceStore } from '../stores/maintenance.store';
 import { useAuthStore } from '../stores/auth.store';
 import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG } from '../lib/constants';
-import type { DashboardStats, MaintenanceTicket, RepairStatus } from '../../shared/types';
+import type { DashboardStats, MaintenanceTicket, RepairStatus, EquipmentUseCount } from '../../shared/types';
 import { Badge } from '../components/common/Badge';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { ipcInvoke } from '../lib/ipc';
@@ -46,6 +46,7 @@ export function DashboardPage() {
     lights_grips: null,
   });
   const [statsLoading, setStatsLoading] = useState(true);
+  const [useCounts, setUseCounts] = useState<EquipmentUseCount[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,6 +74,18 @@ export function DashboardPage() {
 
   useEffect(() => { fetchTickets(); }, [fetchTickets]);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function loadUseCounts() {
+      try {
+        const counts = await ipcInvoke<EquipmentUseCount[]>('db:equipment:getUseCounts');
+        if (!cancelled) setUseCounts(counts || []);
+      } catch { /* ignore */ }
+    }
+    loadUseCounts();
+    return () => { cancelled = true; };
+  }, []);
+
   const openTickets = useMemo(
     () => tickets
       .filter(isOpenTicket)
@@ -83,6 +96,15 @@ export function DashboardPage() {
         return new Date(b.reported_date).getTime() - new Date(a.reported_date).getTime();
       }),
     [tickets],
+  );
+
+  const cameraCounts = useMemo(
+    () => useCounts.filter(c => CATEGORY_TO_DEPARTMENT[c.category_name] === 'camera').slice(0, 10),
+    [useCounts],
+  );
+  const lgCounts = useMemo(
+    () => useCounts.filter(c => CATEGORY_TO_DEPARTMENT[c.category_name] === 'lights_grips').slice(0, 10),
+    [useCounts],
   );
 
   const statusTally = useMemo(() => {
@@ -268,6 +290,74 @@ export function DashboardPage() {
             </table>
           </div>
         )}
+      </div>
+
+      {/* ── Equipment Use Count ────────────────────── */}
+      <div className="glass-panel rounded-xl overflow-hidden">
+        <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
+          <BarChart3 size={16} className="text-primary-400" />
+          <h3 className="text-sm font-semibold text-surface-200">Equipment Use Count</h3>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-surface-700/40">
+          {([
+            { dept: 'camera' as Department, rows: cameraCounts },
+            { dept: 'lights_grips' as Department, rows: lgCounts },
+          ]).map(({ dept, rows }) => {
+            const cfg = DEPARTMENT_CONFIG[dept];
+            const accent = DEPT_ACCENT[dept];
+            const Icon = DEPT_ICONS[dept];
+
+            return (
+              <div key={dept} className="flex flex-col">
+                <div className={`flex items-center gap-2 px-5 py-3 ${accent.bg}`}>
+                  <Icon size={14} className={accent.text} />
+                  <span className={`text-xs font-semibold ${accent.text}`}>{cfg.shortLabel}</span>
+                </div>
+
+                <div className="overflow-x-auto flex-1">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-xs text-surface-500 uppercase tracking-wider border-b border-surface-800">
+                        <th className="text-left px-5 py-2.5 font-medium w-8">#</th>
+                        <th className="text-left px-3 py-2.5 font-medium">Equipment Name</th>
+                        <th className="text-left px-3 py-2.5 font-medium">Code</th>
+                        <th className="text-right px-5 py-2.5 font-medium">Use Count</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-surface-800/60">
+                      {rows.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="px-5 py-6 text-center text-xs text-surface-500">
+                            No data available
+                          </td>
+                        </tr>
+                      ) : (
+                        rows.map((item, idx) => (
+                          <tr key={item.equipment_id} className="hover:bg-surface-800/40 transition-colors">
+                            <td className="px-5 py-2.5 text-xs text-surface-500">{idx + 1}</td>
+                            <td className="px-3 py-2.5 text-surface-200 truncate max-w-[200px]">{item.name}</td>
+                            <td className="px-3 py-2.5 font-mono text-xs text-surface-400">{item.equipment_code}</td>
+                            <td className="px-5 py-2.5 text-right font-bold text-surface-200">{item.use_count}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="px-5 py-3 border-t border-surface-800/60">
+                  <button
+                    onClick={() => navigate('/equipment/use-count')}
+                    className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium"
+                  >
+                    View Complete List →
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

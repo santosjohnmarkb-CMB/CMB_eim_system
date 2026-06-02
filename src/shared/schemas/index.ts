@@ -48,7 +48,6 @@ export const EquipmentCreateSchema = z.object({
   purchase_price: z.number().min(0).max(99999999).default(0),
   vendor_name: z.string().max(200).nullable().optional(),
   warranty_expiry: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
-  condition_grade: z.enum(['A', 'B', 'C', 'D']).default('A'),
   quantity: z.number().int().min(0).default(1),
 });
 
@@ -74,7 +73,7 @@ export const MaintenanceTicketUpdateSchema = z.object({
   estimated_cost: z.number().min(0).optional(),
   actual_cost: z.number().min(0).optional(),
   labor_hours: z.number().min(0).optional(),
-  post_repair_grade: z.enum(['A', 'B', 'C', 'D']).nullable().optional(),
+  post_repair_grade: z.string().nullable().optional(),
   project_name: z.string().max(200).nullable().optional(),
   production_name: z.string().max(200).nullable().optional(),
   project_date: z.string().nullable().optional(),
