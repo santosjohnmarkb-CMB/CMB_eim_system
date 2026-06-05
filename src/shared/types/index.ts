@@ -137,7 +137,7 @@ export type RepairStatus = 'REPORTED' | 'ASSESSED' | 'IN_PROGRESS'
   | 'COMPLETED' | 'CANCELLED';
 
 export type Severity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
-export type MaintenanceType = 'corrective' | 'preventive' | 'predictive';
+export type MaintenanceType = 'routine_maintenance' | 'update' | 'repair' | 'corrective' | 'preventive' | 'predictive';
 
 export interface MaintenanceTicket {
   id: string;
@@ -163,7 +163,7 @@ export interface MaintenanceTicket {
   production_name: string | null;
   project_date: string | null;
   verified_by: string | null;
-  document_type: 'maintenance' | 'repair';
+  document_type: 'maintenance' | 'repair' | 'update';
   created_at: string;
   updated_at: string;
   equipment_name?: string;

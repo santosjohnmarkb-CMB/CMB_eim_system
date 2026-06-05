@@ -56,13 +56,13 @@ export const MaintenanceTicketCreateSchema = z.object({
   equipment_id: z.string().uuid(),
   issue_description: z.string().min(1).max(5000),
   severity: z.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']).default('MEDIUM'),
-  maintenance_type: z.enum(['corrective', 'preventive', 'predictive']).default('corrective'),
+  maintenance_type: z.enum(['routine_maintenance', 'update', 'repair', 'corrective', 'preventive', 'predictive']).default('repair'),
   reported_by: z.string().min(1).max(100),
   project_name: z.string().max(200).nullable().optional(),
   production_name: z.string().max(200).nullable().optional(),
   project_date: z.string().nullable().optional(),
   verified_by: z.string().max(100).nullable().optional(),
-  document_type: z.enum(['maintenance', 'repair']).default('repair'),
+  document_type: z.enum(['maintenance', 'repair', 'update']).default('repair'),
 });
 
 export const MaintenanceTicketUpdateSchema = z.object({

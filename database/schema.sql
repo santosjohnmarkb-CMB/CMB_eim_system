@@ -146,7 +146,7 @@ CREATE TABLE IF NOT EXISTS maintenance_tickets (
   issue_description TEXT NOT NULL DEFAULT '',
   severity TEXT NOT NULL DEFAULT 'MEDIUM' CHECK (severity IN ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW')),
   repair_status TEXT NOT NULL DEFAULT 'REPORTED' CHECK (repair_status IN ('REPORTED', 'ASSESSED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED')),
-  maintenance_type TEXT NOT NULL DEFAULT 'corrective' CHECK (maintenance_type IN ('corrective', 'preventive', 'predictive')),
+  maintenance_type TEXT NOT NULL DEFAULT 'repair' CHECK (maintenance_type IN ('routine_maintenance', 'update', 'repair', 'corrective', 'preventive', 'predictive')),
   assigned_technician TEXT,
   diagnosis TEXT,
   estimated_cost REAL NOT NULL DEFAULT 0,
@@ -160,7 +160,7 @@ CREATE TABLE IF NOT EXISTS maintenance_tickets (
   production_name TEXT,
   project_date TEXT,
   verified_by TEXT,
-  document_type TEXT NOT NULL DEFAULT 'repair' CHECK (document_type IN ('maintenance', 'repair')),
+  document_type TEXT NOT NULL DEFAULT 'repair' CHECK (document_type IN ('maintenance', 'repair', 'update')),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

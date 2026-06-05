@@ -5,7 +5,7 @@ import { useEquipmentStore } from '../stores/equipment.store';
 import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
 import { useToast, useDepartmentFilter } from '../hooks';
-import { Search, X, Plus, Trash2, FileText, Wrench } from 'lucide-react';
+import { Search, X, Plus, Trash2, FileText, Wrench, RefreshCw } from 'lucide-react';
 import type { EquipmentWithAsset } from '../../shared/types';
 
 interface ActionRow {
@@ -34,15 +34,14 @@ export function MaintenanceNewPage() {
   const navigate = useNavigate();
   const toast = useToast();
 
-  const [documentType, setDocumentType] = useState<'maintenance' | 'repair'>('repair');
+  const [documentType, setDocumentType] = useState<'maintenance' | 'repair' | 'update'>('repair');
   const [projectName, setProjectName] = useState('');
   const [productionName, setProductionName] = useState('');
   const [projectDate, setProjectDate] = useState('');
   const [reportedBy, setReportedBy] = useState(user?.full_name || '');
   const [verifiedBy, setVerifiedBy] = useState('');
   const [equipmentId, setEquipmentId] = useState('');
-  const [severity, setSeverity] = useState('MEDIUM');
-  const [maintenanceType, setMaintenanceType] = useState('corrective');
+  const [maintenanceType, setMaintenanceType] = useState('repair');
   const [issueDescription, setIssueDescription] = useState('');
   const [actionRows, setActionRows] = useState<ActionRow[]>([]);
   const [saving, setSaving] = useState(false);
@@ -123,7 +122,6 @@ export function MaintenanceNewPage() {
       const ticket = await create({
         equipment_id: equipmentId,
         issue_description: issueDescription,
-        severity,
         maintenance_type: maintenanceType,
         reported_by: reportedBy,
         project_name: projectName,
@@ -192,6 +190,18 @@ export function MaintenanceNewPage() {
                 >
                   <FileText size={14} />
                   Maintenance
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDocumentType('update')}
+                  className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold transition-colors ${
+                    documentType === 'update'
+                      ? 'bg-amber-600 text-white'
+                      : 'bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  <RefreshCw size={14} />
+                  Update
                 </button>
               </div>
             </div>
@@ -343,28 +353,15 @@ export function MaintenanceNewPage() {
                 )}
               </div>
               <div>
-                <label className={labelClass}>Severity</label>
-                <select
-                  value={severity}
-                  onChange={(e) => setSeverity(e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="CRITICAL">Critical</option>
-                  <option value="HIGH">High</option>
-                  <option value="MEDIUM">Medium</option>
-                  <option value="LOW">Low</option>
-                </select>
-              </div>
-              <div>
                 <label className={labelClass}>Maintenance Type</label>
                 <select
                   value={maintenanceType}
                   onChange={(e) => setMaintenanceType(e.target.value)}
                   className={inputClass}
                 >
-                  <option value="corrective">Corrective</option>
-                  <option value="preventive">Preventive</option>
-                  <option value="predictive">Predictive</option>
+                  <option value="routine_maintenance">Routine Maintenance</option>
+                  <option value="update">Update</option>
+                  <option value="repair">Repair</option>
                 </select>
               </div>
             </div>

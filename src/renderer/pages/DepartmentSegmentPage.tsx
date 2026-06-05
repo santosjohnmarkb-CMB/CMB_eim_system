@@ -8,7 +8,7 @@ import { useAuthStore } from '../stores/auth.store';
 import { useDepartmentStore } from '../stores/department.store';
 import { DEPARTMENT_CONFIG } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
-import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG } from '../lib/constants';
+import { REPAIR_STATUS_CONFIG } from '../lib/constants';
 import { Badge } from '../components/common/Badge';
 import { SearchBox } from '../components/common/SearchBox';
 import { DataTable, type Column } from '../components/common/DataTable';
@@ -34,9 +34,6 @@ const DEPT_ICONS: Record<Department, typeof Camera> = {
   lights_grips: Lightbulb,
 };
 
-const severityVariant: Record<string, 'danger' | 'warning' | 'default' | 'info'> = {
-  CRITICAL: 'danger', HIGH: 'warning', MEDIUM: 'default', LOW: 'info',
-};
 
 const KANBAN_COLUMNS = ['REPORTED', 'ASSESSED', 'IN_PROGRESS', 'COMPLETED'] as const;
 
@@ -108,14 +105,13 @@ function MaintenanceTab({ dept }: { dept: Department }) {
                 >
                   <p className="text-xs text-surface-500 mb-1">{ticket.ticket_number}</p>
                   <p className="text-sm font-medium text-surface-200 truncate">{ticket.equipment_name}</p>
-                  <div className="flex items-center gap-2 mt-2">
-                    <Badge variant={severityVariant[ticket.severity] || 'default'} size="sm">{ticket.severity}</Badge>
-                    {ticket.document_type && (
-                      <Badge variant={ticket.document_type === 'maintenance' ? 'info' : 'warning'} size="sm">
-                        {ticket.document_type === 'maintenance' ? 'MNT' : 'RPR'}
+                  {ticket.document_type && (
+                    <div className="flex items-center gap-2 mt-2">
+                      <Badge variant={ticket.document_type === 'maintenance' ? 'info' : ticket.document_type === 'update' ? 'purple' : 'warning'} size="sm">
+                        {ticket.document_type === 'maintenance' ? 'MNT' : ticket.document_type === 'update' ? 'UPD' : 'RPR'}
                       </Badge>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </button>
               ))}
               {colTickets.length === 0 && <p className="text-2xs text-surface-600 text-center py-4">Empty</p>}
@@ -137,7 +133,6 @@ function MaintenanceTab({ dept }: { dept: Department }) {
               >
                 <span className="text-xs text-surface-500 w-20 shrink-0">{ticket.ticket_number}</span>
                 <span className="text-sm text-surface-200 flex-1 truncate">{ticket.equipment_name}</span>
-                <Badge variant={severityVariant[ticket.severity] || 'default'} size="sm">{ticket.severity}</Badge>
                 <span className="text-2xs text-surface-500 w-24 text-right">
                   {(ticket as any).last_action_date
                     ? new Date((ticket as any).last_action_date).toLocaleDateString()

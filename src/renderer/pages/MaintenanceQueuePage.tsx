@@ -2,7 +2,6 @@ import { useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Wrench, Camera, Lightbulb, ClipboardList, AlertTriangle } from 'lucide-react';
 import { useMaintenanceStore } from '../stores/maintenance.store';
-import { Badge } from '../components/common/Badge';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG } from '../lib/constants';
 import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT } from '../../shared/constants';
@@ -11,13 +10,6 @@ import type { MaintenanceTicket, RepairStatus } from '../../shared/types';
 
 const TALLY_STATUSES: RepairStatus[] = ['REPORTED', 'ASSESSED', 'IN_PROGRESS', 'COMPLETED'];
 const DEPTS: Department[] = ['camera', 'lights_grips'];
-
-const SEVERITY_BADGE_VARIANT: Record<string, 'danger' | 'warning' | 'info' | 'default'> = {
-  CRITICAL: 'danger',
-  HIGH: 'warning',
-  MEDIUM: 'info',
-  LOW: 'default',
-};
 
 const DEPT_ICONS: Record<Department, typeof Camera> = {
   camera: Camera,
@@ -180,14 +172,12 @@ export function MaintenanceQueuePage() {
                       <tr className="text-xs text-surface-500 uppercase tracking-wider border-b border-surface-800">
                         <th className="text-left px-5 py-2 font-medium">Ticket</th>
                         <th className="text-left px-3 py-2 font-medium">Equipment</th>
-                        <th className="text-left px-3 py-2 font-medium">Severity</th>
                         <th className="text-left px-3 py-2 font-medium">Status</th>
                         <th className="text-left px-3 py-2 font-medium">Last Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-surface-800/60">
                       {deptOpen.map((ticket) => {
-                        const severityCfg = SEVERITY_CONFIG[ticket.severity];
                         const statusCfg = REPAIR_STATUS_CONFIG[ticket.repair_status];
 
                         return (
@@ -204,11 +194,6 @@ export function MaintenanceQueuePage() {
                                 {ticket.equipment_name}
                               </p>
                               <p className="text-2xs text-surface-500">{ticket.equipment_code}</p>
-                            </td>
-                            <td className="px-3 py-3 whitespace-nowrap">
-                              <Badge variant={SEVERITY_BADGE_VARIANT[ticket.severity] ?? 'default'}>
-                                {severityCfg?.label ?? ticket.severity}
-                              </Badge>
                             </td>
                             <td className="px-3 py-3 whitespace-nowrap">
                               <span className={`text-xs font-medium ${statusCfg?.color ?? 'text-surface-400'}`}>

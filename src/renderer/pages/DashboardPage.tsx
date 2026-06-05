@@ -7,7 +7,6 @@ import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT, USE_COUNT_SUBCATEGORIES } fr
 import type { Department } from '../../shared/constants';
 import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG } from '../lib/constants';
 import type { DashboardStats, MaintenanceTicket, RepairStatus, EquipmentUseCount } from '../../shared/types';
-import { Badge } from '../components/common/Badge';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { ipcInvoke } from '../lib/ipc';
 
@@ -19,13 +18,6 @@ const DEPT_ICONS: Record<Department, typeof Camera> = {
 const DEPT_ACCENT: Record<Department, { text: string; bg: string; border: string }> = {
   camera:       { text: 'text-primary-400', bg: 'bg-primary-500/10', border: 'border-primary-500/20' },
   lights_grips: { text: 'text-warning-400', bg: 'bg-warning-500/10', border: 'border-warning-500/20' },
-};
-
-const SEVERITY_BADGE_VARIANT: Record<string, 'danger' | 'warning' | 'info' | 'default'> = {
-  CRITICAL: 'danger',
-  HIGH: 'warning',
-  MEDIUM: 'info',
-  LOW: 'default',
 };
 
 const TALLY_STATUSES: RepairStatus[] = ['REPORTED', 'ASSESSED', 'IN_PROGRESS', 'COMPLETED'];
@@ -262,14 +254,12 @@ export function DashboardPage() {
                       <tr className="text-xs text-surface-500 uppercase tracking-wider border-b border-surface-800">
                         <th className="text-left px-5 py-2 font-medium">Ticket</th>
                         <th className="text-left px-3 py-2 font-medium">Equipment</th>
-                        <th className="text-left px-3 py-2 font-medium">Severity</th>
                         <th className="text-left px-3 py-2 font-medium">Status</th>
                         <th className="text-left px-3 py-2 font-medium">Last Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-surface-800/60">
                       {deptOpen.map((ticket) => {
-                        const severityCfg = SEVERITY_CONFIG[ticket.severity];
                         const statusCfg = REPAIR_STATUS_CONFIG[ticket.repair_status];
 
                         return (
@@ -286,11 +276,6 @@ export function DashboardPage() {
                                 {ticket.equipment_name}
                               </p>
                               <p className="text-2xs text-surface-500">{ticket.equipment_code}</p>
-                            </td>
-                            <td className="px-3 py-3 whitespace-nowrap">
-                              <Badge variant={SEVERITY_BADGE_VARIANT[ticket.severity] ?? 'default'}>
-                                {severityCfg?.label ?? ticket.severity}
-                              </Badge>
                             </td>
                             <td className="px-3 py-3 whitespace-nowrap">
                               <span className={`text-xs font-medium ${statusCfg?.color ?? 'text-surface-400'}`}>

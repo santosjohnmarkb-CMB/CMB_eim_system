@@ -5,14 +5,46 @@ import { requireSession } from './session';
 import { MaintenanceTicketCreateSchema, MaintenanceTicketUpdateSchema, MaintenanceNoteSchema, TicketActionSchema, TicketActionUpdateSchema } from '../../shared/schemas';
 import { pushOperationalToCloud } from '../sync/operational-sync';
 
-function generateTicketNumber(db: any, documentType: 'maintenance' | 'repair' = 'repair'): string {
-  const year = new Date().getFullYear();
-  const tag = documentType === 'maintenance' ? 'MNT' : 'RPR';
-  const prefix = `${tag}-${year}-`;
+const DEPT_PREFIX: Record<string, string> = {
+  'Camera': 'CD',
+  'Lights and Grips': 'LG',
+  'Dollies Mounts & Cranes': 'LG',
+  'Special Equipment': 'LG',
+};
+
+const MTYPE_CODE: Record<string, string> = {
+  update: 'UP',
+  routine_maintenance: 'RM',
+  repair: 'RPR',
+  corrective: 'RPR',
+  preventive: 'RM',
+  predictive: 'RM',
+};
+
+function generateTicketNumber(db: any, equipmentId: string, maintenanceType: string): string {
+  const eq: any = db.prepare(`
+    SELECT c.name as category_name FROM equipment_items e
+    JOIN categories c ON c.id = e.category_id
+    WHERE e.id = ?
+  `).get(equipmentId);
+
+  const deptCode = (eq && DEPT_PREFIX[eq.category_name]) || 'CD';
+  const typeCode = MTYPE_CODE[maintenanceType] || 'RPR';
+  const now = new Date();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const yy = String(now.getFullYear()).slice(-2);
+  const dateStr = `${mm}${dd}${yy}`;
+
+  const prefix = `CMB-${deptCode}-${typeCode}-${dateStr}-`;
   const last: any = db.prepare(`SELECT ticket_number FROM maintenance_tickets WHERE ticket_number LIKE ? ORDER BY ticket_number DESC LIMIT 1`).get(`${prefix}%`);
   let seq = 1;
-  if (last) { seq = parseInt(last.ticket_number.replace(prefix, ''), 10) + 1; }
-  return `${prefix}${String(seq).padStart(4, '0')}`;
+  if (last) {
+    const parts = last.ticket_number.split('-');
+    const lastNum = parseInt(parts[parts.length - 1], 10);
+    if (!isNaN(lastNum)) seq = lastNum + 1;
+  }
+  return `${prefix}${String(seq).padStart(3, '0')}`;
 }
 
 export function registerMaintenanceHandlers(): void {
@@ -54,7 +86,7 @@ export function registerMaintenanceHandlers(): void {
     const input = MaintenanceTicketCreateSchema.parse(data);
     const id = uuidv4();
     const docType = input.document_type || 'repair';
-    const ticketNumber = generateTicketNumber(db, docType);
+    const ticketNumber = generateTicketNumber(db, input.equipment_id, input.maintenance_type);
     const now = new Date().toISOString();
     const asset: any = db.prepare('SELECT id FROM equipment_assets WHERE equipment_id = ?').get(input.equipment_id);
 

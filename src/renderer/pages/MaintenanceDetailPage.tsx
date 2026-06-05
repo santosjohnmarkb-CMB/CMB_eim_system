@@ -22,14 +22,15 @@ import type { MaintenanceTicket, MaintenanceNote, TicketAction } from '../../sha
 
 const PIPELINE = ['REPORTED', 'ASSESSED', 'IN_PROGRESS', 'COMPLETED'] as const;
 
-const SEVERITY_OPTIONS = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
-const MAINTENANCE_TYPE_OPTIONS = ['corrective', 'preventive', 'predictive'] as const;
+const MAINTENANCE_TYPE_OPTIONS = ['routine_maintenance', 'update', 'repair'] as const;
 
-const SEVERITY_COLORS: Record<string, string> = {
-  CRITICAL: 'bg-red-100 text-red-800 border-red-300',
-  HIGH: 'bg-orange-100 text-orange-800 border-orange-300',
-  MEDIUM: 'bg-yellow-100 text-yellow-800 border-yellow-300',
-  LOW: 'bg-gray-100 text-gray-600 border-gray-300',
+const MAINTENANCE_TYPE_LABELS: Record<string, string> = {
+  routine_maintenance: 'Routine Maintenance',
+  update: 'Update',
+  repair: 'Repair',
+  corrective: 'Corrective',
+  preventive: 'Preventive',
+  predictive: 'Predictive',
 };
 
 function formatDate(d: string | null | undefined): string {
@@ -210,7 +211,8 @@ export function MaintenanceDetailPage() {
   const currentIdx = PIPELINE.indexOf(ticket.repair_status as (typeof PIPELINE)[number]);
   const canAdvance = currentIdx >= 0 && currentIdx < PIPELINE.length - 1;
   const nextStatus = canAdvance ? PIPELINE[currentIdx + 1] : null;
-  const isDocMaintenance = ticket.document_type === 'maintenance';
+  const docTypeLabel = ticket.document_type === 'maintenance' ? 'Maintenance Report'
+    : ticket.document_type === 'update' ? 'Update Report' : 'Repair Report';
 
   const handleAdvance = async () => {
     if (!nextStatus) return;
@@ -378,7 +380,7 @@ export function MaintenanceDetailPage() {
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-[10px] uppercase tracking-[0.2em] text-amber-700 font-bold mb-1">
-                {isDocMaintenance ? 'Maintenance Report' : 'Repair Report'}
+                {docTypeLabel}
               </p>
               <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
                 {ticket.ticket_number}
@@ -454,38 +456,20 @@ export function MaintenanceDetailPage() {
           </div>
         </div>
 
-        {/* ── 4. Severity & Maintenance Type ── */}
+        {/* ── 4. Maintenance Type ── */}
         <div className="px-8 py-4 border-b border-amber-200">
-          <div className="grid grid-cols-2 gap-8">
-            <div>
-              <label className="text-[10px] uppercase tracking-[0.15em] text-amber-800/60 font-semibold block mb-1.5">
-                Severity
-              </label>
-              <select
-                value={ticket.severity}
-                onChange={(e) => handleSelectChange('severity', e.target.value)}
-                className={`px-3 py-1.5 text-sm font-medium rounded border cursor-pointer focus:outline-none focus:ring-1 focus:ring-amber-400 ${SEVERITY_COLORS[ticket.severity] || 'bg-gray-100 text-gray-800 border-gray-300'}`}
-              >
-                {SEVERITY_OPTIONS.map((s) => (
-                  <option key={s} value={s}>{s.charAt(0) + s.slice(1).toLowerCase()}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-[10px] uppercase tracking-[0.15em] text-amber-800/60 font-semibold block mb-1.5">
-                Maintenance Type
-              </label>
-              <select
-                value={ticket.maintenance_type}
-                onChange={(e) => handleSelectChange('maintenance_type', e.target.value)}
-                className="px-3 py-1.5 text-sm font-medium rounded border border-gray-300 bg-white text-gray-800 capitalize cursor-pointer focus:outline-none focus:ring-1 focus:ring-amber-400"
-              >
-                {MAINTENANCE_TYPE_OPTIONS.map((t) => (
-                  <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
-                ))}
-              </select>
-            </div>
-          </div>
+          <label className="text-[10px] uppercase tracking-[0.15em] text-amber-800/60 font-semibold block mb-1.5">
+            Maintenance Type
+          </label>
+          <select
+            value={ticket.maintenance_type}
+            onChange={(e) => handleSelectChange('maintenance_type', e.target.value)}
+            className="px-3 py-1.5 text-sm font-medium rounded border border-gray-300 bg-white text-gray-800 cursor-pointer focus:outline-none focus:ring-1 focus:ring-amber-400"
+          >
+            {MAINTENANCE_TYPE_OPTIONS.map((t) => (
+              <option key={t} value={t}>{MAINTENANCE_TYPE_LABELS[t] || t}</option>
+            ))}
+          </select>
         </div>
 
         {/* ── 5. Issue / Description ── */}
