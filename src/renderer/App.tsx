@@ -11,6 +11,7 @@ import { EquipmentListPage } from './pages/EquipmentListPage';
 import { EquipmentAddPage } from './pages/EquipmentAddPage';
 import { EquipmentDetailPage } from './pages/EquipmentDetailPage';
 import { DepartmentSegmentPage } from './pages/DepartmentSegmentPage';
+import { MaintenanceQueuePage } from './pages/MaintenanceQueuePage';
 import { MaintenanceNewPage } from './pages/MaintenanceNewPage';
 import { MaintenanceDetailPage } from './pages/MaintenanceDetailPage';
 import { PartsDetailPage } from './pages/PartsDetailPage';
@@ -72,6 +73,7 @@ export default function App() {
                   <Route path="/equipment/:dept" element={<EquipmentListPage />} />
                   <Route path="/equipment/detail/:id" element={<EquipmentDetailPage />} />
                   <Route path="/dept/:dept" element={<DepartmentSegmentPage />} />
+                  <Route path="/maintenance" element={<MaintenanceQueuePage />} />
                   <Route path="/maintenance/new" element={<RoleGuard roles={['inventory_manager', 'maintenance_lead']}><MaintenanceNewPage /></RoleGuard>} />
                   <Route path="/maintenance/:id" element={<RoleGuard roles={['inventory_manager', 'maintenance_lead', 'technician']}><MaintenanceDetailPage /></RoleGuard>} />
                   <Route path="/parts/adjust" element={<RoleGuard roles={['parts_clerk']}><StockAdjustmentPage /></RoleGuard>} />

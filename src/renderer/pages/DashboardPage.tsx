@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Camera, Lightbulb, AlertTriangle, ClipboardList, BarChart3 } from 'lucide-react';
 import { useMaintenanceStore } from '../stores/maintenance.store';
 import { useAuthStore } from '../stores/auth.store';
-import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT } from '../../shared/constants';
+import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT, USE_COUNT_SUBCATEGORIES } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG } from '../lib/constants';
 import type { DashboardStats, MaintenanceTicket, RepairStatus, EquipmentUseCount } from '../../shared/types';
@@ -28,7 +28,13 @@ const SEVERITY_BADGE_VARIANT: Record<string, 'danger' | 'warning' | 'info' | 'de
   LOW: 'default',
 };
 
-const OPEN_STATUSES: RepairStatus[] = ['REPORTED', 'ASSESSED', 'QUEUED', 'IN_PROGRESS', 'TESTING', 'ESCALATED'];
+const TALLY_STATUSES: RepairStatus[] = ['REPORTED', 'ASSESSED', 'IN_PROGRESS', 'COMPLETED'];
+const DEPTS: Department[] = ['camera', 'lights_grips'];
+
+const DEPT_LABEL_COLOR: Record<Department, string> = {
+  camera: 'text-yellow-400',
+  lights_grips: 'text-orange-400',
+};
 
 function isOpenTicket(t: MaintenanceTicket) {
   return t.repair_status !== 'COMPLETED' && t.repair_status !== 'CANCELLED';
@@ -98,23 +104,39 @@ export function DashboardPage() {
     [tickets],
   );
 
-  const cameraCounts = useMemo(
-    () => useCounts.filter(c => CATEGORY_TO_DEPARTMENT[c.category_name] === 'camera').slice(0, 10),
-    [useCounts],
-  );
-  const lgCounts = useMemo(
-    () => useCounts.filter(c => CATEGORY_TO_DEPARTMENT[c.category_name] === 'lights_grips').slice(0, 10),
-    [useCounts],
+  const openByDept = useMemo(() => {
+    const result: Record<Department, MaintenanceTicket[]> = { camera: [], lights_grips: [] };
+    for (const t of openTickets) {
+      const dept = t.category_name ? CATEGORY_TO_DEPARTMENT[t.category_name] : undefined;
+      if (dept) result[dept].push(t);
+    }
+    return result;
+  }, [openTickets]);
+
+  const deptUseCounts = useMemo(() => {
+    const result: Record<Department, EquipmentUseCount[]> = { camera: [], lights_grips: [] };
+    for (const c of useCounts) {
+      const dept = CATEGORY_TO_DEPARTMENT[c.category_name];
+      if (dept) result[dept].push(c);
+    }
+    return result;
+  }, [useCounts]);
+
+  const allDeptTickets = useMemo(
+    () => tickets.filter((t) => t.category_name && CATEGORY_TO_DEPARTMENT[t.category_name]),
+    [tickets],
   );
 
   const statusTally = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const s of OPEN_STATUSES) counts[s] = 0;
-    for (const t of openTickets) {
-      counts[t.repair_status] = (counts[t.repair_status] ?? 0) + 1;
+    for (const s of TALLY_STATUSES) counts[s] = 0;
+    for (const t of allDeptTickets) {
+      if (counts[t.repair_status] !== undefined) {
+        counts[t.repair_status] += 1;
+      }
     }
     return counts;
-  }, [openTickets]);
+  }, [allDeptTickets]);
 
   if (statsLoading || ticketsLoading) {
     return <LoadingSpinner size="lg" className="py-24" />;
@@ -147,18 +169,24 @@ export function DashboardPage() {
                 <div className={`inline-flex items-center justify-center w-10 h-10 rounded-lg ${accent.bg}`}>
                   <Icon size={20} className={accent.text} />
                 </div>
-                <div>
+                <div className="flex-1 min-w-0">
                   <h2 className="text-sm font-semibold text-surface-100">{cfg.label}</h2>
                   <p className="text-2xs text-surface-500">{cfg.categories.join(' · ')}</p>
                 </div>
+                <button
+                  onClick={() => navigate(`/dept/${dept}`)}
+                  className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium whitespace-nowrap"
+                >
+                  View List →
+                </button>
               </div>
 
               {stats ? (
-                <div className="grid grid-cols-4 gap-3">
-                  <MiniStat label="Total" value={stats.totalEquipment} color="text-surface-200" />
-                  <MiniStat label="Available" value={stats.availableCount} color="text-success-400" />
-                  <MiniStat label="In Repair" value={stats.inRepairCount} color="text-warning-400" />
-                  <MiniStat label="Tickets" value={stats.activeTickets} color="text-danger-400" />
+                <div className="grid grid-cols-4">
+                  <MiniStat label="Total" value={stats.totalEquipment} color="text-surface-200" position="first" />
+                  <MiniStat label="Available" value={stats.availableCount} color="text-success-400" position="middle" />
+                  <MiniStat label="In Repair" value={stats.inRepairCount} color="text-warning-400" position="middle" />
+                  <MiniStat label="Tickets" value={stats.activeTickets} color="text-danger-400" position="last" />
                 </div>
               ) : (
                 <p className="text-xs text-surface-500">Unable to load stats</p>
@@ -178,7 +206,7 @@ export function DashboardPage() {
           </span>
         </div>
         <div className="flex flex-wrap gap-3">
-          {OPEN_STATUSES.map((status) => {
+          {TALLY_STATUSES.map((status) => {
             const cfg = REPAIR_STATUS_CONFIG[status];
             const count = statusTally[status] ?? 0;
             return (
@@ -196,164 +224,165 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* ── Open Tickets List ──────────────────────── */}
+      {/* ── Open Tickets ──────────────────────────── */}
       <div className="glass-panel rounded-xl overflow-hidden">
         <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
           <AlertTriangle size={16} className="text-danger-400" />
-          <h3 className="text-sm font-semibold text-surface-200">Open Tickets</h3>
-          <span className="text-xs text-surface-500 ml-1">({openTickets.length})</span>
+          <h3 className="text-base font-semibold text-surface-200">Open Tickets</h3>
         </div>
 
-        {openTickets.length === 0 ? (
-          <div className="px-5 py-10 text-center text-sm text-surface-500">
-            No open tickets across departments
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs text-surface-500 uppercase tracking-wider border-b border-surface-800">
-                  <th className="text-left px-5 py-2.5 font-medium">Ticket</th>
-                  <th className="text-left px-3 py-2.5 font-medium">Equipment</th>
-                  <th className="text-left px-3 py-2.5 font-medium">Dept</th>
-                  <th className="text-left px-3 py-2.5 font-medium">Severity</th>
-                  <th className="text-left px-3 py-2.5 font-medium">Status</th>
-                  <th className="text-left px-3 py-2.5 font-medium">Last Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-surface-800/60">
-                {openTickets.map((ticket) => {
-                  const dept = ticket.category_name
-                    ? CATEGORY_TO_DEPARTMENT[ticket.category_name]
-                    : undefined;
-                  const deptCfg = dept ? DEPARTMENT_CONFIG[dept] : undefined;
-                  const severityCfg = SEVERITY_CONFIG[ticket.severity];
-                  const statusCfg = REPAIR_STATUS_CONFIG[ticket.repair_status];
+        {DEPTS.map((dept, deptIdx) => {
+          const Icon = DEPT_ICONS[dept];
+          const labelColor = DEPT_LABEL_COLOR[dept];
+          const cfg = DEPARTMENT_CONFIG[dept];
+          const deptOpen = openByDept[dept];
 
-                  return (
-                    <tr
-                      key={ticket.id}
-                      onClick={() => {
-                        if (dept) {
-                          navigate(`/dept/${dept}/ticket/${ticket.id}`);
-                        }
-                      }}
-                      className="hover:bg-surface-800/40 transition-colors cursor-pointer"
-                    >
-                      <td className="px-5 py-3 font-mono text-xs text-primary-400 whitespace-nowrap">
-                        {ticket.ticket_number}
-                      </td>
-                      <td className="px-3 py-3">
-                        <p className="text-surface-200 font-medium truncate max-w-[220px]">
-                          {ticket.equipment_name}
-                        </p>
-                        <p className="text-2xs text-surface-500">{ticket.equipment_code}</p>
-                      </td>
-                      <td className="px-3 py-3 whitespace-nowrap">
-                        {dept && (
-                          <Badge variant={dept === 'camera' ? 'info' : 'warning'}>
-                            {deptCfg?.shortLabel ?? dept}
-                          </Badge>
-                        )}
-                      </td>
-                      <td className="px-3 py-3 whitespace-nowrap">
-                        <Badge variant={SEVERITY_BADGE_VARIANT[ticket.severity] ?? 'default'}>
-                          {severityCfg?.label ?? ticket.severity}
-                        </Badge>
-                      </td>
-                      <td className="px-3 py-3 whitespace-nowrap">
-                        <span className={`text-xs font-medium ${statusCfg?.color ?? 'text-surface-400'}`}>
-                          {statusCfg?.label ?? ticket.repair_status}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3 text-xs max-w-[260px]">
-                        {ticket.last_action_date ? (
-                          <div>
-                            <p className="text-surface-300 truncate">
-                              {ticket.last_action_taken}
-                            </p>
-                            <p className="text-2xs text-surface-500 mt-0.5">
-                              {new Date(ticket.last_action_date).toLocaleDateString()}
-                              {ticket.last_action_personnel && (
-                                <> · {ticket.last_action_personnel}</>
+          return (
+            <div key={dept}>
+              <div className={`flex items-center gap-2 px-5 py-2.5 bg-surface-900/40 ${deptIdx > 0 ? 'border-t border-surface-700/40 mt-4' : ''}`}>
+                <Icon size={16} className={labelColor} />
+                <span className={`text-sm font-semibold ${labelColor}`}>{cfg.shortLabel}</span>
+                <span className="text-xs text-surface-500 ml-1">({deptOpen.length})</span>
+                <button
+                  onClick={() => navigate(`/dept/${dept}`)}
+                  className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium ml-auto"
+                >
+                  View All →
+                </button>
+              </div>
+
+              {deptOpen.length === 0 ? (
+                <div className="px-5 py-6 text-center text-sm text-surface-500">
+                  No open tickets
+                </div>
+              ) : (
+                <div className="overflow-x-auto ml-5">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-xs text-surface-500 uppercase tracking-wider border-b border-surface-800">
+                        <th className="text-left px-5 py-2 font-medium">Ticket</th>
+                        <th className="text-left px-3 py-2 font-medium">Equipment</th>
+                        <th className="text-left px-3 py-2 font-medium">Severity</th>
+                        <th className="text-left px-3 py-2 font-medium">Status</th>
+                        <th className="text-left px-3 py-2 font-medium">Last Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-surface-800/60">
+                      {deptOpen.map((ticket) => {
+                        const severityCfg = SEVERITY_CONFIG[ticket.severity];
+                        const statusCfg = REPAIR_STATUS_CONFIG[ticket.repair_status];
+
+                        return (
+                          <tr
+                            key={ticket.id}
+                            onClick={() => navigate(`/maintenance/${ticket.id}`)}
+                            className="hover:bg-surface-800/40 transition-colors cursor-pointer"
+                          >
+                            <td className="px-5 py-3 font-mono text-xs text-primary-400 whitespace-nowrap">
+                              {ticket.ticket_number}
+                            </td>
+                            <td className="px-3 py-3">
+                              <p className="text-surface-200 font-medium truncate max-w-[220px]">
+                                {ticket.equipment_name}
+                              </p>
+                              <p className="text-2xs text-surface-500">{ticket.equipment_code}</p>
+                            </td>
+                            <td className="px-3 py-3 whitespace-nowrap">
+                              <Badge variant={SEVERITY_BADGE_VARIANT[ticket.severity] ?? 'default'}>
+                                {severityCfg?.label ?? ticket.severity}
+                              </Badge>
+                            </td>
+                            <td className="px-3 py-3 whitespace-nowrap">
+                              <span className={`text-xs font-medium ${statusCfg?.color ?? 'text-surface-400'}`}>
+                                {statusCfg?.label ?? ticket.repair_status}
+                              </span>
+                            </td>
+                            <td className="px-3 py-3 text-xs max-w-[260px]">
+                              {ticket.last_action_date ? (
+                                <div>
+                                  <p className="text-surface-300 truncate">
+                                    {ticket.last_action_taken}
+                                  </p>
+                                  <p className="text-2xs text-surface-500 mt-0.5">
+                                    {new Date(ticket.last_action_date).toLocaleDateString()}
+                                    {ticket.last_action_personnel && (
+                                      <> · {ticket.last_action_personnel}</>
+                                    )}
+                                  </p>
+                                </div>
+                              ) : (
+                                <span className="text-surface-600">—</span>
                               )}
-                            </p>
-                          </div>
-                        ) : (
-                          <span className="text-surface-600">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* ── Equipment Use Count ────────────────────── */}
       <div className="glass-panel rounded-xl overflow-hidden">
         <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
           <BarChart3 size={16} className="text-primary-400" />
-          <h3 className="text-sm font-semibold text-surface-200">Equipment Use Count</h3>
+          <h3 className="text-base font-semibold text-surface-200">Equipment Use Count</h3>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-surface-700/40">
-          {([
-            { dept: 'camera' as Department, rows: cameraCounts },
-            { dept: 'lights_grips' as Department, rows: lgCounts },
-          ]).map(({ dept, rows }) => {
-            const cfg = DEPARTMENT_CONFIG[dept];
-            const accent = DEPT_ACCENT[dept];
+        <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-surface-800">
+          {DEPTS.map((dept) => {
             const Icon = DEPT_ICONS[dept];
+            const labelColor = DEPT_LABEL_COLOR[dept];
+            const subGroups = USE_COUNT_SUBCATEGORIES[dept];
+            const deptCounts = deptUseCounts[dept];
 
             return (
-              <div key={dept} className="flex flex-col">
-                <div className={`flex items-center gap-2 px-5 py-3 ${accent.bg}`}>
-                  <Icon size={14} className={accent.text} />
-                  <span className={`text-xs font-semibold ${accent.text}`}>{cfg.shortLabel}</span>
+              <div key={dept} className="p-5 space-y-4">
+                <div className="flex items-center gap-2">
+                  <Icon size={16} className={labelColor} />
+                  <span className={`text-sm font-semibold ${labelColor}`}>
+                    {DEPARTMENT_CONFIG[dept].shortLabel}
+                  </span>
                 </div>
 
-                <div className="overflow-x-auto flex-1">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-xs text-surface-500 uppercase tracking-wider border-b border-surface-800">
-                        <th className="text-left px-5 py-2.5 font-medium w-8">#</th>
-                        <th className="text-left px-3 py-2.5 font-medium">Equipment Name</th>
-                        <th className="text-left px-3 py-2.5 font-medium">Code</th>
-                        <th className="text-right px-5 py-2.5 font-medium">Use Count</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-surface-800/60">
-                      {rows.length === 0 ? (
-                        <tr>
-                          <td colSpan={4} className="px-5 py-6 text-center text-xs text-surface-500">
-                            No data available
-                          </td>
-                        </tr>
-                      ) : (
-                        rows.map((item, idx) => (
-                          <tr key={item.equipment_id} className="hover:bg-surface-800/40 transition-colors">
-                            <td className="px-5 py-2.5 text-xs text-surface-500">{idx + 1}</td>
-                            <td className="px-3 py-2.5 text-surface-200 truncate max-w-[200px]">{item.name}</td>
-                            <td className="px-3 py-2.5 font-mono text-xs text-surface-400">{item.equipment_code}</td>
-                            <td className="px-5 py-2.5 text-right font-bold text-surface-200">{item.use_count}</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                {subGroups.map((group) => {
+                  const nameSet = new Set(group.subcategoryNames);
+                  const groupItems = deptCounts
+                    .filter((c) => nameSet.has(c.subcategory_name))
+                    .slice(0, 5);
 
-                <div className="px-5 py-3 border-t border-surface-800/60">
-                  <button
-                    onClick={() => navigate('/equipment/use-count')}
-                    className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium"
-                  >
-                    View Complete List →
-                  </button>
-                </div>
+                  if (groupItems.length === 0) return null;
+
+                  return (
+                    <div key={group.label}>
+                      <p className="text-xs font-medium text-surface-400 mb-1.5 uppercase tracking-wide">
+                        {group.label}
+                      </p>
+                      <table className="w-full text-sm">
+                        <tbody>
+                          {groupItems.map((item, idx) => (
+                            <tr key={item.equipment_id} className="border-b border-surface-800/40 last:border-0">
+                              <td className="py-1.5 pr-2 text-surface-600 w-5 text-right text-xs">{idx + 1}</td>
+                              <td className="py-1.5 px-2 text-surface-200 truncate max-w-[180px]">{item.name}</td>
+                              <td className="py-1.5 pl-2 text-right font-bold text-surface-100 w-12">{item.use_count}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })}
+
+                <button
+                  onClick={() => navigate('/equipment/use-count')}
+                  className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium"
+                >
+                  View Complete List →
+                </button>
               </div>
             );
           })}
@@ -363,9 +392,11 @@ export function DashboardPage() {
   );
 }
 
-function MiniStat({ label, value, color }: { label: string; value: number; color: string }) {
+function MiniStat({ label, value, color, position = 'middle' }: { label: string; value: number; color: string; position?: 'first' | 'middle' | 'last' }) {
+  const rounded = position === 'first' ? 'rounded-l-lg' : position === 'last' ? 'rounded-r-lg' : '';
+  const border = position !== 'last' ? 'border-r border-surface-700/40' : '';
   return (
-    <div className="bg-surface-900/50 rounded-lg px-3 py-2 text-center">
+    <div className={`bg-surface-900/50 px-3 py-2 text-center ${rounded} ${border}`}>
       <p className={`text-lg font-bold ${color}`}>{value}</p>
       <p className="text-2xs text-surface-500 uppercase tracking-wide">{label}</p>
     </div>

@@ -28,7 +28,7 @@ export function TopBar() {
 
   return (
     <div className="h-14 px-6 flex items-center justify-between border-b border-surface-800/50 bg-surface-950/50">
-      <h2 className="text-base font-semibold text-surface-200">{title}</h2>
+        <h2 className="text-base font-semibold text-surface-200">{title}</h2>
       <div className="flex items-center gap-2">
         <div className={clsx(
           'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium',

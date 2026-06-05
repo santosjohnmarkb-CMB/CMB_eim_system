@@ -58,11 +58,8 @@ export const EQUIPMENT_STATUS_CONFIG: Record<EquipmentStatusType, { label: strin
 export const REPAIR_STATUS = {
   REPORTED: 'REPORTED',
   ASSESSED: 'ASSESSED',
-  QUEUED: 'QUEUED',
   IN_PROGRESS: 'IN_PROGRESS',
-  TESTING: 'TESTING',
   COMPLETED: 'COMPLETED',
-  ESCALATED: 'ESCALATED',
   CANCELLED: 'CANCELLED',
 } as const;
 
@@ -70,13 +67,10 @@ export type RepairStatusType = typeof REPAIR_STATUS[keyof typeof REPAIR_STATUS];
 
 export const REPAIR_STATUS_CONFIG: Record<RepairStatusType, { label: string; color: string; order: number }> = {
   REPORTED:    { label: 'Reported',    color: 'text-danger-400',   order: 0 },
-  ASSESSED:    { label: 'Assessed',    color: 'text-warning-400',  order: 1 },
-  QUEUED:      { label: 'Queued',      color: 'text-yellow-400',   order: 2 },
-  IN_PROGRESS: { label: 'In Progress', color: 'text-primary-400',  order: 3 },
-  TESTING:     { label: 'Testing',     color: 'text-cyan-400',     order: 4 },
-  COMPLETED:   { label: 'Completed',   color: 'text-success-400',  order: 5 },
-  ESCALATED:   { label: 'Escalated',   color: 'text-purple-400',   order: 6 },
-  CANCELLED:   { label: 'Cancelled',   color: 'text-surface-400',  order: 7 },
+  ASSESSED:    { label: 'Assessed',    color: 'text-purple-400',   order: 1 },
+  IN_PROGRESS: { label: 'In Progress', color: 'text-primary-400',  order: 2 },
+  COMPLETED:   { label: 'Completed',   color: 'text-success-400',  order: 3 },
+  CANCELLED:   { label: 'Cancelled',   color: 'text-surface-400',  order: 4 },
 };
 
 export const SEVERITY_CONFIG: Record<string, { label: string; color: string; priority: number }> = {

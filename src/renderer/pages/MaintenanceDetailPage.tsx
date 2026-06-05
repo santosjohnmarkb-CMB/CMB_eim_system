@@ -20,7 +20,7 @@ import { REPAIR_STATUS_CONFIG } from '../lib/constants';
 import { useToast } from '../hooks';
 import type { MaintenanceTicket, MaintenanceNote, TicketAction } from '../../shared/types';
 
-const PIPELINE = ['REPORTED', 'ASSESSED', 'QUEUED', 'IN_PROGRESS', 'TESTING', 'COMPLETED'] as const;
+const PIPELINE = ['REPORTED', 'ASSESSED', 'IN_PROGRESS', 'COMPLETED'] as const;
 
 const SEVERITY_OPTIONS = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
 const MAINTENANCE_TYPE_OPTIONS = ['corrective', 'preventive', 'predictive'] as const;

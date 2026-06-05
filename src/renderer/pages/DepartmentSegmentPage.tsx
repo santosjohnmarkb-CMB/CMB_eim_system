@@ -8,7 +8,7 @@ import { useAuthStore } from '../stores/auth.store';
 import { useDepartmentStore } from '../stores/department.store';
 import { DEPARTMENT_CONFIG } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
-import { EQUIPMENT_STATUS_CONFIG, REPAIR_STATUS_CONFIG, SEVERITY_CONFIG } from '../lib/constants';
+import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG } from '../lib/constants';
 import { Badge } from '../components/common/Badge';
 import { SearchBox } from '../components/common/SearchBox';
 import { DataTable, type Column } from '../components/common/DataTable';
@@ -17,13 +17,12 @@ import { Modal } from '../components/common/Modal';
 import { Input } from '../components/common/Input';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { useToast } from '../hooks';
-import type { EquipmentWithAsset, EquipmentStatus, MaintenanceTicket, PartsCatalogItem, Vendor } from '../../shared/types';
-import { Camera, Lightbulb, ArrowLeft, Package, Wrench, Box, Truck, BarChart3, Plus, AlertTriangle } from 'lucide-react';
+import type { MaintenanceTicket, PartsCatalogItem, Vendor } from '../../shared/types';
+import { Camera, Lightbulb, ArrowLeft, Wrench, Box, Truck, BarChart3, Plus, AlertTriangle } from 'lucide-react';
 
-type TabKey = 'equipment' | 'maintenance' | 'parts' | 'vendors' | 'reports';
+type TabKey = 'maintenance' | 'parts' | 'vendors' | 'reports';
 
 const TABS: { key: TabKey; label: string; icon: typeof Package }[] = [
-  { key: 'equipment', label: 'Equipment', icon: Package },
   { key: 'maintenance', label: 'Maintenance', icon: Wrench },
   { key: 'parts', label: 'Parts', icon: Box },
   { key: 'vendors', label: 'Vendors', icon: Truck },
@@ -35,87 +34,11 @@ const DEPT_ICONS: Record<Department, typeof Camera> = {
   lights_grips: Lightbulb,
 };
 
-const statusVariantMap: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'purple' | 'default'> = {
-  AVAILABLE: 'success', DEPLOYED: 'info', IN_REPAIR: 'warning', ON_HOLD: 'default',
-  IN_TRANSIT: 'info', RETIRED: 'default', MISSING: 'danger', FOR_INSPECTION: 'purple',
-};
-
 const severityVariant: Record<string, 'danger' | 'warning' | 'default' | 'info'> = {
   CRITICAL: 'danger', HIGH: 'warning', MEDIUM: 'default', LOW: 'info',
 };
 
-const KANBAN_COLUMNS = ['REPORTED', 'ASSESSED', 'QUEUED', 'IN_PROGRESS', 'TESTING', 'COMPLETED'] as const;
-
-// ─── Equipment Tab ─────────────────────────────────────────────────────
-
-function EquipmentTab({ dept }: { dept: Department }) {
-  const { items, categories, loading, fetchAll, fetchCategories } = useEquipmentStore();
-  const navigate = useNavigate();
-  const [search, setSearch] = useState('');
-
-  useEffect(() => { fetchAll(); fetchCategories(); }, [fetchAll, fetchCategories]);
-
-  const deptCategoryNames = DEPARTMENT_CONFIG[dept].categories;
-
-  const deptItems = useMemo(() => {
-    const nameSet = new Set(deptCategoryNames);
-    const validCatIds = new Set(categories.filter((c) => nameSet.has(c.name)).map((c) => c.id));
-    return items.filter((i) => validCatIds.has(i.category_id));
-  }, [items, categories, deptCategoryNames]);
-
-  const filtered = useMemo(() => {
-    if (!search) return deptItems;
-    const q = search.toLowerCase();
-    return deptItems.filter((item) =>
-      item.name.toLowerCase().includes(q) ||
-      item.equipment_code.toLowerCase().includes(q) ||
-      item.brand.toLowerCase().includes(q)
-    );
-  }, [deptItems, search]);
-
-  const columns: Column<EquipmentWithAsset>[] = [
-    { key: 'equipment_code', header: 'Code', className: 'w-24' },
-    { key: 'name', header: 'Name', render: (item) => (
-      <div>
-        <p className="font-medium text-surface-100">{item.name}</p>
-        <p className="text-xs text-surface-500">{item.brand} {item.model}</p>
-      </div>
-    )},
-    { key: 'category_name', header: 'Category', render: (item) => (
-      <span className="text-surface-400">{item.category_name}</span>
-    )},
-    { key: 'status', header: 'Status', render: (item) => {
-      const status = item.asset?.current_status || 'AVAILABLE';
-      const config = EQUIPMENT_STATUS_CONFIG[status as EquipmentStatus];
-      return <Badge variant={statusVariantMap[status] || 'default'}>{config?.label || status}</Badge>;
-    }},
-    { key: 'quantity', header: 'Qty', render: (item) => (
-      <span className="text-surface-300">{item.quantity ?? 1}</span>
-    ), className: 'w-14 text-center' },
-    { key: 'available', header: 'Available', render: (item) => (
-      <span className="text-surface-300">{item.asset?.current_status === 'AVAILABLE' ? (item.quantity ?? 1) : 0}</span>
-    ), className: 'w-20 text-center' },
-  ];
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <SearchBox value={search} onChange={setSearch} placeholder="Search equipment..." className="w-64" />
-        <div className="flex-1" />
-        <Button onClick={() => navigate('/equipment/new')}><Plus size={16} /> Add Equipment</Button>
-      </div>
-      <div className="glass-panel rounded-xl overflow-hidden">
-        <DataTable
-          columns={columns}
-          data={filtered}
-          onRowClick={(item) => navigate(`/equipment/detail/${item.id}`)}
-          loading={loading}
-          emptyMessage="No equipment found"
-        />
-      </div>
-    </div>
-  );
-}
+const KANBAN_COLUMNS = ['REPORTED', 'ASSESSED', 'IN_PROGRESS', 'COMPLETED'] as const;
 
 // ─── Maintenance Tab ───────────────────────────────────────────────────
 
@@ -468,7 +391,7 @@ export function DepartmentSegmentPage() {
   const { dept } = useParams<{ dept: string }>();
   const navigate = useNavigate();
   const role = useAuthStore((s) => s.user?.role);
-  const [activeTab, setActiveTab] = useState<TabKey>('equipment');
+  const [activeTab, setActiveTab] = useState<TabKey>('maintenance');
 
   const validDept = (dept === 'camera' || dept === 'lights_grips') ? dept as Department : null;
 
@@ -529,7 +452,6 @@ export function DepartmentSegmentPage() {
 
       {/* Tab Content */}
       <div className="flex-1 min-h-0 overflow-y-auto">
-        {activeTab === 'equipment' && <EquipmentTab dept={validDept} />}
         {activeTab === 'maintenance' && <MaintenanceTab dept={validDept} />}
         {activeTab === 'parts' && <PartsTab dept={validDept} />}
         {activeTab === 'vendors' && <VendorsTab dept={validDept} />}

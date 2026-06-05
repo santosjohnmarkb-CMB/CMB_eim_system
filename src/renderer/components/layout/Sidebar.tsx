@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuthStore } from '../../stores/auth.store';
+import eimLogo from '../../assets/eim-hor.png';
 import { useAppVersion } from '../../hooks/useAppVersion';
 import { DEPARTMENT_CONFIG } from '../../../shared/constants';
 import type { Department } from '../../../shared/constants';
@@ -85,9 +86,7 @@ export function Sidebar() {
   const [equipmentOpen, setEquipmentOpen] = useState(
     location.pathname.startsWith('/equipment')
   );
-  const [maintenanceOpen, setMaintenanceOpen] = useState(
-    location.pathname.startsWith('/dept/')
-  );
+  const _maintenanceActive = location.pathname.startsWith('/maintenance');
 
   const handleLogout = async () => {
     await logout();
@@ -97,15 +96,11 @@ export function Sidebar() {
   const isEquipmentDeptActive = (dept: Department) =>
     location.pathname === `/equipment/${dept}`;
 
-  const isDeptActive = (dept: Department) =>
-    location.pathname === `/dept/${dept}` || location.pathname.startsWith(`/dept/${dept}/`);
-
   if (isAdmin) {
     return (
       <div className="w-[260px] h-full glass-panel flex flex-col border-r border-surface-800/50">
         <div className="px-5 py-5 border-b border-surface-800/50">
-          <h1 className="text-lg font-bold text-gradient">CMB EIM</h1>
-          <p className="text-2xs text-surface-500 mt-0.5">Equipment Inventory Management</p>
+          <img src={eimLogo} alt="CMB EIM" className="w-full object-contain" />
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
@@ -137,23 +132,12 @@ export function Sidebar() {
             ))}
           </CollapsibleSection>
 
-          {/* Maintenance — collapsible */}
-          <CollapsibleSection
+          <NavButton
             icon={<Wrench size={20} />}
             label="Maintenance"
-            open={maintenanceOpen}
-            onToggle={() => setMaintenanceOpen(!maintenanceOpen)}
-            isActive={location.pathname.startsWith('/dept/')}
-          >
-            {(Object.keys(DEPARTMENT_CONFIG) as Department[]).map((dept) => (
-              <DeptSubItem
-                key={dept}
-                dept={dept}
-                active={isDeptActive(dept)}
-                onClick={() => navigate(`/dept/${dept}`)}
-              />
-            ))}
-          </CollapsibleSection>
+            active={_maintenanceActive}
+            onClick={() => navigate('/maintenance')}
+          />
 
           <NavButton
             icon={<Settings size={20} />}
@@ -173,8 +157,7 @@ export function Sidebar() {
   return (
     <div className="w-[260px] h-full glass-panel flex flex-col border-r border-surface-800/50">
       <div className="px-5 py-5 border-b border-surface-800/50">
-        <h1 className="text-lg font-bold text-gradient">CMB EIM</h1>
-        <p className="text-2xs text-surface-500 mt-0.5">Equipment Inventory Management</p>
+        <img src={eimLogo} alt="CMB EIM" className="w-full object-contain" />
       </div>
 
       <div className="px-3 pt-3 pb-1">

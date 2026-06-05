@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/auth.store';
-import { Lock } from 'lucide-react';
+import eimLogo from '../assets/eim-hor.png';
 
 export function LoginPage() {
   const [username, setUsername] = useState('');
@@ -23,18 +23,15 @@ export function LoginPage() {
   };
 
   return (
-    <div className="h-screen flex items-center justify-center bg-surface-950">
+    <div className="h-screen flex items-center justify-center">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary-600/20 mb-4">
-            <Lock size={28} className="text-primary-400" />
-          </div>
-          <h1 className="text-2xl font-bold text-gradient">CMB EIM</h1>
-          <p className="text-sm text-surface-500 mt-1">Equipment Inventory Management</p>
+          <img src={eimLogo} alt="CMB EIM" className="h-[336px] mx-auto mb-3" style={{ transform: 'scaleX(1.6)' }} />
+          <p className="text-sm" style={{ color: '#087cf1' }}>Equipment Inventory Management</p>
         </div>
         <form onSubmit={handleSubmit} className="glass-panel rounded-xl p-6 space-y-4">
           <div>
-            <label className="block text-xs font-medium text-surface-400 mb-1">Username</label>
+            <label className="block text-xs font-medium mb-1" style={{ color: '#087cf1' }}>Username</label>
             <input
               type="text"
               value={username}
@@ -45,7 +42,7 @@ export function LoginPage() {
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-surface-400 mb-1">Password</label>
+            <label className="block text-xs font-medium mb-1" style={{ color: '#087cf1' }}>Password</label>
             <input
               type="password"
               value={password}
@@ -63,7 +60,7 @@ export function LoginPage() {
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
-        <p className="text-center text-2xs text-surface-600 mt-4">CMB Film Services, Inc.</p>
+        <p className="text-center text-xs mt-4" style={{ color: '#ff7034' }}>CMB Film Services, Inc.<br />CMB TechDev - MBS LSD 2026</p>
       </div>
     </div>
   );

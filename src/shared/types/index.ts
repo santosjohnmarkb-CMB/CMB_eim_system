@@ -133,8 +133,8 @@ export interface AssetStatusLogEntry {
   notes: string | null;
 }
 
-export type RepairStatus = 'REPORTED' | 'ASSESSED' | 'QUEUED' | 'IN_PROGRESS'
-  | 'TESTING' | 'COMPLETED' | 'ESCALATED' | 'CANCELLED';
+export type RepairStatus = 'REPORTED' | 'ASSESSED' | 'IN_PROGRESS'
+  | 'COMPLETED' | 'CANCELLED';
 
 export type Severity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 export type MaintenanceType = 'corrective' | 'preventive' | 'predictive';

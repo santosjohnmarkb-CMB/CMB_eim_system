@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS maintenance_tickets (
   reported_date TIMESTAMPTZ NOT NULL DEFAULT now(),
   issue_description TEXT NOT NULL DEFAULT '',
   severity TEXT NOT NULL DEFAULT 'MEDIUM' CHECK (severity IN ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW')),
-  repair_status TEXT NOT NULL DEFAULT 'REPORTED' CHECK (repair_status IN ('REPORTED', 'ASSESSED', 'QUEUED', 'IN_PROGRESS', 'TESTING', 'COMPLETED', 'ESCALATED', 'CANCELLED')),
+  repair_status TEXT NOT NULL DEFAULT 'REPORTED' CHECK (repair_status IN ('REPORTED', 'ASSESSED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED')),
   maintenance_type TEXT NOT NULL DEFAULT 'corrective' CHECK (maintenance_type IN ('corrective', 'preventive', 'predictive')),
   assigned_technician TEXT,
   diagnosis TEXT,
