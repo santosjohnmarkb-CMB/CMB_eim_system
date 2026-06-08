@@ -406,11 +406,6 @@ export function MaintenanceDetailPage() {
                 {ticket.ticket_number}
               </h1>
             </div>
-            {canAdvance && nextStatus && (
-              <Button size="sm" onClick={handleAdvance} className="print:hidden">
-                Advance <ChevronRight size={14} />
-              </Button>
-            )}
           </div>
 
           {/* Status pipeline */}
@@ -420,23 +415,30 @@ export function MaintenanceDetailPage() {
               const isPast = i < currentIdx;
               const isCurrent = i === currentIdx;
               const isFuture = i > currentIdx;
+              const pipelineColors: Record<string, { bg: string; border: string; ring: string; text: string }> = {
+                REPORTED:    { bg: 'bg-red-500',    border: 'border-red-500',    ring: 'ring-red-200',    text: 'text-red-700' },
+                ASSESSED:    { bg: 'bg-purple-500', border: 'border-purple-500', ring: 'ring-purple-200', text: 'text-purple-700' },
+                IN_PROGRESS: { bg: 'bg-blue-500',   border: 'border-blue-500',   ring: 'ring-blue-200',   text: 'text-blue-700' },
+                COMPLETED:   { bg: 'bg-green-500',  border: 'border-green-500',  ring: 'ring-green-200',  text: 'text-green-700' },
+              };
+              const pc = pipelineColors[status] || { bg: 'bg-gray-400', border: 'border-gray-400', ring: 'ring-gray-200', text: 'text-gray-600' };
               return (
                 <div key={status} className="flex items-center flex-1 last:flex-none">
                   <div className="flex flex-col items-center">
                     <div
                       className={`
                         w-3 h-3 rounded-full border-2 transition-all
-                        ${isPast ? 'bg-primary-500 border-primary-500' : ''}
-                        ${isCurrent ? 'bg-primary-500 border-primary-500 ring-4 ring-primary-500/20' : ''}
+                        ${isPast ? `${pc.bg} ${pc.border}` : ''}
+                        ${isCurrent ? `${pc.bg} ${pc.border} ring-4 ${pc.ring}` : ''}
                         ${isFuture ? 'bg-transparent border-gray-400' : ''}
                       `}
                     />
-                    <span className={`text-[9px] mt-1 whitespace-nowrap ${isCurrent ? 'font-bold text-primary-600' : isPast ? 'text-gray-500' : 'text-gray-400'}`}>
+                    <span className={`text-[9px] mt-1 whitespace-nowrap ${isCurrent ? `font-bold ${pc.text}` : isPast ? 'text-gray-500' : 'text-gray-400'}`}>
                       {config?.label}
                     </span>
                   </div>
                   {i < PIPELINE.length - 1 && (
-                    <div className={`flex-1 h-0.5 mx-1 mt-[-12px] ${i < currentIdx ? 'bg-primary-500' : 'bg-gray-300'}`} />
+                    <div className={`flex-1 h-0.5 mx-1 mt-[-12px] ${i < currentIdx ? pc.bg : 'bg-gray-300'}`} />
                   )}
                 </div>
               );
@@ -481,15 +483,9 @@ export function MaintenanceDetailPage() {
           <label className="text-[10px] uppercase tracking-[0.15em] text-amber-800/60 font-semibold block mb-1.5">
             Maintenance Type
           </label>
-          <select
-            value={ticket.maintenance_type}
-            onChange={(e) => handleSelectChange('maintenance_type', e.target.value)}
-            className="px-3 py-1.5 text-sm font-medium rounded border border-gray-300 bg-white text-gray-800 cursor-pointer focus:outline-none focus:ring-1 focus:ring-amber-400"
-          >
-            {MAINTENANCE_TYPE_OPTIONS.map((t) => (
-              <option key={t} value={t}>{MAINTENANCE_TYPE_LABELS[t] || t}</option>
-            ))}
-          </select>
+          <span className="px-3 py-1.5 text-sm font-medium text-gray-800">
+            {MAINTENANCE_TYPE_LABELS[ticket.maintenance_type] || ticket.maintenance_type}
+          </span>
         </div>
 
         {/* ── 5. Issue / Description ── */}
@@ -577,17 +573,24 @@ export function MaintenanceDetailPage() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 {PIPELINE.map((status, i) => {
-                  const config = REPAIR_STATUS_CONFIG[status];
                   const isPast = i < currentIdx;
                   const isCurrent = i === currentIdx;
+                  const statusStyles: Record<string, { dot: string; ring: string; text: string }> = {
+                    REPORTED:    { dot: 'bg-red-500',    ring: 'ring-red-200',    text: 'text-red-700' },
+                    ASSESSED:    { dot: 'bg-purple-500', ring: 'ring-purple-200', text: 'text-purple-700' },
+                    IN_PROGRESS: { dot: 'bg-blue-500',   ring: 'ring-blue-200',   text: 'text-blue-700' },
+                    COMPLETED:   { dot: 'bg-green-500',  ring: 'ring-green-200',  text: 'text-green-700' },
+                  };
+                  const style = statusStyles[status] || { dot: 'bg-gray-400', ring: 'ring-gray-200', text: 'text-gray-600' };
+                  const label = REPAIR_STATUS_CONFIG[status]?.label ?? status;
                   return (
                     <div key={status} className="flex items-center gap-1">
-                      <div className={`w-2 h-2 rounded-full ${isPast ? 'bg-primary-500' : isCurrent ? 'bg-primary-500 ring-2 ring-primary-300' : 'bg-gray-300'}`} />
-                      <span className={`text-[10px] ${isCurrent ? 'text-primary-700 font-bold' : isPast ? 'text-gray-500' : 'text-gray-400'}`}>
-                        {config?.label}
+                      <div className={`w-2.5 h-2.5 rounded-full ${(isPast || isCurrent) ? style.dot : 'bg-gray-300'} ${isCurrent ? `ring-2 ${style.ring}` : ''}`} />
+                      <span className={`text-[10px] font-medium ${isCurrent ? `${style.text} font-bold` : isPast ? 'text-gray-600' : 'text-gray-400'}`}>
+                        {label}
                       </span>
                       {i < PIPELINE.length - 1 && (
-                        <ChevronRight size={10} className={`${isPast ? 'text-primary-400' : 'text-gray-300'}`} />
+                        <ChevronRight size={10} className={`${isPast ? 'text-gray-500' : 'text-gray-300'}`} />
                       )}
                     </div>
                   );

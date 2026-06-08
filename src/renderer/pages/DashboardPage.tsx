@@ -558,7 +558,11 @@ export function DashboardPage() {
                     {modalHistory.map((entry, idx) => {
                       const isLatest = idx === 0;
                       return (
-                        <tr key={entry.id} className={isLatest ? 'bg-emerald-500/5' : ''}>
+                        <tr
+                          key={entry.id}
+                          onClick={() => { setHistoryModal(null); setModalHistory([]); navigate(`/maintenance/${entry.id}`); }}
+                          className={`cursor-pointer hover:bg-surface-800/60 transition-colors ${isLatest ? 'bg-emerald-500/5' : ''}`}
+                        >
                           <td className={`px-3 py-3 font-mono text-xs whitespace-nowrap ${isLatest ? 'text-emerald-400 font-semibold' : 'text-surface-400'}`}>
                             {entry.ticket_number}
                           </td>
