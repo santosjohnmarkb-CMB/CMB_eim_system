@@ -180,8 +180,9 @@ export function MaintenanceDetailPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const user = useAuthStore((s) => s.user);
+  const isAdmin = user?.role === 'admin';
   const {
-    getById, updateStatus, update, addNote, getNotes, getActions, addAction, updateAction, deleteAction,
+    getById, updateStatus, update, addNote, getNotes, getActions, addAction, updateAction, deleteAction, deleteTicket,
   } = useMaintenanceStore();
 
   const [ticket, setTicket] = useState<MaintenanceTicket | null>(null);
@@ -190,6 +191,7 @@ export function MaintenanceDetailPage() {
   const [noteText, setNoteText] = useState('');
   const [notesOpen, setNotesOpen] = useState(false);
   const [editingCell, setEditingCell] = useState<{ rowIdx: number; col: string } | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const cellRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
 
   const load = useCallback(async () => {
@@ -227,6 +229,14 @@ export function MaintenanceDetailPage() {
     try {
       await update(ticket.id, { [field]: value });
       setTicket((prev) => prev ? { ...prev, [field]: value } : prev);
+    } catch (err: any) { toast.error(err.message); }
+  };
+
+  const handleDeleteTicket = async () => {
+    try {
+      await deleteTicket(ticket.id);
+      toast.success('Ticket deleted');
+      navigate('/maintenance');
     } catch (err: any) { toast.error(err.message); }
   };
 
@@ -362,6 +372,16 @@ export function MaintenanceDetailPage() {
           <ArrowLeft size={16} /> Back to Queue
         </Button>
         <div className="flex-1" />
+        {isAdmin && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowDeleteConfirm(true)}
+            className="print:hidden text-red-400 hover:text-red-300 hover:bg-red-500/10"
+          >
+            <Trash2 size={14} /> Delete
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="sm"
@@ -611,6 +631,37 @@ export function MaintenanceDetailPage() {
           </div>
         )}
       </div>
+
+      {/* ── Delete Confirmation Modal ── */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm print:hidden">
+          <div className="bg-surface-900 border border-surface-700 rounded-xl shadow-2xl w-full max-w-md mx-4 p-6">
+            <h3 className="text-lg font-semibold text-surface-100 mb-2">Delete Ticket</h3>
+            <p className="text-sm text-surface-400 mb-1">
+              Are you sure you want to permanently delete this ticket?
+            </p>
+            <p className="text-xs text-surface-500 mb-5 font-mono">{ticket.ticket_number}</p>
+            <p className="text-xs text-red-400 mb-5">
+              This will remove the ticket, all action log entries, and notes. This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowDeleteConfirm(false)}
+              >
+                Cancel
+              </Button>
+              <button
+                onClick={handleDeleteTicket}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+              >
+                Delete Permanently
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

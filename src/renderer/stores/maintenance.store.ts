@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { ipcInvoke } from '../lib/ipc';
-import type { MaintenanceTicket, MaintenanceNote, PreventiveSchedule, TicketAction } from '../../shared/types';
+import type { MaintenanceTicket, MaintenanceNote, PreventiveSchedule, TicketAction, CompletedHistoryEntry } from '../../shared/types';
 
 interface MaintenanceState {
   tickets: MaintenanceTicket[];
@@ -22,6 +22,9 @@ interface MaintenanceState {
   addAction: (data: any) => Promise<TicketAction>;
   updateAction: (id: string, data: any) => Promise<TicketAction>;
   deleteAction: (id: string) => Promise<void>;
+  deleteTicket: (id: string) => Promise<void>;
+  getCompletedHistory: () => Promise<CompletedHistoryEntry[]>;
+  getEquipmentHistory: (equipmentId: string) => Promise<CompletedHistoryEntry[]>;
 }
 
 export const useMaintenanceStore = create<MaintenanceState>((set, get) => ({
@@ -111,5 +114,18 @@ export const useMaintenanceStore = create<MaintenanceState>((set, get) => ({
 
   deleteAction: async (id: string) => {
     await ipcInvoke('db:maintenance:deleteAction', id);
+  },
+
+  deleteTicket: async (id: string) => {
+    await ipcInvoke('db:maintenance:delete', id);
+    await get().fetchAll();
+  },
+
+  getCompletedHistory: async () => {
+    return await ipcInvoke<CompletedHistoryEntry[]>('db:maintenance:getCompletedHistory');
+  },
+
+  getEquipmentHistory: async (equipmentId: string) => {
+    return await ipcInvoke<CompletedHistoryEntry[]>('db:maintenance:getEquipmentHistory', equipmentId);
   },
 }));

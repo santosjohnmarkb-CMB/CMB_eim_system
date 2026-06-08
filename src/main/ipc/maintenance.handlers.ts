@@ -170,6 +170,33 @@ export function registerMaintenanceHandlers(): void {
     return { success: true };
   });
 
+  ipcMain.handle('db:maintenance:delete', (event: any, id: string) => {
+    const user = requireSession(event);
+    if (user.role !== 'admin') throw new Error('Only admins can delete tickets');
+    const ticket: any = db.prepare('SELECT * FROM maintenance_tickets WHERE id = ?').get(id);
+    if (!ticket) throw new Error('Ticket not found');
+
+    const tx = db.transaction(() => {
+      db.prepare('DELETE FROM maintenance_notes WHERE ticket_id = ?').run(id);
+      db.prepare('DELETE FROM ticket_actions WHERE ticket_id = ?').run(id);
+      db.prepare('DELETE FROM maintenance_tickets WHERE id = ?').run(id);
+
+      if (ticket.repair_status !== 'COMPLETED' && ticket.repair_status !== 'CANCELLED') {
+        db.prepare("UPDATE equipment_items SET available_qty = MIN(available_qty + 1, quantity), updated_at = datetime('now') WHERE id = ?")
+          .run(ticket.equipment_id);
+      }
+
+      if (ticket.asset_id) {
+        db.prepare("UPDATE equipment_assets SET current_status = 'AVAILABLE', updated_at = datetime('now') WHERE id = ?")
+          .run(ticket.asset_id);
+      }
+    });
+    tx();
+
+    void pushOperationalToCloud('maintenance_tickets', 'DELETE', { id });
+    return { success: true };
+  });
+
   ipcMain.handle('db:maintenance:addNote', (event: any, data: unknown) => {
     requireSession(event);
     const input = MaintenanceNoteSchema.parse(data);
@@ -243,6 +270,38 @@ export function registerMaintenanceHandlers(): void {
     requireSession(event);
     db.prepare("UPDATE preventive_schedules SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(id);
     return { success: true };
+  });
+
+  // ── Equipment Maintenance History (completed jobs) ──
+
+  ipcMain.handle('db:maintenance:getCompletedHistory', () => {
+    return db.prepare(`
+      SELECT mt.id, mt.ticket_number, mt.equipment_id, mt.reported_date, mt.completion_date,
+        mt.issue_description, mt.severity, mt.maintenance_type, mt.document_type,
+        e.name as equipment_name, e.equipment_code,
+        c.name as category_name,
+        (SELECT ta.remarks FROM ticket_actions ta WHERE ta.ticket_id = mt.id ORDER BY ta.action_date DESC, ta.created_at DESC LIMIT 1) as last_remarks
+      FROM maintenance_tickets mt
+      JOIN equipment_items e ON e.id = mt.equipment_id
+      LEFT JOIN categories c ON c.id = e.category_id
+      WHERE mt.repair_status = 'COMPLETED'
+      ORDER BY mt.completion_date DESC
+    `).all();
+  });
+
+  ipcMain.handle('db:maintenance:getEquipmentHistory', (_e: any, equipmentId: string) => {
+    return db.prepare(`
+      SELECT mt.id, mt.ticket_number, mt.equipment_id, mt.reported_date, mt.completion_date,
+        mt.issue_description, mt.severity, mt.repair_status, mt.maintenance_type, mt.document_type,
+        e.name as equipment_name, e.equipment_code,
+        c.name as category_name,
+        (SELECT ta.remarks FROM ticket_actions ta WHERE ta.ticket_id = mt.id ORDER BY ta.action_date DESC, ta.created_at DESC LIMIT 1) as last_remarks
+      FROM maintenance_tickets mt
+      JOIN equipment_items e ON e.id = mt.equipment_id
+      LEFT JOIN categories c ON c.id = e.category_id
+      WHERE mt.equipment_id = ? AND mt.repair_status = 'COMPLETED'
+      ORDER BY mt.completion_date DESC
+    `).all(equipmentId);
   });
 
   // ── Ticket Actions CRUD ──

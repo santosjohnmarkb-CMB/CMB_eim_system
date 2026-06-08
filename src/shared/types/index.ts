@@ -336,6 +336,23 @@ export interface EquipmentUseCount {
   use_count: number;
 }
 
+export interface CompletedHistoryEntry {
+  id: string;
+  ticket_number: string;
+  equipment_id: string;
+  reported_date: string;
+  completion_date: string | null;
+  issue_description: string;
+  severity: Severity;
+  repair_status: RepairStatus;
+  maintenance_type: MaintenanceType;
+  document_type: 'maintenance' | 'repair' | 'update';
+  equipment_name: string;
+  equipment_code: string;
+  category_name: string;
+  last_remarks: string | null;
+}
+
 export interface ElectronAPI {
   invoke: <T = unknown>(channel: string, ...args: unknown[]) => Promise<T>;
   on: (channel: string, callback: (...args: unknown[]) => void) => void;
