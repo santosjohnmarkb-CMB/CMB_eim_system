@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Wrench, Camera, Lightbulb, ClipboardList, AlertTriangle, History, X } from 'lucide-react';
+import { Wrench, Camera, Lightbulb, ClipboardList, AlertTriangle, History, X, Plus } from 'lucide-react';
 import { useMaintenanceStore } from '../stores/maintenance.store';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG } from '../lib/constants';
@@ -189,6 +189,12 @@ export function MaintenanceQueuePage() {
         <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
           <AlertTriangle size={18} className="text-danger-400" />
           <h3 className="text-base font-semibold text-surface-200">Open Tickets</h3>
+          <button
+            onClick={() => navigate('/maintenance/new')}
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-400 hover:text-primary-300 bg-primary-500/10 hover:bg-primary-500/20 border border-primary-500/20 rounded-lg transition-colors"
+          >
+            <Plus size={14} /> Create New Ticket
+          </button>
         </div>
 
         {DEPTS.map((dept, deptIdx) => {

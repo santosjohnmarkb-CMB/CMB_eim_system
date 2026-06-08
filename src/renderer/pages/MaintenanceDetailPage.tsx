@@ -571,6 +571,42 @@ export function MaintenanceDetailPage() {
               </tbody>
             </table>
           </div>
+
+          {/* ── Status Advancement Control ── */}
+          <div className="mt-4 pt-4 border-t border-amber-200 print:hidden">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {PIPELINE.map((status, i) => {
+                  const config = REPAIR_STATUS_CONFIG[status];
+                  const isPast = i < currentIdx;
+                  const isCurrent = i === currentIdx;
+                  return (
+                    <div key={status} className="flex items-center gap-1">
+                      <div className={`w-2 h-2 rounded-full ${isPast ? 'bg-primary-500' : isCurrent ? 'bg-primary-500 ring-2 ring-primary-300' : 'bg-gray-300'}`} />
+                      <span className={`text-[10px] ${isCurrent ? 'text-primary-700 font-bold' : isPast ? 'text-gray-500' : 'text-gray-400'}`}>
+                        {config?.label}
+                      </span>
+                      {i < PIPELINE.length - 1 && (
+                        <ChevronRight size={10} className={`${isPast ? 'text-primary-400' : 'text-gray-300'}`} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                disabled={!canAdvance}
+                onClick={handleAdvance}
+                className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg transition-colors ${
+                  canAdvance
+                    ? 'text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 cursor-pointer'
+                    : 'text-gray-400 bg-gray-100 border border-gray-200 cursor-not-allowed'
+                }`}
+              >
+                Advance Current Status <ChevronRight size={14} />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
