@@ -180,8 +180,8 @@ export function DashboardPage() {
     }
     for (const t of allDeptTickets) {
       const dept = t.category_name ? CATEGORY_TO_DEPARTMENT[t.category_name] : undefined;
-      if (dept && result[dept][t.repair_status] !== undefined) {
-        result[dept][t.repair_status] += 1;
+      if (dept && t.repair_status in result[dept]) {
+        result[dept][t.repair_status]! += 1;
       }
     }
     return result;

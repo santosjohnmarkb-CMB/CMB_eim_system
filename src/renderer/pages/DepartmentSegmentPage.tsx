@@ -22,7 +22,7 @@ import { Camera, Lightbulb, ArrowLeft, Wrench, Box, Truck, BarChart3, Plus, Aler
 
 type TabKey = 'maintenance' | 'parts' | 'vendors' | 'reports';
 
-const TABS: { key: TabKey; label: string; icon: typeof Package }[] = [
+const TABS: { key: TabKey; label: string; icon: typeof Wrench }[] = [
   { key: 'maintenance', label: 'Maintenance', icon: Wrench },
   { key: 'parts', label: 'Parts', icon: Box },
   { key: 'vendors', label: 'Vendors', icon: Truck },

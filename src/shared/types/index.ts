@@ -71,7 +71,7 @@ export interface PackageItem {
   component?: EquipmentItem;
 }
 
-export type EimUserRole = 'admin' | 'accounts_manager' | 'billing_user' | 'payroll_user'
+export type EimUserRole = 'admin' | 'equipment_manager' | 'accounts_manager' | 'billing_user' | 'payroll_user'
   | 'inventory_manager' | 'maintenance_lead' | 'technician' | 'parts_clerk' | 'viewer';
 
 export interface User {

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Wrench, Camera, Lightbulb, ClipboardList, AlertTriangle, History, X, Plus } from 'lucide-react';
 import { useMaintenanceStore } from '../stores/maintenance.store';
+import { useAuthStore } from '../stores/auth.store';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG } from '../lib/constants';
 import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT } from '../../shared/constants';
@@ -29,7 +30,7 @@ function buildTally(tickets: MaintenanceTicket[]) {
   const counts: Record<string, number> = {};
   for (const s of TALLY_STATUSES) counts[s] = 0;
   for (const t of tickets) {
-    if (counts[t.repair_status] !== undefined) counts[t.repair_status] += 1;
+    if (t.repair_status in counts) counts[t.repair_status]! += 1;
   }
   return counts;
 }
@@ -37,6 +38,10 @@ function buildTally(tickets: MaintenanceTicket[]) {
 export function MaintenanceQueuePage() {
   const { tickets, loading, fetchAll, getCompletedHistory, getEquipmentHistory } = useMaintenanceStore();
   const navigate = useNavigate();
+  const user = useAuthStore((s) => s.user);
+  const isAdmin = user?.role === 'admin';
+  const userDept = user?.department as Department | null;
+  const visibleDepts: Department[] = isAdmin ? DEPTS : (userDept ? [userDept] : DEPTS);
 
   const [completedHistory, setCompletedHistory] = useState<CompletedHistoryEntry[]>([]);
   const [historyModal, setHistoryModal] = useState<{ equipmentId: string; equipmentName: string; equipmentCode: string } | null>(null);
@@ -145,7 +150,7 @@ export function MaintenanceQueuePage() {
         </div>
 
         <div className="divide-y divide-surface-700/40">
-          {DEPTS.map((dept) => {
+          {visibleDepts.map((dept) => {
             const Icon = DEPT_ICONS[dept];
             const accent = DEPT_ACCENT[dept];
             const cfg = DEPARTMENT_CONFIG[dept];
@@ -197,7 +202,7 @@ export function MaintenanceQueuePage() {
           </button>
         </div>
 
-        {DEPTS.map((dept, deptIdx) => {
+        {visibleDepts.map((dept, deptIdx) => {
           const Icon = DEPT_ICONS[dept];
           const accent = DEPT_ACCENT[dept];
           const cfg = DEPARTMENT_CONFIG[dept];
@@ -294,7 +299,7 @@ export function MaintenanceQueuePage() {
           <span className="ml-auto text-xs text-surface-500">5 most recent per department</span>
         </div>
 
-        {DEPTS.map((dept, deptIdx) => {
+        {visibleDepts.map((dept, deptIdx) => {
           const Icon = DEPT_ICONS[dept];
           const accent = DEPT_ACCENT[dept];
           const cfg = DEPARTMENT_CONFIG[dept];

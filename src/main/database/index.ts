@@ -64,6 +64,7 @@ function initializeDatabase(): void {
   runMigrations(db);
   seedDataIfEmpty();
   ensureAdminRecoverable();
+  ensureDepartmentManagers();
 }
 
 function seedDataIfEmpty(): void {
@@ -156,6 +157,28 @@ function ensureAdminRecoverable(): void {
     }
   } catch (err) {
     console.error('[DB] ensureAdminRecoverable failed:', err);
+  }
+}
+
+function ensureDepartmentManagers(): void {
+  try {
+    const now = new Date().toISOString();
+    const camMgr: any = db.prepare("SELECT id FROM users WHERE username = 'camera_mgr'").get();
+    if (!camMgr) {
+      db.prepare(
+        `INSERT INTO users (id, username, password_hash, full_name, email, role, department, is_active, created_at, updated_at)
+         VALUES (?, 'camera_mgr', ?, 'Camera Equipment Manager', 'camera@cmbfilmservices.com', 'equipment_manager', 'camera', 1, ?, ?)`
+      ).run(uuidv4(), hashPassword('camera123'), now, now);
+    }
+    const lgMgr: any = db.prepare("SELECT id FROM users WHERE username = 'lighting_mgr'").get();
+    if (!lgMgr) {
+      db.prepare(
+        `INSERT INTO users (id, username, password_hash, full_name, email, role, department, is_active, created_at, updated_at)
+         VALUES (?, 'lighting_mgr', ?, 'Lighting Equipment Manager', 'lighting@cmbfilmservices.com', 'equipment_manager', 'lights_grips', 1, ?, ?)`
+      ).run(uuidv4(), hashPassword('lighting123'), now, now);
+    }
+  } catch (err) {
+    console.error('[DB] ensureDepartmentManagers failed:', err);
   }
 }
 

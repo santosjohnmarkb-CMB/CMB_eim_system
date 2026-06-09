@@ -146,6 +146,43 @@ const MIGRATIONS: Migration[] = [
       db.pragma('foreign_keys = ON');
     },
   },
+  {
+    id: '007_add_equipment_manager_role',
+    up: (db: any) => {
+      const tableSql: any = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get();
+      if (!tableSql || tableSql.sql.includes("'equipment_manager'")) return;
+
+      db.pragma('foreign_keys = OFF');
+      const colsInfo: any[] = db.pragma('table_info(users)');
+      const colNames = colsInfo.map((c: any) => c.name);
+
+      db.exec(`
+        CREATE TABLE users_new (
+          id TEXT PRIMARY KEY,
+          username TEXT UNIQUE NOT NULL,
+          password_hash TEXT NOT NULL,
+          full_name TEXT NOT NULL,
+          email TEXT NOT NULL DEFAULT '',
+          role TEXT NOT NULL CHECK (role IN ('admin', 'equipment_manager', 'accounts_manager', 'billing_user', 'payroll_user', 'inventory_manager', 'maintenance_lead', 'technician', 'parts_clerk', 'viewer')),
+          department TEXT,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          version INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+
+      const targetCols = ['id','username','password_hash','full_name','email','role','department','is_active','version','created_at','updated_at'];
+      const safeCols = targetCols.filter(c => colNames.includes(c));
+      const colList = safeCols.join(', ');
+
+      db.exec(`INSERT INTO users_new (${colList}) SELECT ${colList} FROM users`);
+      db.exec(`DROP TABLE users`);
+      db.exec(`ALTER TABLE users_new RENAME TO users`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_users_role_active ON users(role, is_active)`);
+      db.pragma('foreign_keys = ON');
+    },
+  },
 ];
 
 export function runMigrations(db: any): void {

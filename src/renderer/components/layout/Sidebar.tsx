@@ -171,6 +171,12 @@ export function Sidebar() {
 
       <nav className="flex-1 px-3 py-3 space-y-1 overflow-y-auto">
         <NavButton
+          icon={<LayoutDashboard size={20} />}
+          label="Dashboard"
+          active={location.pathname === `/dept/${dept}`}
+          onClick={() => navigate(`/dept/${dept}`)}
+        />
+        <NavButton
           icon={<Package size={20} />}
           label="Equipment"
           active={location.pathname === `/equipment/${dept}`}
@@ -179,8 +185,8 @@ export function Sidebar() {
         <NavButton
           icon={<Wrench size={20} />}
           label="Maintenance"
-          active={location.pathname === `/dept/${dept}`}
-          onClick={() => navigate(`/dept/${dept}`)}
+          active={location.pathname.startsWith('/maintenance')}
+          onClick={() => navigate('/maintenance')}
         />
       </nav>
 

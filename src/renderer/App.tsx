@@ -66,7 +66,7 @@ export default function App() {
               <Layout>
                 <Routes>
                   <Route path="/" element={<DefaultRedirect />} />
-                  <Route path="/dashboard" element={<DashboardPage />} />
+                  <Route path="/dashboard" element={<RoleGuard roles={[]}><DashboardPage /></RoleGuard>} />
                   <Route path="/equipment" element={<EquipmentDashboardPage />} />
                   <Route path="/equipment/new" element={<RoleGuard roles={['inventory_manager']}><EquipmentAddPage /></RoleGuard>} />
                   <Route path="/equipment/use-count" element={<EquipmentUseCountPage />} />
@@ -74,8 +74,8 @@ export default function App() {
                   <Route path="/equipment/detail/:id" element={<EquipmentDetailPage />} />
                   <Route path="/dept/:dept" element={<DepartmentSegmentPage />} />
                   <Route path="/maintenance" element={<MaintenanceQueuePage />} />
-                  <Route path="/maintenance/new" element={<RoleGuard roles={['inventory_manager', 'maintenance_lead']}><MaintenanceNewPage /></RoleGuard>} />
-                  <Route path="/maintenance/:id" element={<RoleGuard roles={['inventory_manager', 'maintenance_lead', 'technician']}><MaintenanceDetailPage /></RoleGuard>} />
+                  <Route path="/maintenance/new" element={<RoleGuard roles={['equipment_manager', 'inventory_manager', 'maintenance_lead']}><MaintenanceNewPage /></RoleGuard>} />
+                  <Route path="/maintenance/:id" element={<RoleGuard roles={['equipment_manager', 'inventory_manager', 'maintenance_lead', 'technician']}><MaintenanceDetailPage /></RoleGuard>} />
                   <Route path="/parts/adjust" element={<RoleGuard roles={['parts_clerk']}><StockAdjustmentPage /></RoleGuard>} />
                   <Route path="/parts/:id" element={<RoleGuard roles={['maintenance_lead', 'parts_clerk']}><PartsDetailPage /></RoleGuard>} />
                   <Route path="/settings" element={<RoleGuard roles={[]}><SettingsPage /></RoleGuard>} />

@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   full_name TEXT NOT NULL,
   email TEXT NOT NULL DEFAULT '',
-  role TEXT NOT NULL CHECK (role IN ('admin', 'accounts_manager', 'billing_user', 'payroll_user', 'inventory_manager', 'maintenance_lead', 'technician', 'parts_clerk', 'viewer')),
+  role TEXT NOT NULL CHECK (role IN ('admin', 'equipment_manager', 'accounts_manager', 'billing_user', 'payroll_user', 'inventory_manager', 'maintenance_lead', 'technician', 'parts_clerk', 'viewer')),
   department TEXT CHECK (department IN ('camera', 'lights_grips') OR department IS NULL),
   is_active INTEGER NOT NULL DEFAULT 1,
   version INTEGER NOT NULL DEFAULT 1,
