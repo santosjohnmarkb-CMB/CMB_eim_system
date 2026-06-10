@@ -11,9 +11,17 @@ import { DEPARTMENT_CONFIG } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 
 const ROLES = [
-  'admin', 'accounts_manager', 'billing_user', 'payroll_user',
-  'inventory_manager', 'maintenance_lead', 'technician', 'parts_clerk', 'viewer',
+  'admin', 'equipment_manager', 'accounts_manager', 'billing_user', 'payroll_user',
+  'inventory_manager', 'maintenance_lead', 'technician', 'parts_clerk',
+  'camera_personnel', 'lighting_personnel', 'viewer',
 ] as const;
+
+const ROLE_LABELS: Record<string, string> = {
+  camera_personnel: 'Camera Dept. Personnel',
+  lighting_personnel: 'Lighting Dept. Personnel',
+};
+
+const roleLabel = (role: string) => ROLE_LABELS[role] || role.replace(/_/g, ' ');
 
 export function SettingsPage() {
   const syncStore = useSyncStore();
@@ -152,7 +160,7 @@ export function SettingsPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-surface-200">{u.full_name}</p>
-                  <p className="text-2xs text-surface-500">{u.username} &middot; {u.role.replace(/_/g, ' ')}</p>
+                  <p className="text-2xs text-surface-500">{u.username} &middot; {roleLabel(u.role)}</p>
                 </div>
                 <span className={`text-2xs px-2 py-0.5 rounded-full ${u.department ? 'bg-primary-600/15 text-primary-400' : 'bg-surface-700 text-surface-400'}`}>
                   {getDeptLabel(u.department)}
@@ -213,7 +221,7 @@ export function SettingsPage() {
             <div>
               <label className="block text-xs font-medium text-surface-400 mb-1">Role *</label>
               <select value={userForm.role} onChange={(e) => setField('role', e.target.value)} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100">
-                {ROLES.map((r) => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}
+                {ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
               </select>
             </div>
             <div>

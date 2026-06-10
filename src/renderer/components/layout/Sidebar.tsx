@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Wrench, Settings, LogOut, Package,
-  ChevronRight, ChevronDown, Camera, Lightbulb,
+  ChevronRight, ChevronDown, Camera, Lightbulb, FileText,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuthStore } from '../../stores/auth.store';
@@ -140,6 +140,13 @@ export function Sidebar() {
           />
 
           <NavButton
+            icon={<FileText size={20} />}
+            label="Forms"
+            active={location.pathname.startsWith('/forms')}
+            onClick={() => navigate('/forms')}
+          />
+
+          <NavButton
             icon={<Settings size={20} />}
             label="Settings"
             active={location.pathname === '/settings'}
@@ -187,6 +194,12 @@ export function Sidebar() {
           label="Maintenance"
           active={location.pathname.startsWith('/maintenance')}
           onClick={() => navigate('/maintenance')}
+        />
+        <NavButton
+          icon={<FileText size={20} />}
+          label="Forms"
+          active={location.pathname.startsWith('/forms')}
+          onClick={() => navigate('/forms')}
         />
       </nav>
 

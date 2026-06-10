@@ -241,3 +241,14 @@ CREATE POLICY "Allow all for ticket_actions" ON ticket_actions FOR ALL USING (tr
 ALTER TABLE users ADD COLUMN IF NOT EXISTS department TEXT;
 ALTER TABLE parts_catalog ADD COLUMN IF NOT EXISTS department TEXT;
 ALTER TABLE vendors ADD COLUMN IF NOT EXISTS department TEXT;
+
+-- ═══════════════════════════════════════════════════
+-- Migration: Department personnel roles
+-- ═══════════════════════════════════════════════════
+
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (
+  role IN ('admin', 'equipment_manager', 'accounts_manager', 'billing_user', 'payroll_user',
+           'inventory_manager', 'maintenance_lead', 'technician', 'parts_clerk',
+           'camera_personnel', 'lighting_personnel', 'viewer')
+);

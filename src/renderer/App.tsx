@@ -17,6 +17,7 @@ import { MaintenanceDetailPage } from './pages/MaintenanceDetailPage';
 import { PartsDetailPage } from './pages/PartsDetailPage';
 import { StockAdjustmentPage } from './pages/StockAdjustmentPage';
 import { EquipmentUseCountPage } from './pages/EquipmentUseCountPage';
+import { FormsPage } from './pages/FormsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ToastContainer } from './components/common/Toast';
 
@@ -78,6 +79,7 @@ export default function App() {
                   <Route path="/maintenance/:id" element={<RoleGuard roles={['equipment_manager', 'inventory_manager', 'maintenance_lead', 'technician']}><MaintenanceDetailPage /></RoleGuard>} />
                   <Route path="/parts/adjust" element={<RoleGuard roles={['parts_clerk']}><StockAdjustmentPage /></RoleGuard>} />
                   <Route path="/parts/:id" element={<RoleGuard roles={['maintenance_lead', 'parts_clerk']}><PartsDetailPage /></RoleGuard>} />
+                  <Route path="/forms" element={<FormsPage />} />
                   <Route path="/settings" element={<RoleGuard roles={[]}><SettingsPage /></RoleGuard>} />
                   <Route path="*" element={<DefaultRedirect />} />
                 </Routes>

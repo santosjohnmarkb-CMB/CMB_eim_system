@@ -72,7 +72,8 @@ export interface PackageItem {
 }
 
 export type EimUserRole = 'admin' | 'equipment_manager' | 'accounts_manager' | 'billing_user' | 'payroll_user'
-  | 'inventory_manager' | 'maintenance_lead' | 'technician' | 'parts_clerk' | 'viewer';
+  | 'inventory_manager' | 'maintenance_lead' | 'technician' | 'parts_clerk'
+  | 'camera_personnel' | 'lighting_personnel' | 'viewer';
 
 export interface User {
   id: string;

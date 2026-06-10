@@ -12,8 +12,9 @@ export const UserCreateSchema = z.object({
   password: z.string().min(8).max(200),
   full_name: z.string().min(1).max(100),
   email: z.string().email().max(200).optional().default(''),
-  role: z.enum(['admin', 'accounts_manager', 'billing_user', 'payroll_user',
-    'inventory_manager', 'maintenance_lead', 'technician', 'parts_clerk', 'viewer']),
+  role: z.enum(['admin', 'equipment_manager', 'accounts_manager', 'billing_user', 'payroll_user',
+    'inventory_manager', 'maintenance_lead', 'technician', 'parts_clerk',
+    'camera_personnel', 'lighting_personnel', 'viewer']),
   department: z.enum(['camera', 'lights_grips']).nullable().optional(),
 });
 
@@ -22,8 +23,9 @@ export const UserUpdateSchema = z.object({
   password: z.string().min(8).max(200).optional(),
   full_name: z.string().min(1).max(100).optional(),
   email: z.string().email().max(200).optional(),
-  role: z.enum(['admin', 'accounts_manager', 'billing_user', 'payroll_user',
-    'inventory_manager', 'maintenance_lead', 'technician', 'parts_clerk', 'viewer']).optional(),
+  role: z.enum(['admin', 'equipment_manager', 'accounts_manager', 'billing_user', 'payroll_user',
+    'inventory_manager', 'maintenance_lead', 'technician', 'parts_clerk',
+    'camera_personnel', 'lighting_personnel', 'viewer']).optional(),
   department: z.enum(['camera', 'lights_grips']).nullable().optional(),
   is_active: z.boolean().optional(),
 });
