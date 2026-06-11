@@ -16,9 +16,14 @@ import { useMaintenanceStore } from '../stores/maintenance.store';
 import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
-import { REPAIR_STATUS_CONFIG } from '../lib/constants';
+import { REPAIR_STATUS_CONFIG, COMPLETION_OUTCOME_CONFIG, DOCUMENT_TYPE_CONFIG } from '../lib/constants';
 import { useToast } from '../hooks';
-import type { MaintenanceTicket, MaintenanceNote, TicketAction } from '../../shared/types';
+import type { MaintenanceTicket, MaintenanceNote, TicketAction, CompletionOutcome } from '../../shared/types';
+
+const OUTCOME_OPTIONS: Record<'repair' | 'loss', CompletionOutcome[]> = {
+  repair: ['repaired', 'unrepairable', 'total_loss'],
+  loss: ['found', 'not_found'],
+};
 
 const PIPELINE = ['REPORTED', 'ASSESSED', 'IN_PROGRESS', 'COMPLETED'] as const;
 
@@ -192,6 +197,7 @@ export function MaintenanceDetailPage() {
   const [notesOpen, setNotesOpen] = useState(false);
   const [editingCell, setEditingCell] = useState<{ rowIdx: number; col: string } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showOutcomeModal, setShowOutcomeModal] = useState(false);
   const cellRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
 
   const load = useCallback(async () => {
@@ -213,14 +219,30 @@ export function MaintenanceDetailPage() {
   const currentIdx = PIPELINE.indexOf(ticket.repair_status as (typeof PIPELINE)[number]);
   const canAdvance = currentIdx >= 0 && currentIdx < PIPELINE.length - 1;
   const nextStatus = canAdvance ? PIPELINE[currentIdx + 1] : null;
-  const docTypeLabel = ticket.document_type === 'maintenance' ? 'Maintenance Report'
-    : ticket.document_type === 'update' ? 'Update Report' : 'Repair Report';
+  const isLoss = ticket.document_type === 'loss';
+  const docTypeLabel = DOCUMENT_TYPE_CONFIG[ticket.document_type]?.reportTitle ?? 'Repair Report';
+  const outcomeChoices = OUTCOME_OPTIONS[isLoss ? 'loss' : 'repair'];
+  const outcomeCfg = ticket.completion_outcome ? COMPLETION_OUTCOME_CONFIG[ticket.completion_outcome] : null;
 
   const handleAdvance = async () => {
     if (!nextStatus) return;
+    // Completing a ticket requires an explicit outcome.
+    if (nextStatus === 'COMPLETED') {
+      setShowOutcomeModal(true);
+      return;
+    }
     try {
       await updateStatus(ticket.id, nextStatus);
       toast.success(`Status → ${REPAIR_STATUS_CONFIG[nextStatus]?.label}`);
+      load();
+    } catch (err: any) { toast.error(err.message); }
+  };
+
+  const handleComplete = async (outcome: CompletionOutcome) => {
+    try {
+      await updateStatus(ticket.id, 'COMPLETED', outcome);
+      setShowOutcomeModal(false);
+      toast.success(`Completed — ${COMPLETION_OUTCOME_CONFIG[outcome].label}`);
       load();
     } catch (err: any) { toast.error(err.message); }
   };
@@ -406,6 +428,16 @@ export function MaintenanceDetailPage() {
                 {ticket.ticket_number}
               </h1>
             </div>
+            {ticket.repair_status === 'COMPLETED' && outcomeCfg && (
+              <div className="text-right">
+                <p className="text-[10px] uppercase tracking-[0.15em] text-amber-700/70 font-bold mb-1">Outcome</p>
+                <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${
+                  outcomeCfg.writeOff ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                }`}>
+                  {outcomeCfg.label}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Status pipeline */}
@@ -670,6 +702,46 @@ export function MaintenanceDetailPage() {
           </div>
         )}
       </div>
+
+      {/* ── Completion Outcome Modal ── */}
+      {showOutcomeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm print:hidden">
+          <div className="bg-surface-900 border border-surface-700 rounded-xl shadow-2xl w-full max-w-md mx-4 p-6">
+            <h3 className="text-lg font-semibold text-surface-100 mb-1">
+              {isLoss ? 'Resolve Loss Ticket' : 'Complete Ticket'}
+            </h3>
+            <p className="text-sm text-surface-400 mb-5">
+              {isLoss
+                ? 'Select the result of the search effort for this equipment.'
+                : 'Select the result of this repair. This determines whether the equipment returns to inventory.'}
+            </p>
+            <div className="space-y-2.5">
+              {outcomeChoices.map((outcome) => {
+                const cfg = COMPLETION_OUTCOME_CONFIG[outcome];
+                return (
+                  <button
+                    key={outcome}
+                    onClick={() => handleComplete(outcome)}
+                    className={`w-full text-left px-4 py-3 rounded-lg border transition-colors ${
+                      cfg.writeOff
+                        ? 'border-danger-500/30 hover:bg-danger-500/10'
+                        : 'border-success-500/30 hover:bg-success-500/10'
+                    }`}
+                  >
+                    <span className={`block text-sm font-semibold ${cfg.color}`}>{cfg.label}</span>
+                    <span className="block text-xs text-surface-500 mt-0.5">{cfg.description}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex justify-end mt-5">
+              <Button variant="ghost" size="sm" onClick={() => setShowOutcomeModal(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Delete Confirmation Modal ── */}
       {showDeleteConfirm && (

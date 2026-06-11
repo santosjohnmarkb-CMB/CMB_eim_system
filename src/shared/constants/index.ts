@@ -73,6 +73,34 @@ export const REPAIR_STATUS_CONFIG: Record<RepairStatusType, { label: string; col
   CANCELLED:   { label: 'Cancelled',   color: 'text-surface-400',  order: 4 },
 };
 
+export const COMPLETION_OUTCOME = {
+  REPAIRED: 'repaired',
+  UNREPAIRABLE: 'unrepairable',
+  TOTAL_LOSS: 'total_loss',
+  FOUND: 'found',
+  NOT_FOUND: 'not_found',
+} as const;
+
+export type CompletionOutcomeType = typeof COMPLETION_OUTCOME[keyof typeof COMPLETION_OUTCOME];
+
+// `writeOff` outcomes permanently remove one unit from inventory (quantity -1).
+export const COMPLETION_OUTCOME_CONFIG: Record<CompletionOutcomeType, {
+  label: string; description: string; color: string; bgColor: string; writeOff: boolean; appliesTo: 'repair' | 'loss';
+}> = {
+  repaired:     { label: 'Repaired',     description: 'Fully repaired and returned to available inventory', color: 'text-success-400', bgColor: 'bg-success-500/15', writeOff: false, appliesTo: 'repair' },
+  unrepairable: { label: 'Unrepairable', description: 'Cannot be repaired — written off from inventory',      color: 'text-danger-400',  bgColor: 'bg-danger-500/15',  writeOff: true,  appliesTo: 'repair' },
+  total_loss:   { label: 'Total Loss',   description: 'Damaged beyond use — written off from inventory',      color: 'text-danger-400',  bgColor: 'bg-danger-500/15',  writeOff: true,  appliesTo: 'repair' },
+  found:        { label: 'Found',        description: 'Located and returned to available inventory',          color: 'text-success-400', bgColor: 'bg-success-500/15', writeOff: false, appliesTo: 'loss' },
+  not_found:    { label: 'Not Found',    description: 'Could not be located — written off as missing',        color: 'text-danger-400',  bgColor: 'bg-danger-500/15',  writeOff: true,  appliesTo: 'loss' },
+};
+
+export const DOCUMENT_TYPE_CONFIG: Record<string, { label: string; reportTitle: string }> = {
+  maintenance: { label: 'Maintenance', reportTitle: 'Maintenance Report' },
+  repair:      { label: 'Repair',      reportTitle: 'Repair Report' },
+  update:      { label: 'Update',      reportTitle: 'Update Report' },
+  loss:        { label: 'Equipment Loss', reportTitle: 'Equipment Loss Report' },
+};
+
 export const SEVERITY_CONFIG: Record<string, { label: string; color: string; priority: number }> = {
   CRITICAL: { label: 'Critical', color: 'text-danger-400',  priority: 0 },
   HIGH:     { label: 'High',     color: 'text-warning-400', priority: 1 },

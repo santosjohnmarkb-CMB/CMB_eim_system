@@ -252,3 +252,9 @@ ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (
            'inventory_manager', 'maintenance_lead', 'technician', 'parts_clerk',
            'camera_personnel', 'lighting_personnel', 'viewer')
 );
+
+-- ═══════════════════════════════════════════════════
+-- Migration: Ticket completion outcomes + Equipment Loss tickets
+-- ═══════════════════════════════════════════════════
+
+ALTER TABLE maintenance_tickets ADD COLUMN IF NOT EXISTS completion_outcome TEXT;

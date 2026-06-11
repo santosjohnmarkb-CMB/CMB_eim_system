@@ -155,12 +155,13 @@ CREATE TABLE IF NOT EXISTS maintenance_tickets (
   parts_consumed TEXT NOT NULL DEFAULT '[]',
   priority_order INTEGER NOT NULL DEFAULT 0,
   completion_date TEXT,
+  completion_outcome TEXT CHECK (completion_outcome IN ('repaired', 'unrepairable', 'total_loss', 'found', 'not_found') OR completion_outcome IS NULL),
   post_repair_grade TEXT CHECK (post_repair_grade IN ('A', 'B', 'C', 'D') OR post_repair_grade IS NULL),
   project_name TEXT,
   production_name TEXT,
   project_date TEXT,
   verified_by TEXT,
-  document_type TEXT NOT NULL DEFAULT 'repair' CHECK (document_type IN ('maintenance', 'repair', 'update')),
+  document_type TEXT NOT NULL DEFAULT 'repair' CHECK (document_type IN ('maintenance', 'repair', 'update', 'loss')),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

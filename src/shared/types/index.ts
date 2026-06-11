@@ -139,6 +139,8 @@ export type RepairStatus = 'REPORTED' | 'ASSESSED' | 'IN_PROGRESS'
 
 export type Severity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 export type MaintenanceType = 'routine_maintenance' | 'update' | 'repair' | 'corrective' | 'preventive' | 'predictive';
+export type DocumentType = 'maintenance' | 'repair' | 'update' | 'loss';
+export type CompletionOutcome = 'repaired' | 'unrepairable' | 'total_loss' | 'found' | 'not_found';
 
 export interface MaintenanceTicket {
   id: string;
@@ -159,12 +161,13 @@ export interface MaintenanceTicket {
   parts_consumed: string;
   priority_order: number;
   completion_date: string | null;
+  completion_outcome: CompletionOutcome | null;
   post_repair_grade: string | null;
   project_name: string | null;
   production_name: string | null;
   project_date: string | null;
   verified_by: string | null;
-  document_type: 'maintenance' | 'repair' | 'update';
+  document_type: DocumentType;
   created_at: string;
   updated_at: string;
   equipment_name?: string;
@@ -347,7 +350,8 @@ export interface CompletedHistoryEntry {
   severity: Severity;
   repair_status: RepairStatus;
   maintenance_type: MaintenanceType;
-  document_type: 'maintenance' | 'repair' | 'update';
+  document_type: DocumentType;
+  completion_outcome?: CompletionOutcome | null;
   equipment_name: string;
   equipment_code: string;
   category_name: string;

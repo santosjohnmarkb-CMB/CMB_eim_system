@@ -4,6 +4,7 @@ import { getDatabase } from '../database/index';
 import { requireSession } from './session';
 import { MaintenanceTicketCreateSchema, MaintenanceTicketUpdateSchema, MaintenanceNoteSchema, TicketActionSchema, TicketActionUpdateSchema } from '../../shared/schemas';
 import { pushOperationalToCloud } from '../sync/operational-sync';
+import { pushCatalogToCloud } from '../sync/catalog-sync';
 
 const DEPT_PREFIX: Record<string, string> = {
   'Camera': 'CD',
@@ -104,15 +105,24 @@ export function registerMaintenanceHandlers(): void {
         .run(input.equipment_id);
 
       if (asset) {
+        // Capture the prior status before mutating it (log first, then update).
+        const prev: any = db.prepare('SELECT current_status FROM equipment_assets WHERE id = ?').get(asset.id);
         db.prepare("UPDATE equipment_assets SET current_status = 'FOR_INSPECTION', updated_at = datetime('now') WHERE equipment_id = ?").run(input.equipment_id);
-        db.prepare(`INSERT INTO asset_status_log (id, asset_id, equipment_id, previous_status, new_status, changed_by, reason, related_ticket_id) VALUES (?, ?, ?, (SELECT current_status FROM equipment_assets WHERE equipment_id = ?), 'FOR_INSPECTION', ?, 'Maintenance ticket created', ?)`)
-          .run(uuidv4(), asset.id, input.equipment_id, input.equipment_id, user.full_name, id);
+        db.prepare(`INSERT INTO asset_status_log (id, asset_id, equipment_id, previous_status, new_status, changed_by, reason, related_ticket_id) VALUES (?, ?, ?, ?, 'FOR_INSPECTION', ?, ?, ?)`)
+          .run(uuidv4(), asset.id, input.equipment_id, prev?.current_status || '', user.full_name, docType === 'loss' ? 'Loss ticket created' : 'Maintenance ticket created', id);
       }
     });
     tx();
 
     const ticket: any = db.prepare('SELECT * FROM maintenance_tickets WHERE id = ?').get(id);
     void pushOperationalToCloud('maintenance_tickets', 'INSERT', ticket);
+    // Propagate availability change to the shared catalog (and asset) for the rental system.
+    const eqItem: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(input.equipment_id);
+    if (eqItem) void pushCatalogToCloud('equipment_items', 'UPDATE', eqItem);
+    if (asset) {
+      const a: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(asset.id);
+      if (a) void pushOperationalToCloud('equipment_assets', 'UPDATE', a);
+    }
     return ticket;
   });
 
@@ -133,40 +143,97 @@ export function registerMaintenanceHandlers(): void {
     return ticket;
   });
 
-  ipcMain.handle('db:maintenance:updateStatus', (event: any, id: string, newStatus: string) => {
+  ipcMain.handle('db:maintenance:updateStatus', (event: any, id: string, newStatus: string, outcome?: string | null) => {
     const user = requireSession(event);
     const ticket: any = db.prepare('SELECT * FROM maintenance_tickets WHERE id = ?').get(id);
     if (!ticket) throw new Error('Ticket not found');
 
+    const isLoss = ticket.document_type === 'loss';
+
+    // Resolve the completion outcome (only relevant when completing a ticket).
+    // Defaults: repair tickets -> 'repaired', loss tickets -> 'found'.
+    let finalOutcome: string | null = null;
+    if (newStatus === 'COMPLETED') {
+      finalOutcome = outcome || (isLoss ? 'found' : 'repaired');
+    }
+    // Write-off outcomes permanently remove one unit from total inventory.
+    const writeOff = finalOutcome === 'unrepairable' || finalOutcome === 'total_loss' || finalOutcome === 'not_found';
+
     const tx = db.transaction(() => {
       const updates: string[] = [`repair_status = ?`, "updated_at = datetime('now')"];
       const vals: any[] = [newStatus];
-      if (newStatus === 'COMPLETED') { updates.push('completion_date = ?'); vals.push(new Date().toISOString()); }
+      if (newStatus === 'COMPLETED') {
+        updates.push('completion_date = ?', 'completion_outcome = ?');
+        vals.push(new Date().toISOString(), finalOutcome);
+      }
       vals.push(id);
       db.prepare(`UPDATE maintenance_tickets SET ${updates.join(', ')} WHERE id = ?`).run(...vals);
 
+      const noteSuffix = finalOutcome ? ` (outcome: ${finalOutcome})` : '';
       db.prepare(`INSERT INTO maintenance_notes (id, ticket_id, author, note_text, note_type) VALUES (?, ?, ?, ?, 'status_change')`)
-        .run(uuidv4(), id, user.full_name, `Status changed from ${ticket.repair_status} to ${newStatus}`);
+        .run(uuidv4(), id, user.full_name, `Status changed from ${ticket.repair_status} to ${newStatus}${noteSuffix}`);
 
-      // Auto-increment available_qty when ticket is completed or cancelled
-      if (newStatus === 'COMPLETED' || newStatus === 'CANCELLED') {
+      // Inventory adjustments
+      if (newStatus === 'COMPLETED') {
+        if (writeOff) {
+          // Unit is gone: drop total quantity by 1 and clamp availability to the new total.
+          // (available_qty was already decremented at ticket creation.)
+          db.prepare("UPDATE equipment_items SET quantity = MAX(quantity - 1, 0), available_qty = MIN(available_qty, MAX(quantity - 1, 0)), updated_at = datetime('now') WHERE id = ?")
+            .run(ticket.equipment_id);
+        } else {
+          // Returned to service: restore availability.
+          db.prepare("UPDATE equipment_items SET available_qty = MIN(available_qty + 1, quantity), updated_at = datetime('now') WHERE id = ?")
+            .run(ticket.equipment_id);
+        }
+      } else if (newStatus === 'CANCELLED') {
         db.prepare("UPDATE equipment_items SET available_qty = MIN(available_qty + 1, quantity), updated_at = datetime('now') WHERE id = ?")
           .run(ticket.equipment_id);
       }
 
-      if (newStatus === 'COMPLETED' && ticket.asset_id) {
-        db.prepare("UPDATE equipment_assets SET current_status = 'AVAILABLE', updated_at = datetime('now') WHERE id = ?")
-          .run(ticket.asset_id);
-        db.prepare(`INSERT INTO asset_status_log (id, asset_id, equipment_id, previous_status, new_status, changed_by, reason, related_ticket_id) VALUES (?, ?, ?, 'IN_REPAIR', 'AVAILABLE', ?, 'Repair completed', ?)`)
-          .run(uuidv4(), ticket.asset_id, ticket.equipment_id, user.full_name, id);
-      } else if (newStatus === 'IN_PROGRESS' && ticket.asset_id) {
-        db.prepare("UPDATE equipment_assets SET current_status = 'IN_REPAIR', updated_at = datetime('now') WHERE id = ?").run(ticket.asset_id);
+      // Asset status transitions
+      if (ticket.asset_id) {
+        let assetStatus: string | null = null;
+        let reason = '';
+        if (newStatus === 'COMPLETED') {
+          switch (finalOutcome) {
+            case 'unrepairable': assetStatus = 'RETIRED'; reason = 'Repair completed — unrepairable'; break;
+            case 'total_loss':   assetStatus = 'RETIRED'; reason = 'Repair completed — total loss'; break;
+            case 'not_found':    assetStatus = 'MISSING'; reason = 'Search completed — not found'; break;
+            case 'found':        assetStatus = 'AVAILABLE'; reason = 'Search completed — found'; break;
+            default:             assetStatus = 'AVAILABLE'; reason = 'Repair completed'; break;
+          }
+        } else if (newStatus === 'IN_PROGRESS') {
+          assetStatus = 'IN_REPAIR';
+          reason = isLoss ? 'Search in progress' : 'Repair in progress';
+        }
+
+        if (assetStatus) {
+          const prev: any = db.prepare('SELECT current_status FROM equipment_assets WHERE id = ?').get(ticket.asset_id);
+          if (assetStatus === 'RETIRED') {
+            db.prepare("UPDATE equipment_assets SET current_status = 'RETIRED', retirement_date = ?, retirement_reason = ?, updated_at = datetime('now') WHERE id = ?")
+              .run(new Date().toISOString(), reason, ticket.asset_id);
+          } else {
+            db.prepare("UPDATE equipment_assets SET current_status = ?, updated_at = datetime('now') WHERE id = ?")
+              .run(assetStatus, ticket.asset_id);
+          }
+          db.prepare(`INSERT INTO asset_status_log (id, asset_id, equipment_id, previous_status, new_status, changed_by, reason, related_ticket_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+            .run(uuidv4(), ticket.asset_id, ticket.equipment_id, prev?.current_status || '', assetStatus, user.full_name, reason, id);
+        }
       }
     });
     tx();
 
     const updated: any = db.prepare('SELECT * FROM maintenance_tickets WHERE id = ?').get(id);
     void pushOperationalToCloud('maintenance_tickets', 'UPDATE', updated);
+    // Propagate inventory/asset changes to the shared catalog so the rental system sees them.
+    if (newStatus === 'COMPLETED' || newStatus === 'CANCELLED') {
+      const eq: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(ticket.equipment_id);
+      if (eq) void pushCatalogToCloud('equipment_items', 'UPDATE', eq);
+    }
+    if (ticket.asset_id && (newStatus === 'COMPLETED' || newStatus === 'IN_PROGRESS')) {
+      const asset: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(ticket.asset_id);
+      if (asset) void pushOperationalToCloud('equipment_assets', 'UPDATE', asset);
+    }
     return { success: true };
   });
 
@@ -176,24 +243,35 @@ export function registerMaintenanceHandlers(): void {
     const ticket: any = db.prepare('SELECT * FROM maintenance_tickets WHERE id = ?').get(id);
     if (!ticket) throw new Error('Ticket not found');
 
+    const wasOpen = ticket.repair_status !== 'COMPLETED' && ticket.repair_status !== 'CANCELLED';
+
     const tx = db.transaction(() => {
       db.prepare('DELETE FROM maintenance_notes WHERE ticket_id = ?').run(id);
       db.prepare('DELETE FROM ticket_actions WHERE ticket_id = ?').run(id);
       db.prepare('DELETE FROM maintenance_tickets WHERE id = ?').run(id);
 
-      if (ticket.repair_status !== 'COMPLETED' && ticket.repair_status !== 'CANCELLED') {
+      // Only an open ticket holds the unit out of service — restore it on delete.
+      // A completed ticket already settled inventory (incl. write-offs); leave it alone.
+      if (wasOpen) {
         db.prepare("UPDATE equipment_items SET available_qty = MIN(available_qty + 1, quantity), updated_at = datetime('now') WHERE id = ?")
           .run(ticket.equipment_id);
-      }
-
-      if (ticket.asset_id) {
-        db.prepare("UPDATE equipment_assets SET current_status = 'AVAILABLE', updated_at = datetime('now') WHERE id = ?")
-          .run(ticket.asset_id);
+        if (ticket.asset_id) {
+          db.prepare("UPDATE equipment_assets SET current_status = 'AVAILABLE', updated_at = datetime('now') WHERE id = ?")
+            .run(ticket.asset_id);
+        }
       }
     });
     tx();
 
     void pushOperationalToCloud('maintenance_tickets', 'DELETE', { id });
+    if (wasOpen) {
+      const eq: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(ticket.equipment_id);
+      if (eq) void pushCatalogToCloud('equipment_items', 'UPDATE', eq);
+      if (ticket.asset_id) {
+        const a: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(ticket.asset_id);
+        if (a) void pushOperationalToCloud('equipment_assets', 'UPDATE', a);
+      }
+    }
     return { success: true };
   });
 
@@ -277,7 +355,7 @@ export function registerMaintenanceHandlers(): void {
   ipcMain.handle('db:maintenance:getCompletedHistory', () => {
     return db.prepare(`
       SELECT mt.id, mt.ticket_number, mt.equipment_id, mt.reported_date, mt.completion_date,
-        mt.issue_description, mt.severity, mt.maintenance_type, mt.document_type,
+        mt.issue_description, mt.severity, mt.maintenance_type, mt.document_type, mt.completion_outcome,
         e.name as equipment_name, e.equipment_code,
         c.name as category_name,
         (SELECT ta.remarks FROM ticket_actions ta WHERE ta.ticket_id = mt.id ORDER BY ta.action_date DESC, ta.created_at DESC LIMIT 1) as last_remarks
@@ -292,7 +370,7 @@ export function registerMaintenanceHandlers(): void {
   ipcMain.handle('db:maintenance:getEquipmentHistory', (_e: any, equipmentId: string) => {
     return db.prepare(`
       SELECT mt.id, mt.ticket_number, mt.equipment_id, mt.reported_date, mt.completion_date,
-        mt.issue_description, mt.severity, mt.repair_status, mt.maintenance_type, mt.document_type,
+        mt.issue_description, mt.severity, mt.repair_status, mt.maintenance_type, mt.document_type, mt.completion_outcome,
         e.name as equipment_name, e.equipment_code,
         c.name as category_name,
         (SELECT ta.remarks FROM ticket_actions ta WHERE ta.ticket_id = mt.id ORDER BY ta.action_date DESC, ta.created_at DESC LIMIT 1) as last_remarks

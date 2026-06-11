@@ -5,7 +5,7 @@ import { useEquipmentStore } from '../stores/equipment.store';
 import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
 import { useToast, useDepartmentFilter } from '../hooks';
-import { Search, X, Plus, Trash2, FileText, Wrench, RefreshCw } from 'lucide-react';
+import { Search, X, Plus, Trash2, FileText, Wrench, RefreshCw, SearchX } from 'lucide-react';
 import type { EquipmentWithAsset } from '../../shared/types';
 
 interface ActionRow {
@@ -34,7 +34,7 @@ export function MaintenanceNewPage() {
   const navigate = useNavigate();
   const toast = useToast();
 
-  const [documentType, setDocumentType] = useState<'maintenance' | 'repair' | 'update'>('repair');
+  const [documentType, setDocumentType] = useState<'maintenance' | 'repair' | 'update' | 'loss'>('repair');
   const [projectName, setProjectName] = useState('');
   const [productionName, setProductionName] = useState('');
   const [projectDate, setProjectDate] = useState('');
@@ -143,7 +143,7 @@ export function MaintenanceNewPage() {
         }
       }
 
-      toast.success('Incident report created');
+      toast.success(documentType === 'loss' ? 'Equipment loss report created' : 'Incident report created');
       navigate('/maintenance');
     } catch (err: any) {
       toast.error(err.message || 'Failed to create report');
@@ -202,6 +202,18 @@ export function MaintenanceNewPage() {
                 >
                   <RefreshCw size={14} />
                   Update
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDocumentType('loss')}
+                  className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold transition-colors ${
+                    documentType === 'loss'
+                      ? 'bg-amber-600 text-white'
+                      : 'bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  <SearchX size={14} />
+                  Equipment Loss
                 </button>
               </div>
             </div>
@@ -370,14 +382,16 @@ export function MaintenanceNewPage() {
           {/* Issue Description Section */}
           <div className="px-8 py-5 border-b border-gray-200">
             <h2 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">
-              Issue / Description *
+              {documentType === 'loss' ? 'Loss Circumstances *' : 'Issue / Description *'}
             </h2>
             <textarea
               value={issueDescription}
               onChange={(e) => setIssueDescription(e.target.value)}
               rows={5}
               className={`${inputClass} resize-y`}
-              placeholder="Describe the issue or maintenance requirement in detail..."
+              placeholder={documentType === 'loss'
+                ? 'Describe how and when the equipment went missing, last known location, and any details relevant to locating it...'
+                : 'Describe the issue or maintenance requirement in detail...'}
             />
           </div>
 

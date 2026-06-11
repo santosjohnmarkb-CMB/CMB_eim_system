@@ -4,7 +4,7 @@ import { Wrench, Camera, Lightbulb, ClipboardList, AlertTriangle, History, X, Pl
 import { useMaintenanceStore } from '../stores/maintenance.store';
 import { useAuthStore } from '../stores/auth.store';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
-import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG } from '../lib/constants';
+import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG, COMPLETION_OUTCOME_CONFIG } from '../lib/constants';
 import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import type { MaintenanceTicket, RepairStatus, CompletedHistoryEntry } from '../../shared/types';
@@ -252,8 +252,13 @@ export function MaintenanceQueuePage() {
                               {ticket.ticket_number}
                             </td>
                             <td className="px-3 py-3">
-                              <p className="text-surface-200 font-medium truncate max-w-[220px]">
+                              <p className="text-surface-200 font-medium truncate max-w-[220px] flex items-center gap-1.5">
                                 {ticket.equipment_name}
+                                {ticket.document_type === 'loss' && (
+                                  <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-danger-500/15 text-danger-400">
+                                    Loss
+                                  </span>
+                                )}
                               </p>
                               <p className="text-2xs text-surface-500">{ticket.equipment_code}</p>
                             </td>
@@ -406,8 +411,13 @@ export function MaintenanceQueuePage() {
                           <td className={`px-3 py-3 font-mono text-xs whitespace-nowrap ${isLatest ? 'text-emerald-400 font-semibold' : 'text-surface-400'}`}>
                             {entry.ticket_number}
                           </td>
-                          <td className={`px-3 py-3 text-xs whitespace-nowrap capitalize ${isLatest ? 'text-surface-100 font-medium' : 'text-surface-400'}`}>
-                            {entry.document_type}
+                          <td className={`px-3 py-3 text-xs whitespace-nowrap ${isLatest ? 'text-surface-100 font-medium' : 'text-surface-400'}`}>
+                            <span className="capitalize">{entry.document_type === 'loss' ? 'Equipment Loss' : entry.document_type}</span>
+                            {entry.completion_outcome && COMPLETION_OUTCOME_CONFIG[entry.completion_outcome] && (
+                              <span className={`ml-2 inline-block px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide ${COMPLETION_OUTCOME_CONFIG[entry.completion_outcome].bgColor} ${COMPLETION_OUTCOME_CONFIG[entry.completion_outcome].color}`}>
+                                {COMPLETION_OUTCOME_CONFIG[entry.completion_outcome].label}
+                              </span>
+                            )}
                           </td>
                           <td className={`px-3 py-3 text-xs whitespace-nowrap ${isLatest ? 'text-surface-100 font-medium' : 'text-surface-400'}`}>
                             {entry.completion_date

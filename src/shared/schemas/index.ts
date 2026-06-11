@@ -64,7 +64,7 @@ export const MaintenanceTicketCreateSchema = z.object({
   production_name: z.string().max(200).nullable().optional(),
   project_date: z.string().nullable().optional(),
   verified_by: z.string().max(100).nullable().optional(),
-  document_type: z.enum(['maintenance', 'repair', 'update']).default('repair'),
+  document_type: z.enum(['maintenance', 'repair', 'update', 'loss']).default('repair'),
 });
 
 export const MaintenanceTicketUpdateSchema = z.object({
@@ -80,7 +80,12 @@ export const MaintenanceTicketUpdateSchema = z.object({
   production_name: z.string().max(200).nullable().optional(),
   project_date: z.string().nullable().optional(),
   verified_by: z.string().max(100).nullable().optional(),
-  document_type: z.enum(['maintenance', 'repair']).optional(),
+  document_type: z.enum(['maintenance', 'repair', 'update', 'loss']).optional(),
+});
+
+export const TicketStatusUpdateSchema = z.object({
+  status: z.enum(['REPORTED', 'ASSESSED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED']),
+  outcome: z.enum(['repaired', 'unrepairable', 'total_loss', 'found', 'not_found']).nullable().optional(),
 });
 
 export const TicketActionSchema = z.object({
