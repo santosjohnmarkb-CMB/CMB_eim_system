@@ -4,11 +4,16 @@ import { getDatabase } from '../database/index';
 import { requireSession } from './session';
 import { VendorCreateSchema, VendorUpdateSchema } from '../../shared/schemas';
 import { pushOperationalToCloud } from '../sync/operational-sync';
+import { sessionDepartment } from './department';
 
 export function registerVendorHandlers(): void {
   const db = getDatabase();
 
-  ipcMain.handle('db:vendors:getAll', () => {
+  ipcMain.handle('db:vendors:getAll', (event: any) => {
+    const dept = sessionDepartment(event);
+    if (dept) {
+      return db.prepare('SELECT * FROM vendors WHERE is_active = 1 AND (department = ? OR department IS NULL) ORDER BY name').all(dept);
+    }
     return db.prepare('SELECT * FROM vendors WHERE is_active = 1 ORDER BY name').all();
   });
 

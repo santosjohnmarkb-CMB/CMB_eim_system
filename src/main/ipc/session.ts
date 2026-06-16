@@ -6,6 +6,7 @@ export interface SessionUser {
   full_name: string;
   role: string;
   email?: string;
+  department?: 'camera' | 'lights_grips' | null;
 }
 
 const sessions = new Map<number, SessionUser>();

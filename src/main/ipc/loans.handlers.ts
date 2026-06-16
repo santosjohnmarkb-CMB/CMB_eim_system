@@ -6,6 +6,7 @@ import { LoanCreateSchema, LoanReturnSchema } from '../../shared/schemas';
 import { LOAN_DEPT_PREFIX } from '../../shared/constants';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { pushOperationalToCloud } from '../sync/operational-sync';
+import { sessionDepartment, assertEquipmentInDepartment } from './department';
 
 function generateLoanNumber(db: any, department: 'camera' | 'lights_grips'): string {
   const deptCode = LOAN_DEPT_PREFIX[department] || 'CD';
@@ -70,21 +71,35 @@ function pushItemAvailabilityToCloud(db: any, equipmentId: string, assetId: stri
 export function registerLoanHandlers(): void {
   const db = getDatabase();
 
-  ipcMain.handle('db:loans:getAll', () => {
+  // Loads a loan and rejects access if it belongs to another department.
+  const getLoanInDept = (event: any, loanId: string): any => {
+    const loan: any = db.prepare('SELECT * FROM equipment_loans WHERE id = ?').get(loanId);
+    if (!loan) throw new Error('Loan not found');
+    const dept = sessionDepartment(event);
+    if (dept && loan.department !== dept) throw new Error('This loan belongs to another department.');
+    return loan;
+  };
+
+  ipcMain.handle('db:loans:getAll', (event: any) => {
+    const dept = sessionDepartment(event);
+    const where = dept ? 'WHERE l.department = ?' : '';
     return db.prepare(`
       SELECT l.*,
         (SELECT COUNT(*) FROM equipment_loan_items li WHERE li.loan_id = l.id) as item_count,
         (SELECT COUNT(*) FROM equipment_loan_items li WHERE li.loan_id = l.id AND li.status = 'OUT') as out_count
       FROM equipment_loans l
+      ${where}
       ORDER BY
         CASE l.status WHEN 'ACTIVE' THEN 0 WHEN 'PARTIAL' THEN 1 ELSE 2 END,
         l.loaned_date DESC, l.created_at DESC
-    `).all();
+    `).all(...(dept ? [dept] : []));
   });
 
-  ipcMain.handle('db:loans:getById', (_e: any, id: string) => {
+  ipcMain.handle('db:loans:getById', (event: any, id: string) => {
     const loan: any = db.prepare('SELECT * FROM equipment_loans WHERE id = ?').get(id);
     if (!loan) return null;
+    const dept = sessionDepartment(event);
+    if (dept && loan.department !== dept) return null;
     const items: any[] = db.prepare(`
       SELECT li.*, e.name as equipment_name, e.equipment_code, c.name as category_name
       FROM equipment_loan_items li
@@ -99,6 +114,11 @@ export function registerLoanHandlers(): void {
   ipcMain.handle('db:loans:create', (event: any, data: unknown) => {
     const user = requireSession(event);
     const input = LoanCreateSchema.parse(data);
+    const sessDept = sessionDepartment(event);
+    if (sessDept && input.department !== sessDept) {
+      throw new Error('You can only create loans for your own department.');
+    }
+    for (const item of input.items) assertEquipmentInDepartment(db, event, item.equipment_id);
     const id = uuidv4();
     const loanNumber = generateLoanNumber(db, input.department);
     const now = new Date().toISOString();
@@ -141,6 +161,7 @@ export function registerLoanHandlers(): void {
 
   ipcMain.handle('db:loans:returnItems', (event: any, loanId: string, data: unknown) => {
     const user = requireSession(event);
+    getLoanInDept(event, loanId);
     const input = LoanReturnSchema.parse(data);
 
     const affected: { equipment_id: string; asset_id: string | null }[] = [];
@@ -161,6 +182,7 @@ export function registerLoanHandlers(): void {
 
   ipcMain.handle('db:loans:returnOrder', (event: any, loanId: string) => {
     const user = requireSession(event);
+    getLoanInDept(event, loanId);
 
     const affected: { equipment_id: string; asset_id: string | null }[] = [];
     const tx = db.transaction(() => {
@@ -180,6 +202,7 @@ export function registerLoanHandlers(): void {
   ipcMain.handle('db:loans:delete', (event: any, id: string) => {
     const user = requireSession(event);
     if (user.role !== 'admin') throw new Error('Only admins can delete loans');
+    getLoanInDept(event, id);
 
     const affected: { equipment_id: string; asset_id: string | null }[] = [];
     const tx = db.transaction(() => {

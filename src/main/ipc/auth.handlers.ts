@@ -30,6 +30,7 @@ export function registerAuthHandlers(): void {
       full_name: safeUser.full_name,
       role: safeUser.role,
       email: safeUser.email,
+      department: safeUser.department ?? null,
     });
     return safeUser;
   });
@@ -48,6 +49,7 @@ export function registerAuthHandlers(): void {
         full_name: safeUser.full_name,
         role: safeUser.role,
         email: safeUser.email,
+        department: safeUser.department ?? null,
       });
     }
     return safeUser;

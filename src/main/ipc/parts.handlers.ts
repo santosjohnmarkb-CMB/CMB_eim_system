@@ -4,6 +4,7 @@ import { getDatabase } from '../database/index';
 import { requireSession } from './session';
 import { PartCreateSchema, PartUpdateSchema, StockAdjustmentSchema } from '../../shared/schemas';
 import { pushOperationalToCloud } from '../sync/operational-sync';
+import { sessionDepartment } from './department';
 
 function generatePartCode(db: any, category: string): string {
   const prefixMap: Record<string, string> = { spare: 'SPR', expendable: 'EXP', consumable: 'CON', accessory: 'ACC' };
@@ -17,7 +18,9 @@ function generatePartCode(db: any, category: string): string {
 export function registerPartsHandlers(): void {
   const db = getDatabase();
 
-  ipcMain.handle('db:parts:getAll', () => {
+  ipcMain.handle('db:parts:getAll', (event: any) => {
+    const dept = sessionDepartment(event);
+    const deptWhere = dept ? 'AND (pc.department = ? OR pc.department IS NULL)' : '';
     return db.prepare(`
       SELECT pc.*, pi.qty_on_hand, pi.qty_reserved, pi.reorder_point, pi.reorder_qty, pi.location,
              v.name as vendor_name
@@ -25,8 +28,9 @@ export function registerPartsHandlers(): void {
       LEFT JOIN parts_inventory pi ON pi.part_id = pc.id
       LEFT JOIN vendors v ON v.id = pc.vendor_id
       WHERE pc.is_active = 1
+      ${deptWhere}
       ORDER BY pc.part_code
-    `).all();
+    `).all(...(dept ? [dept] : []));
   });
 
   ipcMain.handle('db:parts:getById', (_e: any, id: string) => {

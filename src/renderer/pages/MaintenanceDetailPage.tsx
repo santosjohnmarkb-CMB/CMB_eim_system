@@ -198,6 +198,9 @@ export function MaintenanceDetailPage() {
   const [editingCell, setEditingCell] = useState<{ rowIdx: number; col: string } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showOutcomeModal, setShowOutcomeModal] = useState(false);
+  const [showActionModal, setShowActionModal] = useState(false);
+  const [actionForm, setActionForm] = useState({ action_date: '', action_taken: '', remarks: '', personnel: '' });
+  const [savingAction, setSavingAction] = useState(false);
   const cellRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
 
   const load = useCallback(async () => {
@@ -284,21 +287,35 @@ export function MaintenanceDetailPage() {
     } catch (err: any) { toast.error(err.message); }
   };
 
-  const handleAddActionRow = () => {
-    setActions((prev) => [
-      ...prev,
-      {
-        id: `_new_${Date.now()}`,
+  const openAddActionModal = () => {
+    setActionForm({
+      action_date: new Date().toISOString().split('T')[0] ?? '',
+      action_taken: '',
+      remarks: '',
+      personnel: user?.full_name || '',
+    });
+    setShowActionModal(true);
+  };
+
+  const handleSaveNewAction = async () => {
+    if (!actionForm.action_taken.trim()) { toast.error('Action taken is required'); return; }
+    setSavingAction(true);
+    try {
+      await addAction({
         ticket_id: ticket.id,
-        action_date: new Date().toISOString().split('T')[0],
-        action_taken: '',
-        remarks: '',
-        personnel: user?.full_name || '',
-        created_at: new Date().toISOString(),
-        _isNew: true,
-      },
-    ]);
-    setEditingCell({ rowIdx: actions.length, col: 'action_taken' });
+        action_date: actionForm.action_date,
+        action_taken: actionForm.action_taken,
+        remarks: actionForm.remarks,
+        personnel: actionForm.personnel,
+      });
+      const a = await getActions(ticket.id);
+      setActions(a);
+      setShowActionModal(false);
+      toast.success('Action log entry added');
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+    setSavingAction(false);
   };
 
   const commitActionCell = async (rowIdx: number, col: string, value: string) => {
@@ -545,7 +562,7 @@ export function MaintenanceDetailPage() {
             </h2>
             <button
               type="button"
-              onClick={handleAddActionRow}
+              onClick={openAddActionModal}
               className="print:hidden flex items-center gap-1 text-xs text-amber-700 hover:text-amber-900 font-medium transition-colors"
             >
               <Plus size={14} /> Add Entry
@@ -702,6 +719,70 @@ export function MaintenanceDetailPage() {
           </div>
         )}
       </div>
+
+      {/* ── Add Action Log Entry Modal ── */}
+      {showActionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm print:hidden">
+          <div className="bg-surface-900 border border-surface-700 rounded-xl shadow-2xl w-full max-w-lg mx-4 p-6">
+            <h3 className="text-lg font-semibold text-surface-100 mb-1">Add Action Log Entry</h3>
+            <p className="text-sm text-surface-400 mb-5">Record an action taken on this ticket.</p>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-surface-400 mb-1">Date</label>
+                  <input
+                    type="date"
+                    value={actionForm.action_date}
+                    onChange={(e) => setActionForm((p) => ({ ...p, action_date: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-surface-400 mb-1">Personnel</label>
+                  <input
+                    type="text"
+                    value={actionForm.personnel}
+                    onChange={(e) => setActionForm((p) => ({ ...p, personnel: e.target.value }))}
+                    placeholder="Name"
+                    className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-surface-400 mb-1">Action Taken *</label>
+                <textarea
+                  value={actionForm.action_taken}
+                  onChange={(e) => setActionForm((p) => ({ ...p, action_taken: e.target.value }))}
+                  rows={3}
+                  autoFocus
+                  placeholder="Describe the action performed..."
+                  className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 resize-y"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-surface-400 mb-1">Remarks</label>
+                <textarea
+                  value={actionForm.remarks}
+                  onChange={(e) => setActionForm((p) => ({ ...p, remarks: e.target.value }))}
+                  rows={2}
+                  placeholder="Additional remarks (optional)"
+                  className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 resize-y"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <Button variant="ghost" size="sm" onClick={() => setShowActionModal(false)}>Cancel</Button>
+              <Button size="sm" onClick={handleSaveNewAction} loading={savingAction}>
+                <Plus size={14} /> Add Entry
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Completion Outcome Modal ── */}
       {showOutcomeModal && (

@@ -6,6 +6,7 @@ import { EquipmentCreateSchema } from '../../shared/schemas';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { pushOperationalToCloud } from '../sync/operational-sync';
 import { CATEGORY_PREFIXES } from '../../shared/constants';
+import { sessionDepartment, categoriesForDepartment, departmentForCategory } from './department';
 
 export function registerEquipmentHandlers(): void {
   const db = getDatabase();
@@ -22,7 +23,9 @@ export function registerEquipmentHandlers(): void {
     return db.prepare('SELECT * FROM subcategories WHERE category_id = ? AND is_active = 1 ORDER BY display_order').all(categoryId);
   });
 
-  ipcMain.handle('db:equipment:getAll', () => {
+  ipcMain.handle('db:equipment:getAll', (event: any) => {
+    const cats = categoriesForDepartment(sessionDepartment(event));
+    const catWhere = cats ? `AND c.name IN (${cats.map(() => '?').join(', ')})` : '';
     return db.prepare(`
       SELECT e.*, ea.id as asset_db_id, ea.serial_number, ea.asset_tag, ea.purchase_date,
              ea.purchase_price, ea.vendor_name as asset_vendor, ea.warranty_expiry,
@@ -34,8 +37,9 @@ export function registerEquipmentHandlers(): void {
       LEFT JOIN categories c ON c.id = e.category_id
       LEFT JOIN subcategories sc ON sc.id = e.subcategory_id
       WHERE e.is_active = 1
+      ${catWhere}
       ORDER BY e.equipment_code
-    `).all().map((row: any) => ({
+    `).all(...(cats || [])).map((row: any) => ({
       ...row,
       is_active: !!row.is_active,
       asset: row.asset_db_id ? {
@@ -49,7 +53,7 @@ export function registerEquipmentHandlers(): void {
     }));
   });
 
-  ipcMain.handle('db:equipment:getById', (_e: any, id: string) => {
+  ipcMain.handle('db:equipment:getById', (event: any, id: string) => {
     const row: any = db.prepare(`
       SELECT e.*, ea.id as asset_db_id, ea.serial_number, ea.asset_tag, ea.purchase_date,
              ea.purchase_price, ea.vendor_name as asset_vendor, ea.warranty_expiry,
@@ -63,6 +67,8 @@ export function registerEquipmentHandlers(): void {
       WHERE e.id = ?
     `).get(id);
     if (!row) return null;
+    const dept = sessionDepartment(event);
+    if (dept && departmentForCategory(row.category_name) !== dept) return null;
     return {
       ...row,
       is_active: !!row.is_active,

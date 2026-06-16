@@ -5,6 +5,7 @@ import { requireSession } from './session';
 import { MaintenanceTicketCreateSchema, MaintenanceTicketUpdateSchema, MaintenanceNoteSchema, TicketActionSchema, TicketActionUpdateSchema } from '../../shared/schemas';
 import { pushOperationalToCloud } from '../sync/operational-sync';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
+import { sessionDepartment, categoriesForDepartment, departmentForCategory, assertEquipmentInDepartment } from './department';
 
 const DEPT_PREFIX: Record<string, string> = {
   'Camera': 'CD',
@@ -51,7 +52,9 @@ function generateTicketNumber(db: any, equipmentId: string, maintenanceType: str
 export function registerMaintenanceHandlers(): void {
   const db = getDatabase();
 
-  ipcMain.handle('db:maintenance:getAll', () => {
+  ipcMain.handle('db:maintenance:getAll', (event: any) => {
+    const cats = categoriesForDepartment(sessionDepartment(event));
+    const catWhere = cats ? `WHERE c.name IN (${cats.map(() => '?').join(', ')})` : '';
     return db.prepare(`
       SELECT mt.*, e.name as equipment_name, e.equipment_code, e.category_id,
         c.name as category_name,
@@ -67,24 +70,31 @@ export function registerMaintenanceHandlers(): void {
         WHERE ta2.ticket_id = mt.id
         ORDER BY ta2.action_date DESC, ta2.created_at DESC LIMIT 1
       )
+      ${catWhere}
       ORDER BY
         CASE mt.severity WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END,
         mt.created_at DESC
-    `).all();
+    `).all(...(cats || []));
   });
 
-  ipcMain.handle('db:maintenance:getById', (_e: any, id: string) => {
-    return db.prepare(`
-      SELECT mt.*, e.name as equipment_name, e.equipment_code
+  ipcMain.handle('db:maintenance:getById', (event: any, id: string) => {
+    const row: any = db.prepare(`
+      SELECT mt.*, e.name as equipment_name, e.equipment_code, c.name as category_name
       FROM maintenance_tickets mt
       JOIN equipment_items e ON e.id = mt.equipment_id
+      LEFT JOIN categories c ON c.id = e.category_id
       WHERE mt.id = ?
     `).get(id);
+    if (!row) return null;
+    const dept = sessionDepartment(event);
+    if (dept && departmentForCategory(row.category_name) !== dept) return null;
+    return row;
   });
 
   ipcMain.handle('db:maintenance:create', (event: any, data: unknown) => {
     const user = requireSession(event);
     const input = MaintenanceTicketCreateSchema.parse(data);
+    assertEquipmentInDepartment(db, event, input.equipment_id);
     const id = uuidv4();
     const docType = input.document_type || 'repair';
     const ticketNumber = generateTicketNumber(db, input.equipment_id, input.maintenance_type);

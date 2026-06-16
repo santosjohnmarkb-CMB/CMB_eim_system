@@ -65,6 +65,7 @@ function initializeDatabase(): void {
   seedDataIfEmpty();
   ensureAdminRecoverable();
   ensureDepartmentManagers();
+  ensureDepartmentCrew();
 }
 
 function seedDataIfEmpty(): void {
@@ -179,6 +180,31 @@ function ensureDepartmentManagers(): void {
     }
   } catch (err) {
     console.error('[DB] ensureDepartmentManagers failed:', err);
+  }
+}
+
+// Department crew test users — each scoped to a single department so they can
+// run their department's workflow (tickets, loans, parts, vendors) but never
+// see or act on the other department's data.
+function ensureDepartmentCrew(): void {
+  try {
+    const now = new Date().toISOString();
+    const camCrew: any = db.prepare("SELECT id FROM users WHERE username = 'camcrew'").get();
+    if (!camCrew) {
+      db.prepare(
+        `INSERT INTO users (id, username, password_hash, full_name, email, role, department, is_active, created_at, updated_at)
+         VALUES (?, 'camcrew', ?, 'Camera Department Crew', 'camcrew@cmbfilmservices.com', 'equipment_manager', 'camera', 1, ?, ?)`
+      ).run(uuidv4(), hashPassword('camcrew123'), now, now);
+    }
+    const lgCrew: any = db.prepare("SELECT id FROM users WHERE username = 'lgcrew'").get();
+    if (!lgCrew) {
+      db.prepare(
+        `INSERT INTO users (id, username, password_hash, full_name, email, role, department, is_active, created_at, updated_at)
+         VALUES (?, 'lgcrew', ?, 'Lights & Grips Department Crew', 'lgcrew@cmbfilmservices.com', 'equipment_manager', 'lights_grips', 1, ?, ?)`
+      ).run(uuidv4(), hashPassword('lgcrew123'), now, now);
+    }
+  } catch (err) {
+    console.error('[DB] ensureDepartmentCrew failed:', err);
   }
 }
 

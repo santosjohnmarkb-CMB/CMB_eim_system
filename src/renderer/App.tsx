@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { useAuthStore } from './stores/auth.store';
 import { useSyncStore } from './stores/sync.store';
 import { initRealtimeListeners, cleanupRealtimeListeners } from './stores/realtime-listeners';
@@ -34,6 +34,17 @@ function RoleGuard({ roles, children }: { roles: string[]; children: React.React
   const role = useAuthStore((s) => s.user?.role);
   if (!role || (!roles.includes(role) && role !== 'admin')) {
     return <Navigate to="/dashboard" replace />;
+  }
+  return <>{children}</>;
+}
+
+// Blocks non-admin users from opening a department-scoped URL (`:dept`) that is
+// not their own; they are redirected to their own department workspace.
+function DepartmentGuard({ children }: { children: React.ReactNode }) {
+  const user = useAuthStore((s) => s.user);
+  const { dept } = useParams<{ dept: string }>();
+  if (user && user.role !== 'admin' && user.department && dept && dept !== user.department) {
+    return <Navigate to={`/dept/${user.department}`} replace />;
   }
   return <>{children}</>;
 }
@@ -74,9 +85,9 @@ export default function App() {
                   <Route path="/equipment" element={<EquipmentDashboardPage />} />
                   <Route path="/equipment/new" element={<RoleGuard roles={['inventory_manager']}><EquipmentAddPage /></RoleGuard>} />
                   <Route path="/equipment/use-count" element={<EquipmentUseCountPage />} />
-                  <Route path="/equipment/:dept" element={<EquipmentListPage />} />
+                  <Route path="/equipment/:dept" element={<DepartmentGuard><EquipmentListPage /></DepartmentGuard>} />
                   <Route path="/equipment/detail/:id" element={<EquipmentDetailPage />} />
-                  <Route path="/dept/:dept" element={<DepartmentSegmentPage />} />
+                  <Route path="/dept/:dept" element={<DepartmentGuard><DepartmentSegmentPage /></DepartmentGuard>} />
                   <Route path="/loans" element={<LoansPage />} />
                   <Route path="/loans/new" element={<RoleGuard roles={['equipment_manager', 'inventory_manager']}><LoanNewPage /></RoleGuard>} />
                   <Route path="/loans/:id" element={<LoanDetailPage />} />

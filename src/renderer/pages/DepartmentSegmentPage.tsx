@@ -4,9 +4,10 @@ import { useEquipmentStore } from '../stores/equipment.store';
 import { useMaintenanceStore } from '../stores/maintenance.store';
 import { usePartsStore } from '../stores/parts.store';
 import { useVendorsStore } from '../stores/vendors.store';
+import { useLoansStore } from '../stores/loans.store';
 import { useAuthStore } from '../stores/auth.store';
 import { useDepartmentStore } from '../stores/department.store';
-import { DEPARTMENT_CONFIG } from '../../shared/constants';
+import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT, LOAN_STATUS_CONFIG } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import { REPAIR_STATUS_CONFIG } from '../lib/constants';
 import { Badge } from '../components/common/Badge';
@@ -17,16 +18,16 @@ import { Modal } from '../components/common/Modal';
 import { Input } from '../components/common/Input';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { useToast } from '../hooks';
-import type { MaintenanceTicket, PartsCatalogItem, Vendor } from '../../shared/types';
-import { Camera, Lightbulb, ArrowLeft, Wrench, Box, Truck, BarChart3, Plus, AlertTriangle } from 'lucide-react';
+import type { MaintenanceTicket, PartsCatalogItem, Vendor, CompletedHistoryEntry, EquipmentLoan } from '../../shared/types';
+import { Camera, Lightbulb, ArrowLeft, Wrench, Box, Truck, BarChart3, Plus, AlertTriangle, History, PackageCheck, ChevronRight } from 'lucide-react';
 
 type TabKey = 'maintenance' | 'parts' | 'vendors' | 'reports';
 
 const TABS: { key: TabKey; label: string; icon: typeof Wrench }[] = [
+  { key: 'reports', label: 'Dashboard', icon: BarChart3 },
   { key: 'maintenance', label: 'Maintenance', icon: Wrench },
   { key: 'parts', label: 'Parts', icon: Box },
   { key: 'vendors', label: 'Vendors', icon: Truck },
-  { key: 'reports', label: 'Reports', icon: BarChart3 },
 ];
 
 const DEPT_ICONS: Record<Department, typeof Camera> = {
@@ -326,9 +327,28 @@ function VendorsTab({ dept }: { dept: Department }) {
 
 // ─── Reports Tab ───────────────────────────────────────────────────────
 
+function fmtDate(d: string | null | undefined): string {
+  return d ? new Date(d).toLocaleDateString() : '—';
+}
+
 function ReportsTab({ dept }: { dept: Department }) {
+  const navigate = useNavigate();
   const { items, categories } = useEquipmentStore();
-  const { tickets } = useMaintenanceStore();
+  const { tickets, getCompletedHistory } = useMaintenanceStore();
+  const loans = useLoansStore((s) => s.loans);
+  const fetchLoans = useLoansStore((s) => s.fetchAll);
+
+  const [completed, setCompleted] = useState<CompletedHistoryEntry[]>([]);
+
+  useEffect(() => { fetchLoans(); }, [fetchLoans]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getCompletedHistory()
+      .then((d) => { if (!cancelled) setCompleted(d); })
+      .catch(() => { /* ignore */ });
+    return () => { cancelled = true; };
+  }, [getCompletedHistory]);
 
   const deptCategoryNames = DEPARTMENT_CONFIG[dept].categories;
 
@@ -353,6 +373,48 @@ function ReportsTab({ dept }: { dept: Department }) {
     return { total, available, inRepair, deployed, openTickets };
   }, [items, categories, tickets, deptCategoryNames]);
 
+  // All tickets belonging to this department (by equipment category).
+  const deptTickets = useMemo(() => {
+    const nameSet = new Set(deptCategoryNames);
+    const validCatIds = new Set(categories.filter((c) => nameSet.has(c.name)).map((c) => c.id));
+    const map = new Map<string, string>();
+    for (const eq of items) map.set(eq.id, eq.category_id);
+    return tickets.filter((t) => {
+      const catId = map.get(t.equipment_id);
+      return catId && validCatIds.has(catId);
+    });
+  }, [tickets, items, categories, deptCategoryNames]);
+
+  const tally = useMemo(() => {
+    const counts: Record<string, number> = { REPORTED: 0, ASSESSED: 0, IN_PROGRESS: 0, COMPLETED: 0 };
+    for (const t of deptTickets) {
+      if (Object.prototype.hasOwnProperty.call(counts, t.repair_status)) {
+        counts[t.repair_status] = (counts[t.repair_status] || 0) + 1;
+      }
+    }
+    return counts;
+  }, [deptTickets]);
+
+  const openTickets = useMemo(
+    () => deptTickets.filter((t) => t.repair_status !== 'COMPLETED' && t.repair_status !== 'CANCELLED'),
+    [deptTickets],
+  );
+  const openTicketsList = useMemo(() => openTickets.slice(0, 5), [openTickets]);
+
+  // Recent completed maintenance/repair jobs for this department.
+  const deptHistory = useMemo(
+    () => completed
+      .filter((e) => e.category_name && CATEGORY_TO_DEPARTMENT[e.category_name] === dept)
+      .slice(0, 5),
+    [completed, dept],
+  );
+
+  // Currently-out loans for this department.
+  const deptLoans = useMemo(
+    () => loans.filter((l) => l.department === dept && l.status !== 'RETURNED').slice(0, 5),
+    [loans, dept],
+  );
+
   const statCards = [
     { label: 'Total Equipment', value: stats.total, color: 'text-primary-400' },
     { label: 'Available', value: stats.available, color: 'text-success-400' },
@@ -371,10 +433,144 @@ function ReportsTab({ dept }: { dept: Department }) {
           </div>
         ))}
       </div>
-      <div className="glass-panel rounded-xl p-6 text-center">
-        <BarChart3 size={32} className="mx-auto text-surface-600 mb-3" />
-        <p className="text-sm text-surface-400">Detailed reports and analytics coming soon.</p>
-        <p className="text-xs text-surface-600 mt-1">Fleet utilization, repair costs, and availability trends will be shown here.</p>
+
+      {/* Repair Tally */}
+      <div className="glass-panel rounded-xl px-5 py-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Wrench size={16} className="text-surface-400" />
+          <h3 className="text-sm font-semibold text-surface-200">Repair Tally</h3>
+          <span className="ml-auto text-xs text-surface-500">{openTickets.length} open</span>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          {KANBAN_COLUMNS.map((status) => {
+            const cfg = REPAIR_STATUS_CONFIG[status];
+            return (
+              <div key={status} className="flex items-center gap-2 bg-surface-900/60 rounded-lg px-3 py-1.5">
+                <span className={`text-xs font-medium ${cfg?.color ?? 'text-surface-400'}`}>{cfg?.label ?? status}</span>
+                <span className="text-sm font-bold text-surface-200">{tally[status] ?? 0}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Quick-view cards */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Open Tickets */}
+        <div className="glass-panel rounded-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
+            <AlertTriangle size={18} className="text-danger-400" />
+            <h3 className="text-sm font-semibold text-surface-200">Open Tickets</h3>
+            <button
+              onClick={() => navigate('/maintenance')}
+              className="ml-auto flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium"
+            >
+              Full List <ChevronRight size={13} />
+            </button>
+          </div>
+          {openTicketsList.length === 0 ? (
+            <div className="px-5 py-8 text-center text-sm text-surface-500">No open tickets</div>
+          ) : (
+            <div className="divide-y divide-surface-800/60">
+              {openTicketsList.map((ticket) => {
+                const cfg = REPAIR_STATUS_CONFIG[ticket.repair_status];
+                return (
+                  <button
+                    key={ticket.id}
+                    onClick={() => navigate(`/maintenance/${ticket.id}`)}
+                    className="w-full flex items-center gap-3 px-5 py-3 hover:bg-surface-800/40 transition-colors text-left"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-surface-200 font-medium truncate">{ticket.equipment_name}</p>
+                      <p className="text-2xs text-surface-500 font-mono">{ticket.ticket_number}</p>
+                    </div>
+                    <span className={`text-xs font-medium shrink-0 ${cfg?.color ?? 'text-surface-400'}`}>
+                      {cfg?.label ?? ticket.repair_status}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Maintenance & Repair History */}
+        <div className="glass-panel rounded-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
+            <History size={18} className="text-emerald-400" />
+            <h3 className="text-sm font-semibold text-surface-200">Maintenance &amp; Repair History</h3>
+            <button
+              onClick={() => navigate('/maintenance')}
+              className="ml-auto flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium"
+            >
+              Full List <ChevronRight size={13} />
+            </button>
+          </div>
+          {deptHistory.length === 0 ? (
+            <div className="px-5 py-8 text-center text-sm text-surface-500">No completed maintenance history</div>
+          ) : (
+            <div className="divide-y divide-surface-800/60">
+              {deptHistory.map((entry) => (
+                <button
+                  key={entry.id}
+                  onClick={() => navigate(`/maintenance/${entry.id}`)}
+                  className="w-full flex items-center gap-3 px-5 py-3 hover:bg-surface-800/40 transition-colors text-left"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-surface-200 font-medium truncate">{entry.equipment_name}</p>
+                    <p className="text-2xs text-surface-500 font-mono">{entry.ticket_number}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <Badge variant={entry.document_type === 'maintenance' ? 'info' : entry.document_type === 'update' ? 'purple' : 'warning'} size="sm">
+                      {entry.document_type}
+                    </Badge>
+                    <p className="text-2xs text-surface-500 mt-1">{fmtDate(entry.completion_date || entry.reported_date)}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Loaned Equipment */}
+        <div className="glass-panel rounded-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
+            <PackageCheck size={18} className="text-primary-400" />
+            <h3 className="text-sm font-semibold text-surface-200">Loaned Equipment</h3>
+            <button
+              onClick={() => navigate('/loans')}
+              className="ml-auto flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium"
+            >
+              Full List <ChevronRight size={13} />
+            </button>
+          </div>
+          {deptLoans.length === 0 ? (
+            <div className="px-5 py-8 text-center text-sm text-surface-500">No active loans</div>
+          ) : (
+            <div className="divide-y divide-surface-800/60">
+              {deptLoans.map((loan: EquipmentLoan) => (
+                <button
+                  key={loan.id}
+                  onClick={() => navigate(`/loans/${loan.id}`)}
+                  className="w-full flex items-center gap-3 px-5 py-3 hover:bg-surface-800/40 transition-colors text-left"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-surface-200 font-medium truncate">{loan.person_or_org}</p>
+                    <p className="text-2xs text-surface-500 font-mono">{loan.loan_number}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className={`text-xs font-medium ${LOAN_STATUS_CONFIG[loan.status]?.color ?? 'text-surface-400'}`}>
+                      {LOAN_STATUS_CONFIG[loan.status]?.label ?? loan.status}
+                    </span>
+                    <p className="text-2xs text-surface-500 mt-1">
+                      {loan.out_count ?? 0}/{loan.item_count ?? 0} out · {fmtDate(loan.tentative_return_date)}
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -386,7 +582,7 @@ export function DepartmentSegmentPage() {
   const { dept } = useParams<{ dept: string }>();
   const navigate = useNavigate();
   const role = useAuthStore((s) => s.user?.role);
-  const [activeTab, setActiveTab] = useState<TabKey>('maintenance');
+  const [activeTab, setActiveTab] = useState<TabKey>('reports');
 
   const validDept = (dept === 'camera' || dept === 'lights_grips') ? dept as Department : null;
 
