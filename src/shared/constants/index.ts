@@ -151,6 +151,22 @@ export const USE_COUNT_SUBCATEGORIES: Record<Department, { label: string; subcat
   ],
 };
 
+export const LOAN_STATUS_CONFIG: Record<string, { label: string; color: string; bgColor: string }> = {
+  ACTIVE:   { label: 'Active',   color: 'text-primary-400', bgColor: 'bg-primary-500/15' },
+  PARTIAL:  { label: 'Partial',  color: 'text-warning-400', bgColor: 'bg-warning-500/15' },
+  RETURNED: { label: 'Returned', color: 'text-success-400', bgColor: 'bg-success-500/15' },
+};
+
+export const LOAN_ITEM_STATUS_CONFIG: Record<string, { label: string; color: string; bgColor: string }> = {
+  OUT:      { label: 'Out',      color: 'text-warning-400', bgColor: 'bg-warning-500/15' },
+  RETURNED: { label: 'Returned', color: 'text-success-400', bgColor: 'bg-success-500/15' },
+};
+
+export const LOAN_DEPT_PREFIX: Record<Department, string> = {
+  camera: 'CD',
+  lights_grips: 'LG',
+};
+
 export const CATEGORY_PREFIXES: Record<string, string> = {
   'Camera': 'CAM',
   'Dollies Mounts & Cranes': 'DMC',
@@ -220,6 +236,14 @@ export const IPC_CHANNELS = {
   PARTS_GET_LOW_STOCK: 'db:parts:getLowStock',
   PARTS_GET_COMPATIBILITY: 'db:parts:getCompatibility',
   PARTS_SET_COMPATIBILITY: 'db:parts:setCompatibility',
+
+  // Loans
+  LOANS_GET_ALL: 'db:loans:getAll',
+  LOANS_GET_BY_ID: 'db:loans:getById',
+  LOANS_CREATE: 'db:loans:create',
+  LOANS_RETURN_ITEMS: 'db:loans:returnItems',
+  LOANS_RETURN_ORDER: 'db:loans:returnOrder',
+  LOANS_DELETE: 'db:loans:delete',
 
   // Vendors
   VENDORS_GET_ALL: 'db:vendors:getAll',

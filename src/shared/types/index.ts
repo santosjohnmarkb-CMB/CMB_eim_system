@@ -291,6 +291,46 @@ export interface Vendor {
   updated_at: string;
 }
 
+export type LoanStatus = 'ACTIVE' | 'PARTIAL' | 'RETURNED';
+export type LoanItemStatus = 'OUT' | 'RETURNED';
+
+export interface EquipmentLoanItem {
+  id: string;
+  loan_id: string;
+  equipment_id: string;
+  asset_id: string | null;
+  status: LoanItemStatus;
+  returned_date: string | null;
+  notes: string | null;
+  created_at: string;
+  equipment_name?: string;
+  equipment_code?: string;
+  category_name?: string;
+}
+
+export interface EquipmentLoan {
+  id: string;
+  loan_number: string;
+  department: 'camera' | 'lights_grips';
+  person_or_org: string;
+  purpose: string;
+  location: string;
+  loaned_date: string;
+  duration: string;
+  tentative_return_date: string | null;
+  remarks: string;
+  status: LoanStatus;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  item_count?: number;
+  out_count?: number;
+}
+
+export interface EquipmentLoanWithItems extends EquipmentLoan {
+  items: EquipmentLoanItem[];
+}
+
 export interface DashboardStats {
   totalEquipment: number;
   availableCount: number;

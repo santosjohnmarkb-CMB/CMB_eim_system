@@ -4,6 +4,7 @@ import { registerEquipmentHandlers } from './equipment.handlers';
 import { registerMaintenanceHandlers } from './maintenance.handlers';
 import { registerPartsHandlers } from './parts.handlers';
 import { registerVendorHandlers } from './vendors.handlers';
+import { registerLoanHandlers } from './loans.handlers';
 import { registerReportsHandlers } from './reports.handlers';
 import { registerSyncHandlers } from './sync.handlers';
 import { registerAppHandlers } from './app.handlers';
@@ -15,6 +16,7 @@ export function registerAllHandlers(): void {
   registerMaintenanceHandlers();
   registerPartsHandlers();
   registerVendorHandlers();
+  registerLoanHandlers();
   registerReportsHandlers();
   registerSyncHandlers();
   registerAppHandlers();

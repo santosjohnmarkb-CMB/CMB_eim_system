@@ -289,6 +289,45 @@ const MIGRATIONS: Migration[] = [
       db.pragma('foreign_keys = ON');
     },
   },
+  {
+    id: '011_equipment_loans',
+    up: (db: any) => {
+      if (!tableExists(db, 'equipment_loans')) {
+        db.exec(`CREATE TABLE equipment_loans (
+          id TEXT PRIMARY KEY,
+          loan_number TEXT UNIQUE NOT NULL,
+          department TEXT NOT NULL CHECK (department IN ('camera', 'lights_grips')),
+          person_or_org TEXT NOT NULL DEFAULT '',
+          purpose TEXT NOT NULL DEFAULT '',
+          location TEXT NOT NULL DEFAULT '',
+          loaned_date TEXT NOT NULL DEFAULT (date('now')),
+          duration TEXT NOT NULL DEFAULT '',
+          tentative_return_date TEXT,
+          remarks TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'PARTIAL', 'RETURNED')),
+          created_by TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_equipment_loans_department ON equipment_loans(department)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_equipment_loans_status ON equipment_loans(status)`);
+      }
+      if (!tableExists(db, 'equipment_loan_items')) {
+        db.exec(`CREATE TABLE equipment_loan_items (
+          id TEXT PRIMARY KEY,
+          loan_id TEXT NOT NULL REFERENCES equipment_loans(id) ON DELETE CASCADE,
+          equipment_id TEXT NOT NULL REFERENCES equipment_items(id),
+          asset_id TEXT REFERENCES equipment_assets(id),
+          status TEXT NOT NULL DEFAULT 'OUT' CHECK (status IN ('OUT', 'RETURNED')),
+          returned_date TEXT,
+          notes TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_equipment_loan_items_loan ON equipment_loan_items(loan_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_equipment_loan_items_equipment ON equipment_loan_items(equipment_id)`);
+      }
+    },
+  },
 ];
 
 export function runMigrations(db: any): void {

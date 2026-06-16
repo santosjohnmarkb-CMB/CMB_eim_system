@@ -1,12 +1,13 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Camera, Lightbulb, AlertTriangle, ClipboardList, BarChart3, History, X } from 'lucide-react';
+import { Camera, Lightbulb, AlertTriangle, ClipboardList, BarChart3, History, X, PackageCheck } from 'lucide-react';
 import { useMaintenanceStore } from '../stores/maintenance.store';
+import { useLoansStore } from '../stores/loans.store';
 import { useAuthStore } from '../stores/auth.store';
-import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT, USE_COUNT_SUBCATEGORIES } from '../../shared/constants';
+import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT, USE_COUNT_SUBCATEGORIES, LOAN_STATUS_CONFIG } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG } from '../lib/constants';
-import type { DashboardStats, MaintenanceTicket, RepairStatus, EquipmentUseCount, CompletedHistoryEntry } from '../../shared/types';
+import type { DashboardStats, MaintenanceTicket, RepairStatus, EquipmentUseCount, CompletedHistoryEntry, EquipmentLoan } from '../../shared/types';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { ipcInvoke } from '../lib/ipc';
 
@@ -40,6 +41,8 @@ export function DashboardPage() {
   const ticketsLoading = useMaintenanceStore((s) => s.loading);
   const getCompletedHistory = useMaintenanceStore((s) => s.getCompletedHistory);
   const getEquipmentHistory = useMaintenanceStore((s) => s.getEquipmentHistory);
+  const loans = useLoansStore((s) => s.loans);
+  const fetchLoans = useLoansStore((s) => s.fetchAll);
 
   const [deptStats, setDeptStats] = useState<Record<Department, DashboardStats | null>>({
     camera: null,
@@ -77,6 +80,8 @@ export function DashboardPage() {
   }, []);
 
   useEffect(() => { fetchTickets(); }, [fetchTickets]);
+
+  useEffect(() => { fetchLoans(); }, [fetchLoans]);
 
   useEffect(() => {
     let cancelled = false;
@@ -170,6 +175,14 @@ export function DashboardPage() {
     () => tickets.filter((t) => t.category_name && CATEGORY_TO_DEPARTMENT[t.category_name]),
     [tickets],
   );
+
+  const activeLoansByDept = useMemo(() => {
+    const result: Record<Department, EquipmentLoan[]> = { camera: [], lights_grips: [] };
+    for (const loan of loans) {
+      if (loan.status !== 'RETURNED' && result[loan.department]) result[loan.department].push(loan);
+    }
+    return result;
+  }, [loans]);
 
   const tallyByDept = useMemo(() => {
     const result: Record<Department, Record<string, number>> = { camera: {}, lights_grips: {} };
@@ -377,6 +390,87 @@ export function DashboardPage() {
                               ) : (
                                 <span className="text-surface-600">—</span>
                               )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── Loaned Equipment ──────────────────────── */}
+      <div className="glass-panel rounded-xl overflow-hidden">
+        <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
+          <PackageCheck size={18} className="text-primary-400" />
+          <h3 className="text-base font-semibold text-surface-200">Loaned Equipment</h3>
+          <button
+            onClick={() => navigate('/loans')}
+            className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium ml-auto"
+          >
+            View All →
+          </button>
+        </div>
+
+        {DEPTS.map((dept, deptIdx) => {
+          const Icon = DEPT_ICONS[dept];
+          const labelColor = DEPT_LABEL_COLOR[dept];
+          const cfg = DEPARTMENT_CONFIG[dept];
+          const deptLoans = activeLoansByDept[dept];
+
+          return (
+            <div key={dept}>
+              <div className={`flex items-center gap-2 px-5 py-2.5 bg-surface-900/40 ${deptIdx > 0 ? 'border-t border-surface-700/40 mt-4' : ''}`}>
+                <Icon size={16} className={labelColor} />
+                <span className={`text-sm font-semibold ${labelColor}`}>{cfg.shortLabel}</span>
+                <span className="text-xs text-surface-500 ml-1">({deptLoans.length})</span>
+              </div>
+
+              {deptLoans.length === 0 ? (
+                <div className="px-5 py-6 text-center text-sm text-surface-500">
+                  No active loans
+                </div>
+              ) : (
+                <div className="overflow-x-auto ml-5">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-xs text-surface-500 uppercase tracking-wider border-b border-surface-800">
+                        <th className="text-left px-5 py-2 font-medium">Loan #</th>
+                        <th className="text-left px-3 py-2 font-medium">Person / Org</th>
+                        <th className="text-left px-3 py-2 font-medium">Items Out</th>
+                        <th className="text-left px-3 py-2 font-medium">Tentative Return</th>
+                        <th className="text-left px-3 py-2 font-medium">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-surface-800/60">
+                      {deptLoans.map((loan) => {
+                        const statusCfg = LOAN_STATUS_CONFIG[loan.status];
+                        return (
+                          <tr
+                            key={loan.id}
+                            onClick={() => navigate(`/loans/${loan.id}`)}
+                            className="hover:bg-surface-800/40 transition-colors cursor-pointer"
+                          >
+                            <td className="px-5 py-3 font-mono text-xs text-primary-400 whitespace-nowrap">
+                              {loan.loan_number}
+                            </td>
+                            <td className="px-3 py-3 text-surface-200 font-medium truncate max-w-[220px]">
+                              {loan.person_or_org}
+                            </td>
+                            <td className="px-3 py-3 text-surface-300 whitespace-nowrap">
+                              {loan.out_count ?? 0} / {loan.item_count ?? 0}
+                            </td>
+                            <td className="px-3 py-3 text-xs text-surface-300 whitespace-nowrap">
+                              {loan.tentative_return_date ? new Date(loan.tentative_return_date).toLocaleDateString() : '—'}
+                            </td>
+                            <td className="px-3 py-3 whitespace-nowrap">
+                              <span className={`text-xs font-medium ${statusCfg?.color ?? 'text-surface-400'}`}>
+                                {statusCfg?.label ?? loan.status}
+                              </span>
                             </td>
                           </tr>
                         );

@@ -135,6 +135,42 @@ CREATE INDEX IF NOT EXISTS idx_asset_status_log_asset ON asset_status_log(asset_
 CREATE INDEX IF NOT EXISTS idx_asset_status_log_equipment ON asset_status_log(equipment_id);
 CREATE INDEX IF NOT EXISTS idx_asset_status_log_changed_at ON asset_status_log(changed_at);
 
+-- Equipment loaned out for events / training / workshops
+CREATE TABLE IF NOT EXISTS equipment_loans (
+  id TEXT PRIMARY KEY,
+  loan_number TEXT UNIQUE NOT NULL,
+  department TEXT NOT NULL CHECK (department IN ('camera', 'lights_grips')),
+  person_or_org TEXT NOT NULL DEFAULT '',
+  purpose TEXT NOT NULL DEFAULT '',
+  location TEXT NOT NULL DEFAULT '',
+  loaned_date TEXT NOT NULL DEFAULT (date('now')),
+  duration TEXT NOT NULL DEFAULT '',
+  tentative_return_date TEXT,
+  remarks TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'PARTIAL', 'RETURNED')),
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_equipment_loans_department ON equipment_loans(department);
+CREATE INDEX IF NOT EXISTS idx_equipment_loans_status ON equipment_loans(status);
+
+-- Individual single-unit line items within a loan order
+CREATE TABLE IF NOT EXISTS equipment_loan_items (
+  id TEXT PRIMARY KEY,
+  loan_id TEXT NOT NULL REFERENCES equipment_loans(id) ON DELETE CASCADE,
+  equipment_id TEXT NOT NULL REFERENCES equipment_items(id),
+  asset_id TEXT REFERENCES equipment_assets(id),
+  status TEXT NOT NULL DEFAULT 'OUT' CHECK (status IN ('OUT', 'RETURNED')),
+  returned_date TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_equipment_loan_items_loan ON equipment_loan_items(loan_id);
+CREATE INDEX IF NOT EXISTS idx_equipment_loan_items_equipment ON equipment_loan_items(equipment_id);
+
 -- Repair and maintenance work orders
 CREATE TABLE IF NOT EXISTS maintenance_tickets (
   id TEXT PRIMARY KEY,

@@ -178,6 +178,26 @@ export const PreventiveScheduleSchema = z.object({
   next_due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
 });
 
+// ── Equipment Loans ──
+export const LoanCreateSchema = z.object({
+  department: z.enum(['camera', 'lights_grips']),
+  person_or_org: z.string().min(1).max(200),
+  purpose: z.string().max(2000).default(''),
+  location: z.string().max(200).default(''),
+  loaned_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  duration: z.string().max(200).default(''),
+  tentative_return_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  remarks: z.string().max(2000).default(''),
+  items: z.array(z.object({
+    equipment_id: z.string().uuid(),
+    notes: z.string().max(1000).nullable().optional(),
+  })).min(1),
+});
+
+export const LoanReturnSchema = z.object({
+  item_ids: z.array(z.string().uuid()).min(1),
+});
+
 // ── Inferred types ──
 export type LoginInput = z.infer<typeof LoginSchema>;
 export type UserCreateInput = z.infer<typeof UserCreateSchema>;
@@ -194,3 +214,5 @@ export type VendorUpdateInput = z.infer<typeof VendorUpdateSchema>;
 export type PreventiveScheduleInput = z.infer<typeof PreventiveScheduleSchema>;
 export type TicketActionInput = z.infer<typeof TicketActionSchema>;
 export type TicketActionUpdateInput = z.infer<typeof TicketActionUpdateSchema>;
+export type LoanCreateInput = z.infer<typeof LoanCreateSchema>;
+export type LoanReturnInput = z.infer<typeof LoanReturnSchema>;
