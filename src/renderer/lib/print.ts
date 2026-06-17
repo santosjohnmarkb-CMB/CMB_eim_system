@@ -62,10 +62,7 @@ export function printHtml(title: string, bodyHtml: string): void {
     <header class="letterhead">
       <div class="brand">
         <img src="${logoUrl}" alt="${COMPANY.name}" />
-        <div class="brand-text">
-          <div class="company">${COMPANY.name}</div>
-          <div class="tagline">${COMPANY.tagline}</div>
-        </div>
+        <div class="tagline">${COMPANY.tagline}</div>
       </div>
       <div class="brand-contact">
         ${COMPANY.addressLines.map((l) => `<div>${l}</div>`).join('')}
@@ -106,16 +103,12 @@ export function printHtml(title: string, bodyHtml: string): void {
     padding-bottom: 14px;
     border-bottom: 2.5px solid #1a1f2b;
   }
-  .letterhead .brand { display: flex; align-items: center; gap: 16px; }
-  .letterhead img { height: 48px; width: auto; object-fit: contain; }
-  .letterhead .company {
-    font-family: 'Helvetica Neue', Arial, sans-serif;
-    font-size: 18px; font-weight: 700; letter-spacing: 0.01em; color: #1a1f2b;
-  }
+  .letterhead .brand { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+  .letterhead img { height: 50px; width: auto; max-width: 320px; object-fit: contain; }
   .letterhead .tagline {
     font-family: 'Helvetica Neue', Arial, sans-serif;
     font-size: 9.5px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase;
-    color: #7a8190; margin-top: 3px;
+    color: #7a8190;
   }
   .letterhead .brand-contact {
     text-align: right; font-family: 'Helvetica Neue', Arial, sans-serif;
