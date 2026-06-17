@@ -1,6 +1,6 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Plus, ArrowLeft, Camera, Lightbulb } from 'lucide-react';
+import { Plus, ArrowLeft, Camera, Lightbulb, Printer, ChevronDown } from 'lucide-react';
 import { useEquipmentStore } from '../stores/equipment.store';
 import { Button } from '../components/common/Button';
 import { SearchBox } from '../components/common/SearchBox';
@@ -11,6 +11,7 @@ import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT } from '../../shared/constant
 import type { Department } from '../../shared/constants';
 import type { EquipmentWithAsset, EquipmentStatus } from '../../shared/types';
 import { useAuthStore } from '../stores/auth.store';
+import { printHtml, escapeHtml } from '../lib/print';
 
 const statusVariantMap: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'purple' | 'default'> = {
   AVAILABLE: 'success', DEPLOYED: 'info', IN_REPAIR: 'warning', ON_HOLD: 'default',
@@ -35,12 +36,23 @@ export function EquipmentListPage() {
   const { items, categories, subcategories, loading, fetchAll, fetchCategories, fetchSubcategories } = useEquipmentStore();
   const navigate = useNavigate();
   const role = useAuthStore((s) => s.user?.role);
+  const userDept = useAuthStore((s) => s.user?.department);
   const isAdmin = role === 'admin';
 
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [subcategoryFilter, setSubcategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [printMenuOpen, setPrintMenuOpen] = useState(false);
+  const printMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (printMenuRef.current && !printMenuRef.current.contains(e.target as Node)) setPrintMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   useEffect(() => { fetchAll(); fetchCategories(); fetchSubcategories(); }, [fetchAll, fetchCategories, fetchSubcategories]);
 
@@ -95,6 +107,53 @@ export function EquipmentListPage() {
       return true;
     });
   }, [deptItems, search, categoryFilter, subcategoryFilter, statusFilter]);
+
+  // Departments this user is allowed to print. Admins get both; a department user only theirs.
+  const printableDepts = useMemo<Department[]>(() => {
+    if (isAdmin) return ['camera', 'lights_grips'];
+    if (userDept === 'camera' || userDept === 'lights_grips') return [userDept];
+    if (department) return [department];
+    return [];
+  }, [isAdmin, userDept, department]);
+
+  const buildPrintSection = (d: Department) => {
+    const list = items.filter((i) => i.category_name && CATEGORY_TO_DEPARTMENT[i.category_name] === d);
+    const rows = list.map((i) => {
+      const status = i.asset?.current_status || 'AVAILABLE';
+      const statusLabel = EQUIPMENT_STATUS_CONFIG[status as EquipmentStatus]?.label || status;
+      const sub = [i.brand, i.model].filter(Boolean).join(' ');
+      return `<tr>
+        <td>${escapeHtml(i.equipment_code)}</td>
+        <td>${escapeHtml(i.name)}${sub ? `<br/><span style="color:#888;font-size:10px">${escapeHtml(sub)}</span>` : ''}</td>
+        <td>${escapeHtml(i.category_name || '—')}</td>
+        <td>${escapeHtml(i.asset?.vendor_name || '—')}</td>
+        <td>${escapeHtml(fmtDate(i.asset?.delivered_date))}</td>
+        <td>${i.quantity ?? 1}</td>
+        <td>${i.available_qty ?? i.quantity ?? 1}</td>
+        <td>${escapeHtml(statusLabel)}</td>
+      </tr>`;
+    }).join('');
+    return `<h2>${escapeHtml(DEPARTMENT_CONFIG[d].label)} (${list.length})</h2>
+      <table>
+        <thead><tr><th>Code</th><th>Equipment</th><th>Category</th><th>Supplier</th><th>Delivered</th><th>Qty</th><th>Avail</th><th>Status</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="8">No equipment</td></tr>'}</tbody>
+      </table>`;
+  };
+
+  const printEquipment = (scope: 'all' | Department) => {
+    setPrintMenuOpen(false);
+    const depts: Department[] = scope === 'all' ? printableDepts : [scope];
+    const title = scope === 'all'
+      ? (depts.length > 1 ? 'All Equipment' : DEPARTMENT_CONFIG[depts[0]!].label)
+      : DEPARTMENT_CONFIG[scope].label;
+    const body = `
+      <div class="header">
+        <h1>Equipment List — ${escapeHtml(title)}</h1>
+        <p class="muted">Generated ${escapeHtml(new Date().toLocaleString())}</p>
+      </div>
+      ${depts.map(buildPrintSection).join('')}`;
+    printHtml('Equipment List', body);
+  };
 
   const columns: Column<EquipmentWithAsset>[] = [
     { key: 'equipment_code', header: 'Code', className: 'w-24' },
@@ -155,6 +214,28 @@ export function EquipmentListPage() {
           {Object.entries(EQUIPMENT_STATUS_CONFIG).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
         </select>
         <div className="flex-1" />
+        <div className="relative" ref={printMenuRef}>
+          {isAdmin ? (
+            <>
+              <Button variant="secondary" onClick={() => setPrintMenuOpen((o) => !o)}>
+                <Printer size={16} /> Print <ChevronDown size={14} />
+              </Button>
+              {printMenuOpen && (
+                <div className="absolute right-0 z-20 mt-1 w-56 bg-surface-800 border border-surface-700 rounded-lg shadow-lg overflow-hidden">
+                  <button onClick={() => printEquipment('all')} className="w-full text-left px-4 py-2.5 text-sm text-surface-200 hover:bg-surface-700/60 transition-colors border-b border-surface-700/50">Whole List</button>
+                  <button onClick={() => printEquipment('camera')} className="w-full text-left px-4 py-2.5 text-sm text-surface-200 hover:bg-surface-700/60 transition-colors border-b border-surface-700/50">Camera Only</button>
+                  <button onClick={() => printEquipment('lights_grips')} className="w-full text-left px-4 py-2.5 text-sm text-surface-200 hover:bg-surface-700/60 transition-colors">Lights &amp; Grips Only</button>
+                </div>
+              )}
+            </>
+          ) : (
+            printableDepts.length > 0 && (
+              <Button variant="secondary" onClick={() => printEquipment(printableDepts[0]!)}>
+                <Printer size={16} /> Print List
+              </Button>
+            )
+          )}
+        </div>
         {canCreate && <Button onClick={() => navigate('/equipment/new')}><Plus size={16} /> Add Equipment</Button>}
       </div>
 
