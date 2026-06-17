@@ -28,7 +28,7 @@ export function registerEquipmentHandlers(): void {
     const catWhere = cats ? `AND c.name IN (${cats.map(() => '?').join(', ')})` : '';
     return db.prepare(`
       SELECT e.*, ea.id as asset_db_id, ea.serial_number, ea.asset_tag, ea.purchase_date,
-             ea.purchase_price, ea.vendor_name as asset_vendor, ea.warranty_expiry,
+             ea.delivered_date, ea.purchase_price, ea.vendor_name as asset_vendor, ea.warranty_expiry,
              ea.current_location, ea.current_status,
              ea.last_inspection_date, ea.notes as asset_notes,
              c.name as category_name, sc.name as subcategory_name
@@ -45,6 +45,7 @@ export function registerEquipmentHandlers(): void {
       asset: row.asset_db_id ? {
         id: row.asset_db_id, equipment_id: row.id, serial_number: row.serial_number,
         asset_tag: row.asset_tag, purchase_date: row.purchase_date,
+        delivered_date: row.delivered_date,
         purchase_price: row.purchase_price, vendor_name: row.asset_vendor,
         warranty_expiry: row.warranty_expiry,
         current_location: row.current_location, current_status: row.current_status,
@@ -56,7 +57,7 @@ export function registerEquipmentHandlers(): void {
   ipcMain.handle('db:equipment:getById', (event: any, id: string) => {
     const row: any = db.prepare(`
       SELECT e.*, ea.id as asset_db_id, ea.serial_number, ea.asset_tag, ea.purchase_date,
-             ea.purchase_price, ea.vendor_name as asset_vendor, ea.warranty_expiry,
+             ea.delivered_date, ea.purchase_price, ea.vendor_name as asset_vendor, ea.warranty_expiry,
              ea.current_location, ea.current_status,
              ea.last_inspection_date, ea.retirement_date, ea.retirement_reason, ea.notes as asset_notes,
              c.name as category_name, sc.name as subcategory_name
@@ -75,6 +76,7 @@ export function registerEquipmentHandlers(): void {
       asset: row.asset_db_id ? {
         id: row.asset_db_id, equipment_id: row.id, serial_number: row.serial_number,
         asset_tag: row.asset_tag, purchase_date: row.purchase_date,
+        delivered_date: row.delivered_date,
         purchase_price: row.purchase_price, vendor_name: row.asset_vendor,
         warranty_expiry: row.warranty_expiry,
         current_location: row.current_location, current_status: row.current_status,
@@ -129,10 +131,10 @@ export function registerEquipmentHandlers(): void {
         input.pricing_type, input.base_price, input.notes || null, qty, qty, now, now);
 
       db.prepare(`
-        INSERT INTO equipment_assets (id, equipment_id, serial_number, asset_tag, purchase_date, purchase_price, vendor_name, warranty_expiry, current_location, current_status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Warehouse', 'AVAILABLE', ?, ?)
+        INSERT INTO equipment_assets (id, equipment_id, serial_number, asset_tag, purchase_date, delivered_date, purchase_price, vendor_name, warranty_expiry, current_location, current_status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Warehouse', 'AVAILABLE', ?, ?)
       `).run(assetId, equipmentId, input.serial_number || '', input.asset_tag || null,
-        input.purchase_date || null, input.purchase_price || 0, input.vendor_name || null,
+        input.purchase_date || null, input.delivered_date || null, input.purchase_price || 0, input.vendor_name || null,
         input.warranty_expiry || null, now, now);
     });
     tx();
@@ -150,7 +152,7 @@ export function registerEquipmentHandlers(): void {
     requireSession(event);
     const allowedFields = ['name', 'display_name', 'category_id', 'subcategory_id', 'sub_subcategory',
       'item_type', 'brand', 'model', 'description', 'pricing_type', 'base_price', 'notes', 'quantity', 'available_qty'];
-    const assetFields = ['serial_number', 'asset_tag', 'purchase_date', 'purchase_price',
+    const assetFields = ['serial_number', 'asset_tag', 'purchase_date', 'delivered_date', 'purchase_price',
       'vendor_name', 'warranty_expiry', 'current_location'];
     const updates: string[] = [];
     const values: any[] = [];
@@ -365,11 +367,12 @@ export function registerEquipmentHandlers(): void {
             row['notes'] || null, now, now);
 
           db.prepare(`
-            INSERT INTO equipment_assets (id, equipment_id, serial_number, asset_tag, purchase_date, purchase_price, vendor_name, warranty_expiry, current_location, current_status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Warehouse', 'AVAILABLE', ?, ?)
+            INSERT INTO equipment_assets (id, equipment_id, serial_number, asset_tag, purchase_date, delivered_date, purchase_price, vendor_name, warranty_expiry, current_location, current_status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Warehouse', 'AVAILABLE', ?, ?)
           `).run(assetId, eqId, row['serial_number'] || '', row['asset_tag'] || null,
-            row['purchase_date'] || null, parseFloat(row['purchase_price'] || '0'),
-            row['vendor_name'] || null, row['warranty_expiry'] || null, now, now);
+            row['purchase_date'] || null, row['delivered_date'] || row['delivery_date'] || null,
+            parseFloat(row['purchase_price'] || '0'),
+            row['vendor_name'] || row['supplier'] || null, row['warranty_expiry'] || null, now, now);
 
           imported++;
         } catch (err: any) {

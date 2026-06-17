@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS equipment_assets (
   serial_number TEXT NOT NULL DEFAULT '',
   asset_tag TEXT,
   purchase_date TEXT,
+  delivered_date TEXT,
   purchase_price REAL NOT NULL DEFAULT 0,
   vendor_name TEXT,
   warranty_expiry TEXT,

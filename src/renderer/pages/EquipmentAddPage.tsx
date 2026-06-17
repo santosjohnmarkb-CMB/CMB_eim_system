@@ -13,7 +13,7 @@ export function EquipmentAddPage() {
   const [form, setForm] = useState<Record<string, any>>({
     name: '', display_name: '', category_id: '', subcategory_id: '', brand: '', model: '',
     description: '', pricing_type: 'per_day', base_price: 0, quantity: 1, serial_number: '',
-    purchase_date: '', purchase_price: 0, vendor_name: '', warranty_expiry: '',
+    purchase_date: '', delivered_date: '', purchase_price: 0, vendor_name: '', warranty_expiry: '',
     notes: '', item_type: 'standalone',
   });
   const [saving, setSaving] = useState(false);
@@ -74,9 +74,10 @@ export function EquipmentAddPage() {
         <h3 className="text-sm font-semibold text-surface-300 mb-2">Asset Information</h3>
         <div className="grid grid-cols-2 gap-4">
           <Input label="Serial Number" value={form.serial_number} onChange={(e) => set('serial_number', e.target.value)} />
+          <Input label="Supplier" value={form.vendor_name} onChange={(e) => set('vendor_name', e.target.value)} placeholder="Optional" />
           <Input label="Purchase Date" type="date" value={form.purchase_date} onChange={(e) => set('purchase_date', e.target.value)} />
+          <Input label="Delivered Date" type="date" value={form.delivered_date} onChange={(e) => set('delivered_date', e.target.value)} />
           <Input label="Purchase Price" type="number" value={form.purchase_price} onChange={(e) => set('purchase_price', parseFloat(e.target.value) || 0)} />
-          <Input label="Vendor" value={form.vendor_name} onChange={(e) => set('vendor_name', e.target.value)} />
           <Input label="Warranty Expiry" type="date" value={form.warranty_expiry} onChange={(e) => set('warranty_expiry', e.target.value)} />
         </div>
         <Input label="Notes" value={form.notes} onChange={(e) => set('notes', e.target.value)} />

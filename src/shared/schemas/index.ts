@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+// Optional YYYY-MM-DD date that treats empty strings (from blank form inputs) as "not provided".
+const optionalDate = z.preprocess(
+  (v) => (v === '' || v === null ? undefined : v),
+  z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+);
+
 // ── Auth ──
 export const LoginSchema = z.object({
   username: z.string().min(1).max(50),
@@ -46,10 +52,11 @@ export const EquipmentCreateSchema = z.object({
   notes: z.string().max(2000).nullable().optional(),
   serial_number: z.string().max(100).default(''),
   asset_tag: z.string().max(100).nullable().optional(),
-  purchase_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  purchase_date: optionalDate,
+  delivered_date: optionalDate,
   purchase_price: z.number().min(0).max(99999999).default(0),
   vendor_name: z.string().max(200).nullable().optional(),
-  warranty_expiry: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  warranty_expiry: optionalDate,
   quantity: z.number().int().min(0).default(1),
 });
 

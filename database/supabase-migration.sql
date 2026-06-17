@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS equipment_assets (
   serial_number TEXT NOT NULL DEFAULT '',
   asset_tag TEXT,
   purchase_date DATE,
+  delivered_date DATE,
   purchase_price NUMERIC NOT NULL DEFAULT 0,
   vendor_name TEXT,
   warranty_expiry DATE,
@@ -154,6 +155,9 @@ CREATE TABLE IF NOT EXISTS preventive_schedules (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Backfill columns for databases created before they were introduced
+ALTER TABLE equipment_assets ADD COLUMN IF NOT EXISTS delivered_date DATE;
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_equipment_assets_status ON equipment_assets(current_status);

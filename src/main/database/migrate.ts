@@ -364,6 +364,15 @@ const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    // Optional delivery date for assets (when the equipment was actually delivered/received).
+    id: '013_asset_delivered_date',
+    up: (db: any) => {
+      if (tableExists(db, 'equipment_assets') && !columnExists(db, 'equipment_assets', 'delivered_date')) {
+        db.exec(`ALTER TABLE equipment_assets ADD COLUMN delivered_date TEXT`);
+      }
+    },
+  },
 ];
 
 export function runMigrations(db: any): void {

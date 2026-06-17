@@ -83,7 +83,9 @@ export function EquipmentDetailPage() {
             <span className="text-surface-500">Serial Number</span><span className="text-surface-200">{equipment.asset?.serial_number || '-'}</span>
             <span className="text-surface-500">Asset Tag</span><span className="text-surface-200">{equipment.asset?.asset_tag || '-'}</span>
             <span className="text-surface-500">Location</span><span className="text-surface-200">{equipment.asset?.current_location || '-'}</span>
+            <span className="text-surface-500">Supplier</span><span className="text-surface-200">{equipment.asset?.vendor_name || '-'}</span>
             <span className="text-surface-500">Purchase Date</span><span className="text-surface-200">{equipment.asset?.purchase_date || '-'}</span>
+            <span className="text-surface-500">Delivered Date</span><span className="text-surface-200">{equipment.asset?.delivered_date || '-'}</span>
             <span className="text-surface-500">Purchase Price</span><span className="text-surface-200">{equipment.asset?.purchase_price ? `P${equipment.asset.purchase_price.toLocaleString()}` : '-'}</span>
             <span className="text-surface-500">Warranty</span><span className="text-surface-200">{equipment.asset?.warranty_expiry || '-'}</span>
           </div>

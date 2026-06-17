@@ -101,6 +101,7 @@ export interface EquipmentAsset {
   serial_number: string;
   asset_tag: string | null;
   purchase_date: string | null;
+  delivered_date: string | null;
   purchase_price: number;
   vendor_name: string | null;
   warranty_expiry: string | null;

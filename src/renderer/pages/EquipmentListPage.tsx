@@ -22,6 +22,10 @@ const DEPT_ICONS: Record<Department, typeof Camera> = {
   lights_grips: Lightbulb,
 };
 
+function fmtDate(d: string | null | undefined) {
+  return d ? new Date(d).toLocaleDateString() : '—';
+}
+
 export function EquipmentListPage() {
   const { dept } = useParams<{ dept: string }>();
   const department = (dept === 'camera' || dept === 'lights_grips') ? dept as Department : null;
@@ -96,6 +100,8 @@ export function EquipmentListPage() {
     { key: 'equipment_code', header: 'Code', className: 'w-24' },
     { key: 'name', header: 'Name', render: (item) => (<div><p className="font-medium text-surface-100">{item.name}</p><p className="text-xs text-surface-500">{item.brand} {item.model}</p></div>) },
     { key: 'category_name', header: 'Category', render: (item) => (<span className="text-surface-400">{item.category_name}</span>) },
+    { key: 'supplier', header: 'Supplier', render: (item) => (<span className="text-surface-400">{item.asset?.vendor_name || '—'}</span>) },
+    { key: 'delivered_date', header: 'Delivered', render: (item) => (<span className="text-surface-400">{fmtDate(item.asset?.delivered_date)}</span>) },
     { key: 'status', header: 'Status', render: (item) => {
       const status = item.asset?.current_status || 'AVAILABLE';
       const config = EQUIPMENT_STATUS_CONFIG[status as EquipmentStatus];
