@@ -1,5 +1,17 @@
 import eimLogo from '../assets/eim-hor.png';
 
+// Prefer the full CMB company logo for the letterhead when it has been added to the
+// assets folder (src/renderer/assets/cmb_full_logo.png); otherwise fall back to the
+// bundled EIM logo. Using a glob keeps the build working even before the file is added.
+const assetLogos = import.meta.glob('../assets/*.png', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
+
+function letterheadLogo(): string {
+  for (const [path, url] of Object.entries(assetLogos)) {
+    if (/cmb_full_logo\.png$/i.test(path)) return url;
+  }
+  return eimLogo;
+}
+
 // Company identity printed on the letterhead of every generated document.
 // Adjust here to update all printed forms/reports at once.
 const COMPANY = {
@@ -14,10 +26,11 @@ const COMPANY = {
 // Resolve the bundled logo to an absolute URL so it loads inside the print iframe
 // (whose base URL is about:blank and cannot resolve app-relative asset paths).
 function resolveLogoUrl(): string {
+  const logo = letterheadLogo();
   try {
-    return new URL(eimLogo, document.baseURI).href;
+    return new URL(logo, document.baseURI).href;
   } catch {
-    return eimLogo;
+    return logo;
   }
 }
 
