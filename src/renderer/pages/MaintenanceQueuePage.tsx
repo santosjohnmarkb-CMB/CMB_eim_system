@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Wrench, Camera, Lightbulb, ClipboardList, AlertTriangle, History, X, Plus } from 'lucide-react';
+import { Wrench, Camera, Lightbulb, ClipboardList, AlertTriangle, History, X, Plus, Printer } from 'lucide-react';
 import { useMaintenanceStore } from '../stores/maintenance.store';
 import { useAuthStore } from '../stores/auth.store';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG, COMPLETION_OUTCOME_CONFIG } from '../lib/constants';
+import { printHtml, escapeHtml } from '../lib/print';
 import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import type { MaintenanceTicket, RepairStatus, CompletedHistoryEntry } from '../../shared/types';
@@ -74,6 +75,43 @@ export function MaintenanceQueuePage() {
       setModalLoading(false);
     }
   }, [getEquipmentHistory]);
+
+  // Print the full completed repair & maintenance history for the equipment in the open modal.
+  const printEquipmentHistory = useCallback(() => {
+    if (!historyModal || modalHistory.length === 0) return;
+    const fmt = (d: string | null | undefined) => (d ? new Date(d).toLocaleDateString() : '—');
+    const rows = modalHistory.map((entry, idx) => {
+      const docType = entry.document_type === 'loss' ? 'Equipment Loss' : (entry.document_type || '—');
+      const mType = (entry.maintenance_type || '').replace(/_/g, ' ');
+      const severity = SEVERITY_CONFIG[entry.severity]?.label || entry.severity || '—';
+      const outcome = entry.completion_outcome
+        ? (COMPLETION_OUTCOME_CONFIG[entry.completion_outcome]?.label || entry.completion_outcome)
+        : '—';
+      return `<tr>
+        <td>${idx + 1}</td>
+        <td>${escapeHtml(entry.ticket_number)}</td>
+        <td style="text-transform:capitalize">${escapeHtml(docType)}${mType ? `<br/><span style="color:#888;font-size:10px;text-transform:capitalize">${escapeHtml(mType)}</span>` : ''}</td>
+        <td>${escapeHtml(severity)}</td>
+        <td>${escapeHtml(fmt(entry.reported_date))}</td>
+        <td>${escapeHtml(fmt(entry.completion_date))}</td>
+        <td>${escapeHtml(outcome)}</td>
+        <td>${escapeHtml(entry.issue_description || '—')}</td>
+        <td>${escapeHtml(entry.last_remarks || '—')}</td>
+      </tr>`;
+    }).join('');
+
+    const body = `
+      <div class="header">
+        <h1>Equipment Repair & Maintenance History</h1>
+        <p class="muted">${escapeHtml(historyModal.equipmentName)} · ${escapeHtml(historyModal.equipmentCode)}</p>
+        <p class="muted">${modalHistory.length} completed job${modalHistory.length !== 1 ? 's' : ''} on record · Generated ${escapeHtml(new Date().toLocaleString())}</p>
+      </div>
+      <table>
+        <thead><tr><th>#</th><th>Control No.</th><th>Type</th><th>Severity</th><th>Reported</th><th>Completed</th><th>Outcome</th><th>Issue Description</th><th>Last Remarks</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+    printHtml(`Maintenance History — ${historyModal.equipmentCode}`, body);
+  }, [historyModal, modalHistory]);
 
   const recentByDept = useMemo(() => {
     const result: Record<Department, { equipmentId: string; equipmentName: string; equipmentCode: string; completionDate: string; category: string }[]> = { camera: [], lights_grips: [] };
@@ -443,12 +481,21 @@ export function MaintenanceQueuePage() {
               <p className="text-xs text-surface-500">
                 {modalHistory.length} completed job{modalHistory.length !== 1 && 's'} on record
               </p>
-              <button
-                onClick={() => { setHistoryModal(null); setModalHistory([]); }}
-                className="px-4 py-1.5 text-sm font-medium text-surface-300 hover:text-surface-100 bg-surface-800 hover:bg-surface-700 rounded-lg transition-colors"
-              >
-                Close
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={printEquipmentHistory}
+                  disabled={modalLoading || modalHistory.length === 0}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium text-primary-300 bg-primary-500/10 hover:bg-primary-500/20 border border-primary-500/20 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Printer size={15} /> Print History
+                </button>
+                <button
+                  onClick={() => { setHistoryModal(null); setModalHistory([]); }}
+                  className="px-4 py-1.5 text-sm font-medium text-surface-300 hover:text-surface-100 bg-surface-800 hover:bg-surface-700 rounded-lg transition-colors"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>
