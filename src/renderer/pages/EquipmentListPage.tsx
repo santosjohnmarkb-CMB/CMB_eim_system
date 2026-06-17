@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Plus, ArrowLeft, Camera, Lightbulb, Printer, ChevronDown } from 'lucide-react';
 import { useEquipmentStore } from '../stores/equipment.store';
@@ -95,18 +95,20 @@ export function EquipmentListPage() {
     setSubcategoryFilter('');
   };
 
-  const filtered = useMemo(() => {
-    return deptItems.filter((item) => {
-      if (search) {
-        const q = search.toLowerCase();
-        if (!item.name.toLowerCase().includes(q) && !item.equipment_code.toLowerCase().includes(q) && !item.brand.toLowerCase().includes(q)) return false;
-      }
-      if (categoryFilter && item.category_id !== categoryFilter) return false;
-      if (subcategoryFilter && item.subcategory_id !== subcategoryFilter) return false;
-      if (statusFilter && item.asset?.current_status !== statusFilter) return false;
-      return true;
-    });
-  }, [deptItems, search, categoryFilter, subcategoryFilter, statusFilter]);
+  // Shared predicate for the active search/category/subcategory/status filters, so the
+  // on-screen table and the printed output stay in sync.
+  const matchesFilters = useCallback((item: EquipmentWithAsset) => {
+    if (search) {
+      const q = search.toLowerCase();
+      if (!item.name.toLowerCase().includes(q) && !item.equipment_code.toLowerCase().includes(q) && !item.brand.toLowerCase().includes(q)) return false;
+    }
+    if (categoryFilter && item.category_id !== categoryFilter) return false;
+    if (subcategoryFilter && item.subcategory_id !== subcategoryFilter) return false;
+    if (statusFilter && item.asset?.current_status !== statusFilter) return false;
+    return true;
+  }, [search, categoryFilter, subcategoryFilter, statusFilter]);
+
+  const filtered = useMemo(() => deptItems.filter(matchesFilters), [deptItems, matchesFilters]);
 
   // Departments this user is allowed to print. Admins get both; a department user only theirs.
   const printableDepts = useMemo<Department[]>(() => {
@@ -117,7 +119,8 @@ export function EquipmentListPage() {
   }, [isAdmin, userDept, department]);
 
   const buildPrintSection = (d: Department) => {
-    const list = items.filter((i) => i.category_name && CATEGORY_TO_DEPARTMENT[i.category_name] === d);
+    // Respect the active page filters so the printout matches what's visible on screen.
+    const list = items.filter((i) => i.category_name && CATEGORY_TO_DEPARTMENT[i.category_name] === d && matchesFilters(i));
     const rows = list.map((i) => {
       const status = i.asset?.current_status || 'AVAILABLE';
       const statusLabel = EQUIPMENT_STATUS_CONFIG[status as EquipmentStatus]?.label || status;
@@ -173,7 +176,6 @@ export function EquipmentListPage() {
       const color = avail === 0 ? 'text-danger-400' : avail < total ? 'text-warning-400' : 'text-success-400';
       return <span className={color}>{avail}</span>;
     }, className: 'w-14 text-center' },
-    { key: 'base_price', header: 'Rate', render: (item) => (<span className="text-surface-300">P{item.base_price.toLocaleString()}</span>), className: 'w-24 text-right' },
   ];
 
   const canCreate = role === 'admin' || role === 'inventory_manager';

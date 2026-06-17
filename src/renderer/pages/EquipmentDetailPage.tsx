@@ -70,7 +70,6 @@ export function EquipmentDetailPage() {
             <span className="text-surface-500">Model</span><span className="text-surface-200">{equipment.model || '-'}</span>
             <span className="text-surface-500">Category</span><span className="text-surface-200">{equipment.category_name}</span>
             <span className="text-surface-500">Subcategory</span><span className="text-surface-200">{equipment.subcategory_name}</span>
-            <span className="text-surface-500">Pricing</span><span className="text-surface-200">{equipment.pricing_type} - P{equipment.base_price.toLocaleString()}</span>
             <span className="text-surface-500">Quantity</span><span className="text-surface-200">{equipment.quantity ?? 1}</span>
             <span className="text-surface-500">Available</span><span className={`${(equipment.available_qty ?? 1) === 0 ? 'text-danger-400' : 'text-surface-200'}`}>{equipment.available_qty ?? 1} of {equipment.quantity ?? 1}</span>
             <span className="text-surface-500">Status</span><Badge variant={statusVariantMap[currentStatus] || 'default'}>{statusConfig?.label}</Badge>

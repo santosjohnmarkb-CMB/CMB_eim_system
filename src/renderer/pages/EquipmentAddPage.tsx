@@ -58,13 +58,6 @@ export function EquipmentAddPage() {
           </div>
           <Input label="Brand" value={form.brand} onChange={(e) => set('brand', e.target.value)} />
           <Input label="Model" value={form.model} onChange={(e) => set('model', e.target.value)} />
-          <div>
-            <label className="block text-xs font-medium text-surface-400 mb-1">Pricing Type</label>
-            <select value={form.pricing_type} onChange={(e) => set('pricing_type', e.target.value)} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100">
-              <option value="per_day">Per Day</option><option value="per_project">Per Project</option><option value="package_rate">Package Rate</option>
-            </select>
-          </div>
-          <Input label="Base Price" type="number" value={form.base_price} onChange={(e) => set('base_price', parseFloat(e.target.value) || 0)} />
           <Input label="Quantity" type="number" value={form.quantity} onChange={(e) => set('quantity', Math.max(0, parseInt(e.target.value) || 0))} />
         </div>
         <Input label="Description" value={form.description} onChange={(e) => set('description', e.target.value)} />
