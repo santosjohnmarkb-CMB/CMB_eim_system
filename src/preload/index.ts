@@ -54,6 +54,7 @@ const ALLOWED_CHANNELS = new Set([
   'db:loans:getAll',
   'db:loans:getById',
   'db:loans:create',
+  'db:loans:update',
   'db:loans:returnItems',
   'db:loans:returnOrder',
   'db:loans:delete',

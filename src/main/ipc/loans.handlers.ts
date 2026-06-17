@@ -2,7 +2,7 @@ import { ipcMain } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../database/index';
 import { requireSession } from './session';
-import { LoanCreateSchema, LoanReturnSchema } from '../../shared/schemas';
+import { LoanCreateSchema, LoanUpdateSchema, LoanReturnSchema } from '../../shared/schemas';
 import { LOAN_DEPT_PREFIX, LOAN_DIRECTION_CONFIG } from '../../shared/constants';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { pushOperationalToCloud } from '../sync/operational-sync';
@@ -179,6 +179,23 @@ export function registerLoanHandlers(): void {
       }
     }
 
+    return db.prepare('SELECT * FROM equipment_loans WHERE id = ?').get(id);
+  });
+
+  ipcMain.handle('db:loans:update', (event: any, id: string, data: unknown) => {
+    const user = requireSession(event);
+    if (user.role !== 'admin') throw new Error('Only admins can edit loans');
+    getLoanInDept(event, id);
+    const input = LoanUpdateSchema.parse(data);
+    db.prepare(`
+      UPDATE equipment_loans
+      SET person_or_org = ?, purpose = ?, location = ?, loaned_date = ?, duration = ?,
+          tentative_return_date = ?, remarks = ?, updated_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      input.person_or_org, input.purpose || '', input.location || '', input.loaned_date,
+      input.duration || '', input.tentative_return_date || null, input.remarks || '', id,
+    );
     return db.prepare('SELECT * FROM equipment_loans WHERE id = ?').get(id);
   });
 

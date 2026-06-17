@@ -8,6 +8,7 @@ interface LoansState {
   fetchAll: () => Promise<void>;
   getById: (id: string) => Promise<EquipmentLoanWithItems | null>;
   create: (data: any) => Promise<EquipmentLoan>;
+  update: (loanId: string, data: any) => Promise<EquipmentLoan>;
   returnItems: (loanId: string, itemIds: string[]) => Promise<void>;
   returnOrder: (loanId: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
@@ -33,6 +34,12 @@ export const useLoansStore = create<LoansState>((set, get) => ({
 
   create: async (data: any) => {
     const result = await ipcInvoke<EquipmentLoan>('db:loans:create', data);
+    await get().fetchAll();
+    return result;
+  },
+
+  update: async (loanId: string, data: any) => {
+    const result = await ipcInvoke<EquipmentLoan>('db:loans:update', loanId, data);
     await get().fetchAll();
     return result;
   },

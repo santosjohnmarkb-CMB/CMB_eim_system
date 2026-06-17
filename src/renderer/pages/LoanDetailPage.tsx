@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Printer, RotateCcw, Trash2, PackageCheck, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { ArrowLeft, Printer, RotateCcw, Trash2, PackageCheck, ArrowUpRight, ArrowDownLeft, Pencil } from 'lucide-react';
 import { useLoansStore } from '../stores/loans.store';
 import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
+import { Input } from '../components/common/Input';
+import { Modal } from '../components/common/Modal';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { useToast } from '../hooks';
 import { DEPARTMENT_CONFIG, LOAN_STATUS_CONFIG, LOAN_DIRECTION_CONFIG } from '../../shared/constants';
@@ -25,12 +27,19 @@ export function LoanDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const toast = useToast();
-  const { getById, returnItems, returnOrder, remove } = useLoansStore();
+  const { getById, update, returnItems, returnOrder, remove } = useLoansStore();
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
 
   const [loan, setLoan] = useState<EquipmentLoanWithItems | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+
+  const [showEdit, setShowEdit] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editForm, setEditForm] = useState({
+    person_or_org: '', loaned_date: '', tentative_return_date: '',
+    purpose: '', location: '', duration: '', remarks: '',
+  });
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -87,6 +96,44 @@ export function LoanDetailPage() {
       toast.error(err.message || 'Failed to delete loan');
       setBusy(false);
     }
+  };
+
+  const openEdit = () => {
+    if (!loan) return;
+    setEditForm({
+      person_or_org: loan.person_or_org || '',
+      loaned_date: loan.loaned_date || '',
+      tentative_return_date: loan.tentative_return_date || '',
+      purpose: loan.purpose || '',
+      location: loan.location || '',
+      duration: loan.duration || '',
+      remarks: loan.remarks || '',
+    });
+    setShowEdit(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!id) return;
+    if (!editForm.person_or_org.trim()) { toast.error('Person or organization is required'); return; }
+    if (!editForm.loaned_date) { toast.error('Date is required'); return; }
+    setSavingEdit(true);
+    try {
+      await update(id, {
+        person_or_org: editForm.person_or_org,
+        loaned_date: editForm.loaned_date,
+        tentative_return_date: editForm.tentative_return_date || null,
+        purpose: editForm.purpose,
+        location: editForm.location,
+        duration: editForm.duration,
+        remarks: editForm.remarks,
+      });
+      setShowEdit(false);
+      await load();
+      toast.success('Loan updated');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update loan');
+    }
+    setSavingEdit(false);
   };
 
   const handlePrint = () => {
@@ -166,6 +213,9 @@ export function LoanDetailPage() {
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={handlePrint}><Printer size={16} /> Print</Button>
+          {isAdmin && (
+            <Button variant="secondary" onClick={openEdit}><Pencil size={16} /> Edit</Button>
+          )}
           {outItems.length > 0 && (
             <Button onClick={handleReturnAll} loading={busy}><RotateCcw size={16} /> Return All</Button>
           )}
@@ -243,6 +293,59 @@ export function LoanDetailPage() {
           <Button variant="danger" onClick={handleDelete} loading={busy}><Trash2 size={16} /> Delete Loan</Button>
         </div>
       )}
+
+      <Modal isOpen={showEdit} onClose={() => setShowEdit(false)} title="Edit Loan Details" size="lg">
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              label={isOutward ? 'Person / Organization *' : 'Lent By (Person / Organization) *'}
+              value={editForm.person_or_org}
+              onChange={(e) => setEditForm((p) => ({ ...p, person_or_org: e.target.value }))}
+            />
+            <Input
+              label={isOutward ? 'Loaned Date *' : 'Received Date *'}
+              type="date"
+              value={editForm.loaned_date}
+              onChange={(e) => setEditForm((p) => ({ ...p, loaned_date: e.target.value }))}
+            />
+            <Input
+              label={isOutward ? 'Tentative Return Date' : 'Return-by Date'}
+              type="date"
+              value={editForm.tentative_return_date}
+              onChange={(e) => setEditForm((p) => ({ ...p, tentative_return_date: e.target.value }))}
+            />
+            <Input
+              label="Duration"
+              value={editForm.duration}
+              onChange={(e) => setEditForm((p) => ({ ...p, duration: e.target.value }))}
+              placeholder="e.g. 3 days"
+            />
+            <Input
+              label="Purpose"
+              value={editForm.purpose}
+              onChange={(e) => setEditForm((p) => ({ ...p, purpose: e.target.value }))}
+            />
+            <Input
+              label="Location"
+              value={editForm.location}
+              onChange={(e) => setEditForm((p) => ({ ...p, location: e.target.value }))}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-surface-400 mb-1">Remarks</label>
+            <textarea
+              value={editForm.remarks}
+              onChange={(e) => setEditForm((p) => ({ ...p, remarks: e.target.value }))}
+              rows={3}
+              className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 resize-y"
+            />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="secondary" onClick={() => setShowEdit(false)}>Cancel</Button>
+            <Button onClick={handleSaveEdit} loading={savingEdit}>Save Changes</Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

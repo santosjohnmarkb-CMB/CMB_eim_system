@@ -246,6 +246,7 @@ export const IPC_CHANNELS = {
   LOANS_GET_ALL: 'db:loans:getAll',
   LOANS_GET_BY_ID: 'db:loans:getById',
   LOANS_CREATE: 'db:loans:create',
+  LOANS_UPDATE: 'db:loans:update',
   LOANS_RETURN_ITEMS: 'db:loans:returnItems',
   LOANS_RETURN_ORDER: 'db:loans:returnOrder',
   LOANS_DELETE: 'db:loans:delete',

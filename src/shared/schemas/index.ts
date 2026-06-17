@@ -217,6 +217,18 @@ export const LoanCreateSchema = z.object({
   });
 });
 
+// Editable loan-order fields (admin only). Direction, department, and line items are
+// intentionally excluded since they affect numbering and inventory accounting.
+export const LoanUpdateSchema = z.object({
+  person_or_org: z.string().min(1).max(200),
+  purpose: z.string().max(2000).default(''),
+  location: z.string().max(200).default(''),
+  loaned_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  duration: z.string().max(200).default(''),
+  tentative_return_date: optionalDate.nullable(),
+  remarks: z.string().max(2000).default(''),
+});
+
 export const LoanReturnSchema = z.object({
   item_ids: z.array(z.string().uuid()).min(1),
 });
@@ -238,4 +250,5 @@ export type PreventiveScheduleInput = z.infer<typeof PreventiveScheduleSchema>;
 export type TicketActionInput = z.infer<typeof TicketActionSchema>;
 export type TicketActionUpdateInput = z.infer<typeof TicketActionUpdateSchema>;
 export type LoanCreateInput = z.infer<typeof LoanCreateSchema>;
+export type LoanUpdateInput = z.infer<typeof LoanUpdateSchema>;
 export type LoanReturnInput = z.infer<typeof LoanReturnSchema>;
