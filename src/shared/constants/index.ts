@@ -167,6 +167,11 @@ export const LOAN_DEPT_PREFIX: Record<Department, string> = {
   lights_grips: 'LG',
 };
 
+export const LOAN_DIRECTION_CONFIG: Record<'OUTWARD' | 'INWARD', { label: string; shortLabel: string; description: string; numberCode: string }> = {
+  OUTWARD: { label: 'Outward', shortLabel: 'Out', description: 'Equipment we loan out to others', numberCode: 'OUT' },
+  INWARD:  { label: 'Inward',  shortLabel: 'In',  description: 'Equipment loaned to us by others', numberCode: 'IN' },
+};
+
 export const CATEGORY_PREFIXES: Record<string, string> = {
   'Camera': 'CAM',
   'Dollies Mounts & Cranes': 'DMC',

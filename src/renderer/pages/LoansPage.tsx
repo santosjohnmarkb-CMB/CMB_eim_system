@@ -1,16 +1,16 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Printer, Camera, Lightbulb, PackageCheck } from 'lucide-react';
+import { Plus, Printer, Camera, Lightbulb, PackageCheck, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { useLoansStore } from '../stores/loans.store';
 import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { DataTable, type Column } from '../components/common/DataTable';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
-import { DEPARTMENT_CONFIG, LOAN_STATUS_CONFIG } from '../../shared/constants';
+import { DEPARTMENT_CONFIG, LOAN_STATUS_CONFIG, LOAN_DIRECTION_CONFIG } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import { printHtml, escapeHtml } from '../lib/print';
-import type { EquipmentLoan } from '../../shared/types';
+import type { EquipmentLoan, LoanDirection } from '../../shared/types';
 
 const DEPT_ICONS: Record<Department, typeof Camera> = {
   camera: Camera,
@@ -40,6 +40,10 @@ export function LoansPage() {
   const isAdmin = user?.role === 'admin';
   const lockedDept = !isAdmin ? (user?.department as Department | null) : null;
 
+  const [direction, setDirection] = useState<LoanDirection>('OUTWARD');
+  const isOutward = direction === 'OUTWARD';
+  const partyHeader = isOutward ? 'Borrower' : 'Lender';
+
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   const visibleDepts = useMemo<Department[]>(
@@ -47,16 +51,22 @@ export function LoansPage() {
     [lockedDept],
   );
 
+  // Older records created before the inward/outward split default to OUTWARD.
+  const directionLoans = useMemo(
+    () => loans.filter((l) => (l.direction ?? 'OUTWARD') === direction),
+    [loans, direction],
+  );
+
   const byDept = useMemo(() => {
     const result: Record<Department, EquipmentLoan[]> = { camera: [], lights_grips: [] };
-    for (const loan of loans) {
+    for (const loan of directionLoans) {
       if (result[loan.department]) result[loan.department].push(loan);
     }
     return result;
-  }, [loans]);
+  }, [directionLoans]);
 
   const printList = () => {
-    const activeLoans = loans.filter((l) => l.status !== 'RETURNED');
+    const activeLoans = directionLoans.filter((l) => l.status !== 'RETURNED');
     const sections = visibleDepts.map((dept) => {
       const deptLoans = activeLoans.filter((l) => l.department === dept);
       const rows = deptLoans.map((l) => `
@@ -72,15 +82,15 @@ export function LoansPage() {
       return `
         <h2>${escapeHtml(DEPARTMENT_CONFIG[dept].label)}</h2>
         <table>
-          <thead><tr><th>Loan #</th><th>Person / Org</th><th>Purpose</th><th>Location</th><th>Out / Total</th><th>Loaned</th><th>Tentative Return</th></tr></thead>
+          <thead><tr><th>Loan #</th><th>${escapeHtml(partyHeader)}</th><th>Purpose</th><th>Location</th><th>Out / Total</th><th>${isOutward ? 'Loaned' : 'Received'}</th><th>${isOutward ? 'Tentative Return' : 'Return By'}</th></tr></thead>
           <tbody>${rows || '<tr><td colspan="7">No active loans</td></tr>'}</tbody>
         </table>`;
     }).join('');
 
     const body = `
       <div class="header">
-        <h1>Loaned Equipment</h1>
-        <p class="muted">Active loans as of ${escapeHtml(new Date().toLocaleDateString())}</p>
+        <h1>Loaned Equipment — ${escapeHtml(LOAN_DIRECTION_CONFIG[direction].label)}</h1>
+        <p class="muted">${isOutward ? 'Equipment we have loaned out' : 'Equipment loaned to us'} as of ${escapeHtml(new Date().toLocaleDateString())}</p>
       </div>
       ${sections}`;
     printHtml('Loaned Equipment List', body);
@@ -88,10 +98,10 @@ export function LoansPage() {
 
   const columns: Column<EquipmentLoan>[] = [
     { key: 'loan_number', header: 'Loan #', render: (l) => <span className="font-mono text-xs text-primary-400">{l.loan_number}</span> },
-    { key: 'person_or_org', header: 'Person / Org', render: (l) => <span className="font-medium text-surface-100">{l.person_or_org}</span> },
+    { key: 'person_or_org', header: partyHeader, render: (l) => <span className="font-medium text-surface-100">{l.person_or_org}</span> },
     { key: 'purpose', header: 'Purpose', render: (l) => <span className="text-surface-400">{l.purpose || '—'}</span> },
     { key: 'items', header: 'Items Out', render: (l) => <span className="text-surface-300">{l.out_count ?? 0} / {l.item_count ?? 0}</span> },
-    { key: 'tentative_return_date', header: 'Tentative Return', render: (l) => <span className="text-surface-400">{fmtDate(l.tentative_return_date)}</span> },
+    { key: 'tentative_return_date', header: isOutward ? 'Tentative Return' : 'Return By', render: (l) => <span className="text-surface-400">{fmtDate(l.tentative_return_date)}</span> },
     { key: 'status', header: 'Status', render: (l) => <Badge variant={STATUS_VARIANT[l.status] || 'default'}>{LOAN_STATUS_CONFIG[l.status]?.label || l.status}</Badge> },
   ];
 
@@ -105,10 +115,35 @@ export function LoansPage() {
         </div>
         <div className="flex-1">
           <h1 className="text-2xl font-bold text-surface-100">Loaned Equipment</h1>
-          <p className="text-sm text-surface-500">Equipment loaned out for events, training, and workshops</p>
+          <p className="text-sm text-surface-500">
+            {isOutward ? 'Equipment we loan out for events, training, and workshops' : 'Equipment loaned to us by external parties'}
+          </p>
         </div>
         <Button variant="secondary" onClick={printList}><Printer size={16} /> Print List</Button>
         <Button onClick={() => navigate('/loans/new')}><Plus size={16} /> New Loan</Button>
+      </div>
+
+      {/* Direction filter */}
+      <div className="inline-flex rounded-lg border border-surface-700 bg-surface-800/60 p-1">
+        {(['OUTWARD', 'INWARD'] as LoanDirection[]).map((dir) => {
+          const cfg = LOAN_DIRECTION_CONFIG[dir];
+          const Icon = dir === 'OUTWARD' ? ArrowUpRight : ArrowDownLeft;
+          const active = direction === dir;
+          const count = loans.filter((l) => (l.direction ?? 'OUTWARD') === dir).length;
+          return (
+            <button
+              key={dir}
+              type="button"
+              onClick={() => setDirection(dir)}
+              className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                active ? 'bg-primary-600/25 text-primary-200' : 'text-surface-400 hover:text-surface-200'
+              }`}
+            >
+              <Icon size={15} /> {cfg.label}
+              <span className="text-xs text-surface-500">({count})</span>
+            </button>
+          );
+        })}
       </div>
 
       {visibleDepts.map((dept) => {
@@ -126,7 +161,7 @@ export function LoansPage() {
               data={deptLoans}
               onRowClick={(l) => navigate(`/loans/${l.id}`)}
               loading={false}
-              emptyMessage="No loans recorded"
+              emptyMessage={isOutward ? 'No loans recorded' : 'No inward loans recorded'}
             />
           </div>
         );

@@ -328,6 +328,42 @@ const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    // Add inward/outward loan direction and support free-text (external) loan items.
+    id: '012_loan_inward_outward',
+    up: (db: any) => {
+      if (tableExists(db, 'equipment_loans') && !columnExists(db, 'equipment_loans', 'direction')) {
+        db.exec(`ALTER TABLE equipment_loans ADD COLUMN direction TEXT NOT NULL DEFAULT 'OUTWARD' CHECK (direction IN ('OUTWARD', 'INWARD'))`);
+      }
+      // INWARD items have no catalog reference, so equipment_id must become nullable and
+      // a free-text item_name column is added. SQLite can't relax NOT NULL in place, so the
+      // table is rebuilt with the relaxed schema while preserving existing rows.
+      if (tableExists(db, 'equipment_loan_items')) {
+        const needsRebuild = !columnExists(db, 'equipment_loan_items', 'item_name');
+        if (needsRebuild) {
+          db.pragma('foreign_keys = OFF');
+          db.exec(`CREATE TABLE equipment_loan_items_new (
+            id TEXT PRIMARY KEY,
+            loan_id TEXT NOT NULL REFERENCES equipment_loans(id) ON DELETE CASCADE,
+            equipment_id TEXT REFERENCES equipment_items(id),
+            asset_id TEXT REFERENCES equipment_assets(id),
+            item_name TEXT,
+            status TEXT NOT NULL DEFAULT 'OUT' CHECK (status IN ('OUT', 'RETURNED')),
+            returned_date TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+          )`);
+          db.exec(`INSERT INTO equipment_loan_items_new (id, loan_id, equipment_id, asset_id, item_name, status, returned_date, notes, created_at)
+            SELECT id, loan_id, equipment_id, asset_id, NULL, status, returned_date, notes, created_at FROM equipment_loan_items`);
+          db.exec(`DROP TABLE equipment_loan_items`);
+          db.exec(`ALTER TABLE equipment_loan_items_new RENAME TO equipment_loan_items`);
+          db.exec(`CREATE INDEX IF NOT EXISTS idx_equipment_loan_items_loan ON equipment_loan_items(loan_id)`);
+          db.exec(`CREATE INDEX IF NOT EXISTS idx_equipment_loan_items_equipment ON equipment_loan_items(equipment_id)`);
+          db.pragma('foreign_keys = ON');
+        }
+      }
+    },
+  },
 ];
 
 export function runMigrations(db: any): void {

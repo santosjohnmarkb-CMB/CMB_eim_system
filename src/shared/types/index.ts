@@ -293,12 +293,15 @@ export interface Vendor {
 
 export type LoanStatus = 'ACTIVE' | 'PARTIAL' | 'RETURNED';
 export type LoanItemStatus = 'OUT' | 'RETURNED';
+// OUTWARD = we lend our equipment to others; INWARD = equipment lent to us by others.
+export type LoanDirection = 'OUTWARD' | 'INWARD';
 
 export interface EquipmentLoanItem {
   id: string;
   loan_id: string;
-  equipment_id: string;
+  equipment_id: string | null;
   asset_id: string | null;
+  item_name: string | null;
   status: LoanItemStatus;
   returned_date: string | null;
   notes: string | null;
@@ -311,6 +314,7 @@ export interface EquipmentLoanItem {
 export interface EquipmentLoan {
   id: string;
   loan_number: string;
+  direction: LoanDirection;
   department: 'camera' | 'lights_grips';
   person_or_org: string;
   purpose: string;

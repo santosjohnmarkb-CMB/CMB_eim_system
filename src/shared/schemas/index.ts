@@ -180,6 +180,7 @@ export const PreventiveScheduleSchema = z.object({
 
 // ── Equipment Loans ──
 export const LoanCreateSchema = z.object({
+  direction: z.enum(['OUTWARD', 'INWARD']).default('OUTWARD'),
   department: z.enum(['camera', 'lights_grips']),
   person_or_org: z.string().min(1).max(200),
   purpose: z.string().max(2000).default(''),
@@ -189,9 +190,24 @@ export const LoanCreateSchema = z.object({
   tentative_return_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   remarks: z.string().max(2000).default(''),
   items: z.array(z.object({
-    equipment_id: z.string().uuid(),
+    equipment_id: z.string().uuid().nullable().optional(),
+    item_name: z.string().max(200).nullable().optional(),
     notes: z.string().max(1000).nullable().optional(),
   })).min(1),
+}).superRefine((data, ctx) => {
+  data.items.forEach((item, idx) => {
+    if (data.direction === 'OUTWARD') {
+      // Outward loans draw from our catalog and must reference an equipment record.
+      if (!item.equipment_id) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['items', idx, 'equipment_id'], message: 'equipment_id is required for outward loans' });
+      }
+    } else {
+      // Inward items are external — described by free-text name only.
+      if (!item.item_name || !item.item_name.trim()) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['items', idx, 'item_name'], message: 'item_name is required for inward loans' });
+      }
+    }
+  });
 });
 
 export const LoanReturnSchema = z.object({

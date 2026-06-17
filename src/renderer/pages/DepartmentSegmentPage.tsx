@@ -16,16 +16,14 @@ import { DataTable, type Column } from '../components/common/DataTable';
 import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
 import { Input } from '../components/common/Input';
-import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { useToast } from '../hooks';
 import type { MaintenanceTicket, PartsCatalogItem, Vendor, CompletedHistoryEntry, EquipmentLoan } from '../../shared/types';
 import { Camera, Lightbulb, ArrowLeft, Wrench, Box, Truck, BarChart3, Plus, AlertTriangle, History, PackageCheck, ChevronRight } from 'lucide-react';
 
-type TabKey = 'maintenance' | 'parts' | 'vendors' | 'reports';
+type TabKey = 'parts' | 'vendors' | 'reports';
 
 const TABS: { key: TabKey; label: string; icon: typeof Wrench }[] = [
   { key: 'reports', label: 'Dashboard', icon: BarChart3 },
-  { key: 'maintenance', label: 'Maintenance', icon: Wrench },
   { key: 'parts', label: 'Parts', icon: Box },
   { key: 'vendors', label: 'Vendors', icon: Truck },
 ];
@@ -37,121 +35,6 @@ const DEPT_ICONS: Record<Department, typeof Camera> = {
 
 
 const KANBAN_COLUMNS = ['REPORTED', 'ASSESSED', 'IN_PROGRESS', 'COMPLETED'] as const;
-
-// ─── Maintenance Tab ───────────────────────────────────────────────────
-
-function MaintenanceTab({ dept }: { dept: Department }) {
-  const { tickets, loading, fetchAll } = useMaintenanceStore();
-  const { items: equipmentItems, categories, fetchAll: fetchEquipment, fetchCategories } = useEquipmentStore();
-  const navigate = useNavigate();
-  const [search, setSearch] = useState('');
-
-  useEffect(() => { fetchAll(); fetchEquipment(); fetchCategories(); }, [fetchAll, fetchEquipment, fetchCategories]);
-
-  const deptCategoryNames = DEPARTMENT_CONFIG[dept].categories;
-
-  const equipmentCategoryMap = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const eq of equipmentItems) map.set(eq.id, eq.category_id);
-    return map;
-  }, [equipmentItems]);
-
-  const validCatIds = useMemo(() => {
-    const nameSet = new Set(deptCategoryNames);
-    return new Set(categories.filter((c) => nameSet.has(c.name)).map((c) => c.id));
-  }, [categories, deptCategoryNames]);
-
-  const filtered = useMemo(() => {
-    return tickets.filter((t) => {
-      const catId = equipmentCategoryMap.get(t.equipment_id);
-      if (catId && !validCatIds.has(catId)) return false;
-      if (!search) return true;
-      const q = search.toLowerCase();
-      return t.ticket_number.toLowerCase().includes(q) || (t.equipment_name || '').toLowerCase().includes(q);
-    });
-  }, [tickets, equipmentCategoryMap, validCatIds, search]);
-
-  const kanbanData = KANBAN_COLUMNS.map((status) => ({
-    status,
-    config: REPAIR_STATUS_CONFIG[status],
-    tickets: filtered.filter((t) => t.repair_status === status),
-  }));
-
-  const openTickets = useMemo(() =>
-    filtered.filter((t) => t.repair_status !== 'COMPLETED' && t.repair_status !== 'CANCELLED'),
-  [filtered]);
-
-  return (
-    <div className="space-y-4 flex flex-col">
-      <div className="flex items-center gap-3">
-        <SearchBox value={search} onChange={setSearch} placeholder="Search tickets..." className="w-64" />
-        <div className="flex-1" />
-        <Button onClick={() => navigate('/maintenance/new')}><Plus size={16} /> New Ticket</Button>
-      </div>
-
-      {/* Kanban Board */}
-      <div className="flex gap-3 overflow-x-auto pb-2">
-        {kanbanData.map(({ status, config, tickets: colTickets }) => (
-          <div key={status} className="flex-shrink-0 w-52 flex flex-col">
-            <div className="flex items-center gap-2 mb-2 px-1">
-              <span className={`text-xs font-semibold ${config.color}`}>{config.label}</span>
-              <span className="text-2xs text-surface-500 bg-surface-800 px-1.5 py-0.5 rounded-full">{colTickets.length}</span>
-            </div>
-            <div className="flex-1 space-y-2 overflow-y-auto max-h-[340px]">
-              {colTickets.map((ticket) => (
-                <button
-                  key={ticket.id}
-                  onClick={() => navigate(`/maintenance/${ticket.id}`)}
-                  className="w-full glass-panel rounded-lg p-3 text-left hover:bg-surface-800/70 transition-colors"
-                >
-                  <p className="text-xs text-surface-500 mb-1">{ticket.ticket_number}</p>
-                  <p className="text-sm font-medium text-surface-200 truncate">{ticket.equipment_name}</p>
-                  {ticket.document_type && (
-                    <div className="flex items-center gap-2 mt-2">
-                      <Badge variant={ticket.document_type === 'maintenance' ? 'info' : ticket.document_type === 'update' ? 'purple' : 'warning'} size="sm">
-                        {ticket.document_type === 'maintenance' ? 'MNT' : ticket.document_type === 'update' ? 'UPD' : 'RPR'}
-                      </Badge>
-                    </div>
-                  )}
-                </button>
-              ))}
-              {colTickets.length === 0 && <p className="text-2xs text-surface-600 text-center py-4">Empty</p>}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Open Tickets List */}
-      {openTickets.length > 0 && (
-        <div className="glass-panel rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-surface-200 mb-3">Open Tickets — Last Action</h3>
-          <div className="divide-y divide-surface-800">
-            {openTickets.slice(0, 20).map((ticket) => (
-              <button
-                key={ticket.id}
-                onClick={() => navigate(`/maintenance/${ticket.id}`)}
-                className="w-full flex items-center gap-3 py-2.5 hover:bg-surface-800/40 transition-colors text-left px-2 rounded"
-              >
-                <span className="text-xs text-surface-500 w-20 shrink-0">{ticket.ticket_number}</span>
-                <span className="text-sm text-surface-200 flex-1 truncate">{ticket.equipment_name}</span>
-                <span className="text-2xs text-surface-500 w-24 text-right">
-                  {(ticket as any).last_action_date
-                    ? new Date((ticket as any).last_action_date).toLocaleDateString()
-                    : '—'}
-                </span>
-                <span className="text-2xs text-surface-400 w-36 truncate text-right">
-                  {(ticket as any).last_action_taken || '—'}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {loading && <LoadingSpinner className="py-8" />}
-    </div>
-  );
-}
 
 // ─── Parts Tab ─────────────────────────────────────────────────────────
 
@@ -385,21 +268,20 @@ function ReportsTab({ dept }: { dept: Department }) {
     });
   }, [tickets, items, categories, deptCategoryNames]);
 
-  const tally = useMemo(() => {
-    const counts: Record<string, number> = { REPORTED: 0, ASSESSED: 0, IN_PROGRESS: 0, COMPLETED: 0 };
-    for (const t of deptTickets) {
-      if (Object.prototype.hasOwnProperty.call(counts, t.repair_status)) {
-        counts[t.repair_status] = (counts[t.repair_status] || 0) + 1;
-      }
-    }
-    return counts;
-  }, [deptTickets]);
+  // Kanban-style tally grouped by repair status (mirrors the old Maintenance tab board).
+  const kanbanData = useMemo(
+    () => KANBAN_COLUMNS.map((status) => ({
+      status,
+      config: REPAIR_STATUS_CONFIG[status],
+      tickets: deptTickets.filter((t) => t.repair_status === status),
+    })),
+    [deptTickets],
+  );
 
   const openTickets = useMemo(
     () => deptTickets.filter((t) => t.repair_status !== 'COMPLETED' && t.repair_status !== 'CANCELLED'),
     [deptTickets],
   );
-  const openTicketsList = useMemo(() => openTickets.slice(0, 5), [openTickets]);
 
   // Recent completed maintenance/repair jobs for this department.
   const deptHistory = useMemo(
@@ -434,66 +316,53 @@ function ReportsTab({ dept }: { dept: Department }) {
         ))}
       </div>
 
-      {/* Repair Tally */}
+      {/* Repair Tally — Kanban board */}
       <div className="glass-panel rounded-xl px-5 py-4">
         <div className="flex items-center gap-2 mb-3">
           <Wrench size={16} className="text-surface-400" />
           <h3 className="text-sm font-semibold text-surface-200">Repair Tally</h3>
-          <span className="ml-auto text-xs text-surface-500">{openTickets.length} open</span>
+          <span className="text-xs text-surface-500">{openTickets.length} open</span>
+          <button
+            onClick={() => navigate('/maintenance/new')}
+            className="ml-auto flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium"
+          >
+            <Plus size={13} /> New Ticket
+          </button>
         </div>
-        <div className="flex flex-wrap gap-3">
-          {KANBAN_COLUMNS.map((status) => {
-            const cfg = REPAIR_STATUS_CONFIG[status];
-            return (
-              <div key={status} className="flex items-center gap-2 bg-surface-900/60 rounded-lg px-3 py-1.5">
-                <span className={`text-xs font-medium ${cfg?.color ?? 'text-surface-400'}`}>{cfg?.label ?? status}</span>
-                <span className="text-sm font-bold text-surface-200">{tally[status] ?? 0}</span>
+        <div className="flex gap-3 overflow-x-auto pb-2">
+          {kanbanData.map(({ status, config, tickets: colTickets }) => (
+            <div key={status} className="flex-shrink-0 w-52 flex flex-col">
+              <div className="flex items-center gap-2 mb-2 px-1">
+                <span className={`text-xs font-semibold ${config?.color ?? 'text-surface-400'}`}>{config?.label ?? status}</span>
+                <span className="text-2xs text-surface-500 bg-surface-800 px-1.5 py-0.5 rounded-full">{colTickets.length}</span>
               </div>
-            );
-          })}
+              <div className="flex-1 space-y-2 overflow-y-auto max-h-[340px]">
+                {colTickets.map((ticket) => (
+                  <button
+                    key={ticket.id}
+                    onClick={() => navigate(`/maintenance/${ticket.id}`)}
+                    className="w-full bg-surface-900/60 rounded-lg p-3 text-left hover:bg-surface-800/70 transition-colors"
+                  >
+                    <p className="text-xs text-surface-500 mb-1">{ticket.ticket_number}</p>
+                    <p className="text-sm font-medium text-surface-200 truncate">{ticket.equipment_name}</p>
+                    {ticket.document_type && (
+                      <div className="flex items-center gap-2 mt-2">
+                        <Badge variant={ticket.document_type === 'maintenance' ? 'info' : ticket.document_type === 'update' ? 'purple' : 'warning'} size="sm">
+                          {ticket.document_type === 'maintenance' ? 'MNT' : ticket.document_type === 'update' ? 'UPD' : 'RPR'}
+                        </Badge>
+                      </div>
+                    )}
+                  </button>
+                ))}
+                {colTickets.length === 0 && <p className="text-2xs text-surface-600 text-center py-4">Empty</p>}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
       {/* Quick-view cards */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Open Tickets */}
-        <div className="glass-panel rounded-xl overflow-hidden">
-          <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
-            <AlertTriangle size={18} className="text-danger-400" />
-            <h3 className="text-sm font-semibold text-surface-200">Open Tickets</h3>
-            <button
-              onClick={() => navigate('/maintenance')}
-              className="ml-auto flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium"
-            >
-              Full List <ChevronRight size={13} />
-            </button>
-          </div>
-          {openTicketsList.length === 0 ? (
-            <div className="px-5 py-8 text-center text-sm text-surface-500">No open tickets</div>
-          ) : (
-            <div className="divide-y divide-surface-800/60">
-              {openTicketsList.map((ticket) => {
-                const cfg = REPAIR_STATUS_CONFIG[ticket.repair_status];
-                return (
-                  <button
-                    key={ticket.id}
-                    onClick={() => navigate(`/maintenance/${ticket.id}`)}
-                    className="w-full flex items-center gap-3 px-5 py-3 hover:bg-surface-800/40 transition-colors text-left"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-surface-200 font-medium truncate">{ticket.equipment_name}</p>
-                      <p className="text-2xs text-surface-500 font-mono">{ticket.ticket_number}</p>
-                    </div>
-                    <span className={`text-xs font-medium shrink-0 ${cfg?.color ?? 'text-surface-400'}`}>
-                      {cfg?.label ?? ticket.repair_status}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
         {/* Maintenance & Repair History */}
         <div className="glass-panel rounded-xl overflow-hidden">
           <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
@@ -643,7 +512,6 @@ export function DepartmentSegmentPage() {
 
       {/* Tab Content */}
       <div className="flex-1 min-h-0 overflow-y-auto">
-        {activeTab === 'maintenance' && <MaintenanceTab dept={validDept} />}
         {activeTab === 'parts' && <PartsTab dept={validDept} />}
         {activeTab === 'vendors' && <VendorsTab dept={validDept} />}
         {activeTab === 'reports' && <ReportsTab dept={validDept} />}

@@ -135,10 +135,12 @@ CREATE INDEX IF NOT EXISTS idx_asset_status_log_asset ON asset_status_log(asset_
 CREATE INDEX IF NOT EXISTS idx_asset_status_log_equipment ON asset_status_log(equipment_id);
 CREATE INDEX IF NOT EXISTS idx_asset_status_log_changed_at ON asset_status_log(changed_at);
 
--- Equipment loaned out for events / training / workshops
+-- Equipment loans. OUTWARD = we lend our inventory to others (decrements availability);
+-- INWARD = equipment lent TO us by an external party (free-text items, no inventory impact).
 CREATE TABLE IF NOT EXISTS equipment_loans (
   id TEXT PRIMARY KEY,
   loan_number TEXT UNIQUE NOT NULL,
+  direction TEXT NOT NULL DEFAULT 'OUTWARD' CHECK (direction IN ('OUTWARD', 'INWARD')),
   department TEXT NOT NULL CHECK (department IN ('camera', 'lights_grips')),
   person_or_org TEXT NOT NULL DEFAULT '',
   purpose TEXT NOT NULL DEFAULT '',
@@ -156,12 +158,15 @@ CREATE TABLE IF NOT EXISTS equipment_loans (
 CREATE INDEX IF NOT EXISTS idx_equipment_loans_department ON equipment_loans(department);
 CREATE INDEX IF NOT EXISTS idx_equipment_loans_status ON equipment_loans(status);
 
--- Individual single-unit line items within a loan order
+-- Individual single-unit line items within a loan order.
+-- equipment_id/asset_id are set for OUTWARD loans (our catalog); INWARD loans use
+-- the free-text item_name instead since the item is not in our inventory.
 CREATE TABLE IF NOT EXISTS equipment_loan_items (
   id TEXT PRIMARY KEY,
   loan_id TEXT NOT NULL REFERENCES equipment_loans(id) ON DELETE CASCADE,
-  equipment_id TEXT NOT NULL REFERENCES equipment_items(id),
+  equipment_id TEXT REFERENCES equipment_items(id),
   asset_id TEXT REFERENCES equipment_assets(id),
+  item_name TEXT,
   status TEXT NOT NULL DEFAULT 'OUT' CHECK (status IN ('OUT', 'RETURNED')),
   returned_date TEXT,
   notes TEXT,

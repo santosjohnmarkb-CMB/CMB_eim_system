@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Printer, RotateCcw, Trash2, PackageCheck } from 'lucide-react';
+import { ArrowLeft, Printer, RotateCcw, Trash2, PackageCheck, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { useLoansStore } from '../stores/loans.store';
 import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { useToast } from '../hooks';
-import { DEPARTMENT_CONFIG, LOAN_STATUS_CONFIG } from '../../shared/constants';
+import { DEPARTMENT_CONFIG, LOAN_STATUS_CONFIG, LOAN_DIRECTION_CONFIG } from '../../shared/constants';
 import { printHtml, escapeHtml } from '../lib/print';
 import type { EquipmentLoanWithItems } from '../../shared/types';
 
@@ -73,7 +73,11 @@ export function LoanDetailPage() {
 
   const handleDelete = async () => {
     if (!id) return;
-    if (!window.confirm('Delete this loan record? Any items still out will be returned to inventory.')) return;
+    const isOut = (loan?.direction ?? 'OUTWARD') === 'OUTWARD';
+    const msg = isOut
+      ? 'Delete this loan record? Any items still out will be returned to inventory.'
+      : 'Delete this inward loan record?';
+    if (!window.confirm(msg)) return;
     setBusy(true);
     try {
       await remove(id);
@@ -87,25 +91,26 @@ export function LoanDetailPage() {
 
   const handlePrint = () => {
     if (!loan) return;
+    const printOutward = (loan.direction ?? 'OUTWARD') === 'OUTWARD';
     const rows = loan.items.map((it, idx) => `
       <tr>
         <td>${idx + 1}</td>
-        <td>${escapeHtml(it.equipment_code)}</td>
-        <td>${escapeHtml(it.equipment_name)}</td>
+        ${printOutward ? `<td>${escapeHtml(it.equipment_code || '—')}</td>` : ''}
+        <td>${escapeHtml(it.equipment_name || '—')}</td>
         <td>${it.status === 'RETURNED' ? `Returned ${escapeHtml(fmtDate(it.returned_date))}` : 'Out'}</td>
       </tr>`).join('');
 
     const body = `
       <div class="header">
-        <h1>Equipment Loan Document</h1>
+        <h1>Equipment Loan Document — ${escapeHtml(LOAN_DIRECTION_CONFIG[loan.direction ?? 'OUTWARD'].label)}</h1>
         <p class="muted">${escapeHtml(loan.loan_number)} · ${escapeHtml(DEPARTMENT_CONFIG[loan.department].label)}</p>
       </div>
       <h2>Loan Details</h2>
       <div class="grid">
-        <div class="field"><label>Person / Organization</label><span>${escapeHtml(loan.person_or_org)}</span></div>
+        <div class="field"><label>${printOutward ? 'Person / Organization' : 'Lent By'}</label><span>${escapeHtml(loan.person_or_org)}</span></div>
         <div class="field"><label>Status</label><span>${escapeHtml(LOAN_STATUS_CONFIG[loan.status]?.label || loan.status)}</span></div>
-        <div class="field"><label>Loaned Date</label><span>${escapeHtml(fmtDate(loan.loaned_date))}</span></div>
-        <div class="field"><label>Tentative Return Date</label><span>${escapeHtml(fmtDate(loan.tentative_return_date))}</span></div>
+        <div class="field"><label>${printOutward ? 'Loaned Date' : 'Received Date'}</label><span>${escapeHtml(fmtDate(loan.loaned_date))}</span></div>
+        <div class="field"><label>${printOutward ? 'Tentative Return Date' : 'Return-by Date'}</label><span>${escapeHtml(fmtDate(loan.tentative_return_date))}</span></div>
         <div class="field"><label>Purpose</label><span>${escapeHtml(loan.purpose) || '—'}</span></div>
         <div class="field"><label>Location</label><span>${escapeHtml(loan.location) || '—'}</span></div>
         <div class="field"><label>Duration</label><span>${escapeHtml(loan.duration) || '—'}</span></div>
@@ -113,9 +118,9 @@ export function LoanDetailPage() {
       </div>
       <h2>Remarks</h2>
       <p>${escapeHtml(loan.remarks) || '—'}</p>
-      <h2>Loaned Equipment (${loan.items.length})</h2>
+      <h2>${printOutward ? 'Loaned Equipment' : 'Items'} (${loan.items.length})</h2>
       <table>
-        <thead><tr><th>#</th><th>Code</th><th>Equipment</th><th>Status</th></tr></thead>
+        <thead><tr><th>#</th>${printOutward ? '<th>Code</th>' : ''}<th>${printOutward ? 'Equipment' : 'Item'}</th><th>Status</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
     printHtml(`Loan ${loan.loan_number}`, body);
@@ -132,6 +137,10 @@ export function LoanDetailPage() {
   }
 
   const outItems = loan.items.filter((it) => it.status === 'OUT');
+  const direction = loan.direction ?? 'OUTWARD';
+  const isOutward = direction === 'OUTWARD';
+  const dirCfg = LOAN_DIRECTION_CONFIG[direction];
+  const DirIcon = isOutward ? ArrowUpRight : ArrowDownLeft;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -149,8 +158,11 @@ export function LoanDetailPage() {
             <Badge variant={STATUS_VARIANT[loan.status] || 'default'} size="md">
               {LOAN_STATUS_CONFIG[loan.status]?.label || loan.status}
             </Badge>
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-surface-300 bg-surface-800 border border-surface-700 rounded-md px-2 py-1">
+              <DirIcon size={13} /> {dirCfg.label}
+            </span>
           </div>
-          <p className="text-sm text-surface-500">{DEPARTMENT_CONFIG[loan.department].label}</p>
+          <p className="text-sm text-surface-500">{DEPARTMENT_CONFIG[loan.department].label} · {dirCfg.description}</p>
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={handlePrint}><Printer size={16} /> Print</Button>
@@ -164,9 +176,9 @@ export function LoanDetailPage() {
       <div className="glass-panel rounded-xl p-5">
         <h2 className="text-xs font-bold text-surface-500 uppercase tracking-widest mb-4">Loan Details</h2>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-4">
-          <Detail label="Person / Organization" value={loan.person_or_org} />
-          <Detail label="Loaned Date" value={fmtDate(loan.loaned_date)} />
-          <Detail label="Tentative Return" value={fmtDate(loan.tentative_return_date)} />
+          <Detail label={isOutward ? 'Person / Organization' : 'Lent By'} value={loan.person_or_org} />
+          <Detail label={isOutward ? 'Loaned Date' : 'Received Date'} value={fmtDate(loan.loaned_date)} />
+          <Detail label={isOutward ? 'Tentative Return' : 'Return By'} value={fmtDate(loan.tentative_return_date)} />
           <Detail label="Purpose" value={loan.purpose || '—'} />
           <Detail label="Location" value={loan.location || '—'} />
           <Detail label="Duration" value={loan.duration || '—'} />
@@ -183,14 +195,15 @@ export function LoanDetailPage() {
       {/* Items */}
       <div className="glass-panel rounded-xl overflow-hidden">
         <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
-          <h2 className="text-sm font-semibold text-surface-200">Loaned Equipment</h2>
+          <h2 className="text-sm font-semibold text-surface-200">{isOutward ? 'Loaned Equipment' : 'Items'}</h2>
           <span className="text-xs text-surface-500 ml-auto">{outItems.length} out · {loan.items.length} total</span>
         </div>
         <table className="w-full text-sm">
           <thead>
             <tr className="text-xs text-surface-500 uppercase tracking-wider border-b border-surface-800">
-              <th className="text-left px-5 py-2.5 font-medium">Code</th>
-              <th className="text-left px-3 py-2.5 font-medium">Equipment</th>
+              {isOutward && <th className="text-left px-5 py-2.5 font-medium">Code</th>}
+              <th className="text-left px-3 py-2.5 font-medium">{isOutward ? 'Equipment' : 'Item'}</th>
+              {!isOutward && <th className="text-left px-3 py-2.5 font-medium">Notes</th>}
               <th className="text-left px-3 py-2.5 font-medium">Status</th>
               <th className="text-right px-5 py-2.5 font-medium">Action</th>
             </tr>
@@ -198,11 +211,12 @@ export function LoanDetailPage() {
           <tbody className="divide-y divide-surface-800/60">
             {loan.items.map((it) => (
               <tr key={it.id}>
-                <td className="px-5 py-3 font-mono text-xs text-primary-400 whitespace-nowrap">{it.equipment_code}</td>
-                <td className="px-3 py-3 text-surface-200">{it.equipment_name}</td>
+                {isOutward && <td className="px-5 py-3 font-mono text-xs text-primary-400 whitespace-nowrap">{it.equipment_code}</td>}
+                <td className={`${isOutward ? 'px-3' : 'px-5'} py-3 text-surface-200`}>{it.equipment_name}</td>
+                {!isOutward && <td className="px-3 py-3 text-surface-400">{it.notes || '—'}</td>}
                 <td className="px-3 py-3">
                   {it.status === 'RETURNED' ? (
-                    <span className="text-xs text-success-400">Returned {fmtDate(it.returned_date)}</span>
+                    <span className="text-xs text-success-400">{isOutward ? 'Returned' : 'Returned to lender'} {fmtDate(it.returned_date)}</span>
                   ) : (
                     <span className="text-xs text-warning-400">Out</span>
                   )}
@@ -214,7 +228,7 @@ export function LoanDetailPage() {
                       disabled={busy}
                       className="inline-flex items-center gap-1 text-xs font-medium text-primary-400 hover:text-primary-300 transition-colors disabled:opacity-50"
                     >
-                      <RotateCcw size={13} /> Return
+                      <RotateCcw size={13} /> {isOutward ? 'Return' : 'Mark Returned'}
                     </button>
                   )}
                 </td>

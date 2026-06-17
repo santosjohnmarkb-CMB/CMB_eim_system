@@ -3,18 +3,19 @@ import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../database/index';
 import { requireSession } from './session';
 import { LoanCreateSchema, LoanReturnSchema } from '../../shared/schemas';
-import { LOAN_DEPT_PREFIX } from '../../shared/constants';
+import { LOAN_DEPT_PREFIX, LOAN_DIRECTION_CONFIG } from '../../shared/constants';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { pushOperationalToCloud } from '../sync/operational-sync';
 import { sessionDepartment, assertEquipmentInDepartment } from './department';
 
-function generateLoanNumber(db: any, department: 'camera' | 'lights_grips'): string {
+function generateLoanNumber(db: any, department: 'camera' | 'lights_grips', direction: 'OUTWARD' | 'INWARD'): string {
   const deptCode = LOAN_DEPT_PREFIX[department] || 'CD';
+  const dirCode = LOAN_DIRECTION_CONFIG[direction]?.numberCode || 'OUT';
   const now = new Date();
   const mm = String(now.getMonth() + 1).padStart(2, '0');
   const dd = String(now.getDate()).padStart(2, '0');
   const yy = String(now.getFullYear()).slice(-2);
-  const prefix = `CMB-LOAN-${deptCode}-${mm}${dd}${yy}-`;
+  const prefix = `CMB-LOAN-${dirCode}-${deptCode}-${mm}${dd}${yy}-`;
   const last: any = db.prepare(`SELECT loan_number FROM equipment_loans WHERE loan_number LIKE ? ORDER BY loan_number DESC LIMIT 1`).get(`${prefix}%`);
   let seq = 1;
   if (last) {
@@ -40,10 +41,14 @@ function recomputeLoanStatus(db: any, loanId: string): void {
   db.prepare("UPDATE equipment_loans SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, loanId);
 }
 
-// Restore availability + asset status for a single loaned-out item being returned.
+// Mark a single loan item returned. For OUTWARD items (which reference our catalog) this
+// also restores availability and asset status; INWARD items have no equipment_id and only
+// flip to RETURNED (the item belonged to an external party, never our inventory).
 function returnSingleItem(db: any, item: any, changedBy: string): void {
   db.prepare("UPDATE equipment_loan_items SET status = 'RETURNED', returned_date = ? WHERE id = ?")
     .run(new Date().toISOString().slice(0, 10), item.id);
+
+  if (!item.equipment_id) return;
 
   db.prepare("UPDATE equipment_items SET available_qty = MIN(available_qty + 1, quantity), updated_at = datetime('now') WHERE id = ?")
     .run(item.equipment_id);
@@ -101,9 +106,12 @@ export function registerLoanHandlers(): void {
     const dept = sessionDepartment(event);
     if (dept && loan.department !== dept) return null;
     const items: any[] = db.prepare(`
-      SELECT li.*, e.name as equipment_name, e.equipment_code, c.name as category_name
+      SELECT li.*,
+        COALESCE(e.name, li.item_name) as equipment_name,
+        e.equipment_code,
+        c.name as category_name
       FROM equipment_loan_items li
-      JOIN equipment_items e ON e.id = li.equipment_id
+      LEFT JOIN equipment_items e ON e.id = li.equipment_id
       LEFT JOIN categories c ON c.id = e.category_id
       WHERE li.loan_id = ?
       ORDER BY li.created_at ASC
@@ -118,23 +126,35 @@ export function registerLoanHandlers(): void {
     if (sessDept && input.department !== sessDept) {
       throw new Error('You can only create loans for your own department.');
     }
-    for (const item of input.items) assertEquipmentInDepartment(db, event, item.equipment_id);
+    const isOutward = input.direction === 'OUTWARD';
+    // Outward loans draw from our catalog, so each item must be a department-owned equipment.
+    if (isOutward) {
+      for (const item of input.items) assertEquipmentInDepartment(db, event, item.equipment_id as string);
+    }
     const id = uuidv4();
-    const loanNumber = generateLoanNumber(db, input.department);
+    const loanNumber = generateLoanNumber(db, input.department, input.direction);
     const now = new Date().toISOString();
 
     const tx = db.transaction(() => {
       db.prepare(`
-        INSERT INTO equipment_loans (id, loan_number, department, person_or_org, purpose, location, loaned_date, duration, tentative_return_date, remarks, status, created_by, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)
-      `).run(id, loanNumber, input.department, input.person_or_org, input.purpose || '', input.location || '',
+        INSERT INTO equipment_loans (id, loan_number, direction, department, person_or_org, purpose, location, loaned_date, duration, tentative_return_date, remarks, status, created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)
+      `).run(id, loanNumber, input.direction, input.department, input.person_or_org, input.purpose || '', input.location || '',
         input.loaned_date, input.duration || '', input.tentative_return_date || null, input.remarks || '',
         user.full_name, now, now);
 
       for (const item of input.items) {
-        const asset: any = db.prepare('SELECT id, current_status FROM equipment_assets WHERE equipment_id = ?').get(item.equipment_id);
         const itemId = uuidv4();
-        db.prepare(`INSERT INTO equipment_loan_items (id, loan_id, equipment_id, asset_id, status, notes, created_at) VALUES (?, ?, ?, ?, 'OUT', ?, ?)`)
+
+        if (!isOutward) {
+          // Inward item: external equipment, recorded by free-text name, no inventory impact.
+          db.prepare(`INSERT INTO equipment_loan_items (id, loan_id, equipment_id, asset_id, item_name, status, notes, created_at) VALUES (?, ?, NULL, NULL, ?, 'OUT', ?, ?)`)
+            .run(itemId, id, (item.item_name || '').trim(), item.notes || null, now);
+          continue;
+        }
+
+        const asset: any = db.prepare('SELECT id, current_status FROM equipment_assets WHERE equipment_id = ?').get(item.equipment_id);
+        db.prepare(`INSERT INTO equipment_loan_items (id, loan_id, equipment_id, asset_id, item_name, status, notes, created_at) VALUES (?, ?, ?, ?, NULL, 'OUT', ?, ?)`)
           .run(itemId, id, item.equipment_id, asset?.id || null, item.notes || null, now);
 
         // Each loaned unit reduces availability by one.
@@ -151,9 +171,12 @@ export function registerLoanHandlers(): void {
     tx();
 
     // Propagate availability/asset changes to the shared catalog after the transaction commits.
-    for (const item of input.items) {
-      const asset: any = db.prepare('SELECT id FROM equipment_assets WHERE equipment_id = ?').get(item.equipment_id);
-      pushItemAvailabilityToCloud(db, item.equipment_id, asset?.id || null);
+    // Inward loans never touch inventory, so there is nothing to sync.
+    if (isOutward) {
+      for (const item of input.items) {
+        const asset: any = db.prepare('SELECT id FROM equipment_assets WHERE equipment_id = ?').get(item.equipment_id);
+        pushItemAvailabilityToCloud(db, item.equipment_id as string, asset?.id || null);
+      }
     }
 
     return db.prepare('SELECT * FROM equipment_loans WHERE id = ?').get(id);
