@@ -197,8 +197,13 @@ ${footer}
     setTimeout(triggerPrint, 150);
   } else {
     let remaining = pending.length;
-    const onDone = () => { remaining -= 1; if (remaining <= 0) setTimeout(triggerPrint, 80); };
     pending.forEach((img) => {
+      const onDone = () => {
+        img.removeEventListener('load', onDone);
+        img.removeEventListener('error', onDone);
+        remaining -= 1;
+        if (remaining <= 0) setTimeout(triggerPrint, 80);
+      };
       img.addEventListener('load', onDone);
       img.addEventListener('error', onDone);
     });
