@@ -14,7 +14,7 @@ function letterheadLogo(): string {
 
 // Company identity printed on the letterhead of every generated document.
 // Adjust here to update all printed forms/reports at once.
-const COMPANY = {
+export const COMPANY = {
   name: 'CMB Film Services, Inc.',
   tagline: 'Equipment Inventory Management',
   addressLines: [

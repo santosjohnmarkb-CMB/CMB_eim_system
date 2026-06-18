@@ -51,6 +51,13 @@ export function LoansPage() {
     [lockedDept],
   );
 
+  // Camera and Lights & Grips are run as separate, distinct loan processes. Admins switch
+  // between them; department users are locked to the one they're assigned to.
+  const [activeDept, setActiveDept] = useState<Department>(lockedDept || 'camera');
+  useEffect(() => {
+    if (!visibleDepts.includes(activeDept)) setActiveDept(visibleDepts[0] ?? 'camera');
+  }, [visibleDepts, activeDept]);
+
   // Older records created before the inward/outward split default to OUTWARD.
   const directionLoans = useMemo(
     () => loans.filter((l) => (l.direction ?? 'OUTWARD') === direction),
@@ -67,7 +74,7 @@ export function LoansPage() {
 
   const printList = () => {
     const activeLoans = directionLoans.filter((l) => l.status !== 'RETURNED');
-    const sections = visibleDepts.map((dept) => {
+    const sections = [activeDept].map((dept) => {
       const deptLoans = activeLoans.filter((l) => l.department === dept);
       const rows = deptLoans.map((l) => `
         <tr>
@@ -89,7 +96,7 @@ export function LoansPage() {
 
     const body = `
       <div class="header">
-        <h1>Loaned Equipment — ${escapeHtml(LOAN_DIRECTION_CONFIG[direction].label)}</h1>
+        <h1>${escapeHtml(DEPARTMENT_CONFIG[activeDept].label)} — Loaned Equipment (${escapeHtml(LOAN_DIRECTION_CONFIG[direction].label)})</h1>
         <p class="muted">${isOutward ? 'Equipment we have loaned out' : 'Equipment loaned to us'} as of ${escapeHtml(new Date().toLocaleDateString())}</p>
       </div>
       ${sections}`;
@@ -120,40 +127,64 @@ export function LoansPage() {
           </p>
         </div>
         <Button variant="secondary" onClick={printList}><Printer size={16} /> Print List</Button>
-        <Button onClick={() => navigate('/loans/new')}><Plus size={16} /> New Loan</Button>
+        <Button onClick={() => navigate('/loans/new', { state: { department: activeDept, direction } })}><Plus size={16} /> New Loan</Button>
       </div>
 
-      {/* Direction filter */}
-      <div className="inline-flex rounded-lg border border-surface-700 bg-surface-800/60 p-1">
-        {(['OUTWARD', 'INWARD'] as LoanDirection[]).map((dir) => {
-          const cfg = LOAN_DIRECTION_CONFIG[dir];
-          const Icon = dir === 'OUTWARD' ? ArrowUpRight : ArrowDownLeft;
-          const active = direction === dir;
-          const count = loans.filter((l) => (l.direction ?? 'OUTWARD') === dir).length;
-          return (
-            <button
-              key={dir}
-              type="button"
-              onClick={() => setDirection(dir)}
-              className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                active ? 'bg-primary-600/25 text-primary-200' : 'text-surface-400 hover:text-surface-200'
-              }`}
-            >
-              <Icon size={15} /> {cfg.label}
-              <span className="text-xs text-surface-500">({count})</span>
-            </button>
-          );
-        })}
+      <div className="flex flex-wrap items-center gap-3">
+        {/* Department switcher — Camera and Lights & Grips are separate loan processes */}
+        <div className="inline-flex rounded-lg border border-surface-700 bg-surface-800/60 p-1">
+          {visibleDepts.map((dept) => {
+            const Icon = DEPT_ICONS[dept];
+            const active = activeDept === dept;
+            const count = directionLoans.filter((l) => l.department === dept).length;
+            return (
+              <button
+                key={dept}
+                type="button"
+                onClick={() => setActiveDept(dept)}
+                className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  active ? 'bg-primary-600/25 text-primary-200' : 'text-surface-400 hover:text-surface-200'
+                }`}
+              >
+                <Icon size={15} className={active ? '' : DEPT_LABEL_COLOR[dept]} /> {DEPARTMENT_CONFIG[dept].label}
+                <span className="text-xs text-surface-500">({count})</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Direction filter */}
+        <div className="inline-flex rounded-lg border border-surface-700 bg-surface-800/60 p-1">
+          {(['OUTWARD', 'INWARD'] as LoanDirection[]).map((dir) => {
+            const cfg = LOAN_DIRECTION_CONFIG[dir];
+            const Icon = dir === 'OUTWARD' ? ArrowUpRight : ArrowDownLeft;
+            const active = direction === dir;
+            const count = loans.filter((l) => (l.direction ?? 'OUTWARD') === dir && l.department === activeDept).length;
+            return (
+              <button
+                key={dir}
+                type="button"
+                onClick={() => setDirection(dir)}
+                className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  active ? 'bg-primary-600/25 text-primary-200' : 'text-surface-400 hover:text-surface-200'
+                }`}
+              >
+                <Icon size={15} /> {cfg.label}
+                <span className="text-xs text-surface-500">({count})</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {visibleDepts.map((dept) => {
-        const Icon = DEPT_ICONS[dept];
-        const deptLoans = byDept[dept];
+      {(() => {
+        const Icon = DEPT_ICONS[activeDept];
+        const deptLoans = byDept[activeDept];
         return (
-          <div key={dept} className="glass-panel rounded-xl overflow-hidden">
+          <div className="glass-panel rounded-xl overflow-hidden">
             <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
-              <Icon size={18} className={DEPT_LABEL_COLOR[dept]} />
-              <h2 className={`text-base font-semibold ${DEPT_LABEL_COLOR[dept]}`}>{DEPARTMENT_CONFIG[dept].label}</h2>
+              <Icon size={18} className={DEPT_LABEL_COLOR[activeDept]} />
+              <h2 className={`text-base font-semibold ${DEPT_LABEL_COLOR[activeDept]}`}>{DEPARTMENT_CONFIG[activeDept].label}</h2>
               <span className="text-xs text-surface-500 ml-1">({deptLoans.length})</span>
             </div>
             <DataTable
@@ -165,7 +196,7 @@ export function LoansPage() {
             />
           </div>
         );
-      })}
+      })()}
     </div>
   );
 }

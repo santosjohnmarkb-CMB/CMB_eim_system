@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Search, Plus, Trash2, PackageCheck, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { Search, Plus, Trash2, PackageCheck, ArrowDownLeft, ArrowUpRight, FileSignature } from 'lucide-react';
 import { useLoansStore } from '../stores/loans.store';
 import { useEquipmentStore } from '../stores/equipment.store';
 import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
 import { useToast } from '../hooks';
+import { printLoanReleaseForm } from '../lib/loanForms';
 import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT, LOAN_DIRECTION_CONFIG } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import type { EquipmentWithAsset, LoanDirection } from '../../shared/types';
@@ -23,6 +24,7 @@ interface ItemRow {
 
 export function LoanNewPage() {
   const navigate = useNavigate();
+  const routerLocation = useLocation();
   const toast = useToast();
   const { create } = useLoansStore();
   const { items: allItems, fetchAll } = useEquipmentStore();
@@ -30,8 +32,18 @@ export function LoanNewPage() {
 
   const lockedDept = user?.role !== 'admin' ? (user?.department as Department | null) : null;
 
-  const [direction, setDirection] = useState<LoanDirection>('OUTWARD');
-  const [department, setDepartment] = useState<Department>(lockedDept || 'camera');
+  // Department users only ever see their own department; admins can pick either.
+  const availableDepts = useMemo<Department[]>(
+    () => (lockedDept ? [lockedDept] : (Object.keys(DEPARTMENT_CONFIG) as Department[])),
+    [lockedDept],
+  );
+
+  // The list page hands off which department/direction process the user came from so the
+  // new-loan form opens in the same context (department users stay locked regardless).
+  const navState = (routerLocation.state || {}) as { department?: Department; direction?: LoanDirection };
+
+  const [direction, setDirection] = useState<LoanDirection>(navState.direction || 'OUTWARD');
+  const [department, setDepartment] = useState<Department>(lockedDept || navState.department || 'camera');
   const [personOrOrg, setPersonOrOrg] = useState('');
   const [purpose, setPurpose] = useState('');
   const [location, setLocation] = useState('');
@@ -118,8 +130,7 @@ export function LoanNewPage() {
     setRows([]);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submitLoan = async (withRelease: boolean) => {
     if (!personOrOrg.trim()) {
       toast.error(isOutward ? 'Person or organization is required' : 'Lender is required');
       return;
@@ -142,12 +153,35 @@ export function LoanNewPage() {
           ? rows.map((r) => ({ equipment_id: r.equipment!.id }))
           : rows.map((r) => ({ item_name: r.itemName, notes: r.notes || null })),
       });
+
+      // The release form is the signed hand-off for equipment we loan out (outward only).
+      if (withRelease && isOutward) {
+        printLoanReleaseForm({
+          loan_number: loan.loan_number,
+          department,
+          person_or_org: personOrOrg,
+          purpose,
+          location,
+          loaned_date: loanedDate,
+          tentative_return_date: tentativeReturn || null,
+          duration,
+          remarks,
+          released_by: user?.full_name || null,
+          items: rows.map((r) => ({ code: r.equipment?.equipment_code, name: r.equipment?.name || '' })),
+        });
+      }
+
       toast.success(isOutward ? 'Loan recorded' : 'Inward loan recorded');
       navigate(`/loans/${loan.id}`);
     } catch (err: any) {
       toast.error(err.message || 'Failed to record loan');
     }
     setSaving(false);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void submitLoan(false);
   };
 
   return (
@@ -203,17 +237,16 @@ export function LoanNewPage() {
             <div className="w-full">
               <label className="block text-xs font-medium text-surface-400 mb-1">Department</label>
               <div className="flex gap-2">
-                {(Object.keys(DEPARTMENT_CONFIG) as Department[]).map((dept) => (
+                {availableDepts.map((dept) => (
                   <button
                     key={dept}
                     type="button"
-                    disabled={!!lockedDept && lockedDept !== dept}
                     onClick={() => changeDepartment(dept)}
                     className={`flex-1 px-3 py-2 text-sm rounded-lg border transition-colors ${
                       department === dept
                         ? 'bg-primary-600/20 border-primary-500/40 text-primary-300'
                         : 'bg-surface-800 border-surface-700 text-surface-400 hover:text-surface-200'
-                    } ${!!lockedDept && lockedDept !== dept ? 'opacity-40 cursor-not-allowed' : ''}`}
+                    }`}
                   >
                     {DEPARTMENT_CONFIG[dept].shortLabel}
                   </button>
@@ -366,6 +399,11 @@ export function LoanNewPage() {
 
         <div className="flex justify-end gap-3">
           <Button type="button" variant="secondary" onClick={() => navigate('/loans')}>Cancel</Button>
+          {isOutward && (
+            <Button type="button" variant="secondary" loading={saving} onClick={() => void submitLoan(true)}>
+              <FileSignature size={16} /> Record &amp; Print Release Form
+            </Button>
+          )}
           <Button type="submit" loading={saving}><Plus size={16} /> Record Loan</Button>
         </div>
       </form>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Printer, RotateCcw, Trash2, PackageCheck, ArrowUpRight, ArrowDownLeft, Pencil } from 'lucide-react';
+import { ArrowLeft, RotateCcw, Trash2, PackageCheck, ArrowUpRight, ArrowDownLeft, Pencil, FileSignature } from 'lucide-react';
 import { useLoansStore } from '../stores/loans.store';
 import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
@@ -10,7 +10,7 @@ import { Modal } from '../components/common/Modal';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { useToast } from '../hooks';
 import { DEPARTMENT_CONFIG, LOAN_STATUS_CONFIG, LOAN_DIRECTION_CONFIG } from '../../shared/constants';
-import { printHtml, escapeHtml } from '../lib/print';
+import { printLoanReleaseForm } from '../lib/loanForms';
 import type { EquipmentLoanWithItems } from '../../shared/types';
 
 const STATUS_VARIANT: Record<string, 'info' | 'warning' | 'success'> = {
@@ -136,41 +136,21 @@ export function LoanDetailPage() {
     setSavingEdit(false);
   };
 
-  const handlePrint = () => {
+  const handlePrintReleaseForm = () => {
     if (!loan) return;
-    const printOutward = (loan.direction ?? 'OUTWARD') === 'OUTWARD';
-    const rows = loan.items.map((it, idx) => `
-      <tr>
-        <td>${idx + 1}</td>
-        ${printOutward ? `<td>${escapeHtml(it.equipment_code || '—')}</td>` : ''}
-        <td>${escapeHtml(it.equipment_name || '—')}</td>
-        <td>${it.status === 'RETURNED' ? `Returned ${escapeHtml(fmtDate(it.returned_date))}` : 'Out'}</td>
-      </tr>`).join('');
-
-    const body = `
-      <div class="header">
-        <h1>Equipment Loan Document — ${escapeHtml(LOAN_DIRECTION_CONFIG[loan.direction ?? 'OUTWARD'].label)}</h1>
-        <p class="muted">${escapeHtml(loan.loan_number)} · ${escapeHtml(DEPARTMENT_CONFIG[loan.department].label)}</p>
-      </div>
-      <h2>Loan Details</h2>
-      <div class="grid">
-        <div class="field"><label>${printOutward ? 'Person / Organization' : 'Lent By'}</label><span>${escapeHtml(loan.person_or_org)}</span></div>
-        <div class="field"><label>Status</label><span>${escapeHtml(LOAN_STATUS_CONFIG[loan.status]?.label || loan.status)}</span></div>
-        <div class="field"><label>${printOutward ? 'Loaned Date' : 'Received Date'}</label><span>${escapeHtml(fmtDate(loan.loaned_date))}</span></div>
-        <div class="field"><label>${printOutward ? 'Tentative Return Date' : 'Return-by Date'}</label><span>${escapeHtml(fmtDate(loan.tentative_return_date))}</span></div>
-        <div class="field"><label>Purpose</label><span>${escapeHtml(loan.purpose) || '—'}</span></div>
-        <div class="field"><label>Location</label><span>${escapeHtml(loan.location) || '—'}</span></div>
-        <div class="field"><label>Duration</label><span>${escapeHtml(loan.duration) || '—'}</span></div>
-        <div class="field"><label>Recorded By</label><span>${escapeHtml(loan.created_by) || '—'}</span></div>
-      </div>
-      <h2>Remarks</h2>
-      <p>${escapeHtml(loan.remarks) || '—'}</p>
-      <h2>${printOutward ? 'Loaned Equipment' : 'Items'} (${loan.items.length})</h2>
-      <table>
-        <thead><tr><th>#</th>${printOutward ? '<th>Code</th>' : ''}<th>${printOutward ? 'Equipment' : 'Item'}</th><th>Status</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>`;
-    printHtml(`Loan ${loan.loan_number}`, body);
+    printLoanReleaseForm({
+      loan_number: loan.loan_number,
+      department: loan.department,
+      person_or_org: loan.person_or_org,
+      purpose: loan.purpose,
+      location: loan.location,
+      loaned_date: loan.loaned_date,
+      tentative_return_date: loan.tentative_return_date,
+      duration: loan.duration,
+      remarks: loan.remarks,
+      released_by: loan.created_by,
+      items: loan.items.map((it) => ({ code: it.equipment_code, name: it.equipment_name || '' })),
+    });
   };
 
   if (loading) return <LoadingSpinner size="lg" className="py-24" />;
@@ -212,7 +192,9 @@ export function LoanDetailPage() {
           <p className="text-sm text-surface-500">{DEPARTMENT_CONFIG[loan.department].label} · {dirCfg.description}</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="secondary" onClick={handlePrint}><Printer size={16} /> Print</Button>
+          {isOutward && (
+            <Button variant="secondary" onClick={handlePrintReleaseForm}><FileSignature size={16} /> Print Release Form</Button>
+          )}
           {isAdmin && (
             <Button variant="secondary" onClick={openEdit}><Pencil size={16} /> Edit</Button>
           )}
