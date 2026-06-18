@@ -13,6 +13,7 @@ interface DataTableProps<T> {
   onRowClick?: (item: T) => void;
   emptyMessage?: string;
   loading?: boolean;
+  rowClassName?: (item: T) => string | undefined;
 }
 
 export function DataTable<T extends { id: string }>({
@@ -21,6 +22,7 @@ export function DataTable<T extends { id: string }>({
   onRowClick,
   emptyMessage = 'No data found',
   loading = false,
+  rowClassName,
 }: DataTableProps<T>) {
   if (loading) {
     return (
@@ -63,6 +65,7 @@ export function DataTable<T extends { id: string }>({
                 className={clsx(
                   'transition-colors',
                   onRowClick && 'cursor-pointer hover:bg-surface-800/50',
+                  rowClassName?.(item),
                 )}
               >
                 {columns.map((col) => (

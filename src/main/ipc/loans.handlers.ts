@@ -137,10 +137,10 @@ export function registerLoanHandlers(): void {
 
     const tx = db.transaction(() => {
       db.prepare(`
-        INSERT INTO equipment_loans (id, loan_number, direction, department, person_or_org, purpose, location, loaned_date, duration, tentative_return_date, remarks, status, created_by, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)
+        INSERT INTO equipment_loans (id, loan_number, direction, department, person_or_org, purpose, location, loaned_date, duration, tentative_return_date, remarks, internal_notes, status, created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)
       `).run(id, loanNumber, input.direction, input.department, input.person_or_org, input.purpose || '', input.location || '',
-        input.loaned_date, input.duration || '', input.tentative_return_date || null, input.remarks || '',
+        input.loaned_date, input.duration || '', input.tentative_return_date || null, input.remarks || '', input.internal_notes || '',
         user.full_name, now, now);
 
       for (const item of input.items) {
@@ -190,11 +190,11 @@ export function registerLoanHandlers(): void {
     db.prepare(`
       UPDATE equipment_loans
       SET person_or_org = ?, purpose = ?, location = ?, loaned_date = ?, duration = ?,
-          tentative_return_date = ?, remarks = ?, updated_at = datetime('now')
+          tentative_return_date = ?, remarks = ?, internal_notes = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(
       input.person_or_org, input.purpose || '', input.location || '', input.loaned_date,
-      input.duration || '', input.tentative_return_date || null, input.remarks || '', id,
+      input.duration || '', input.tentative_return_date || null, input.remarks || '', input.internal_notes || '', id,
     );
     return db.prepare('SELECT * FROM equipment_loans WHERE id = ?').get(id);
   });

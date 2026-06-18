@@ -38,7 +38,7 @@ export function LoanDetailPage() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [editForm, setEditForm] = useState({
     person_or_org: '', loaned_date: '', tentative_return_date: '',
-    purpose: '', location: '', duration: '', remarks: '',
+    purpose: '', location: '', duration: '', remarks: '', internal_notes: '',
   });
 
   const load = useCallback(async () => {
@@ -108,6 +108,7 @@ export function LoanDetailPage() {
       location: loan.location || '',
       duration: loan.duration || '',
       remarks: loan.remarks || '',
+      internal_notes: loan.internal_notes || '',
     });
     setShowEdit(true);
   };
@@ -126,6 +127,7 @@ export function LoanDetailPage() {
         location: editForm.location,
         duration: editForm.duration,
         remarks: editForm.remarks,
+        internal_notes: editForm.internal_notes,
       });
       setShowEdit(false);
       await load();
@@ -220,6 +222,14 @@ export function LoanDetailPage() {
           <div className="mt-4 pt-4 border-t border-surface-800">
             <p className="text-xs font-medium text-surface-500 uppercase tracking-wide mb-1">Remarks</p>
             <p className="text-sm text-surface-300 whitespace-pre-wrap">{loan.remarks}</p>
+          </div>
+        )}
+        {loan.internal_notes && (
+          <div className="mt-4 pt-4 border-t border-surface-800">
+            <p className="text-xs font-medium text-surface-500 uppercase tracking-wide mb-1">
+              Internal Notes <span className="text-surface-600 normal-case tracking-normal">· internal only, not on release form</span>
+            </p>
+            <p className="text-sm text-surface-300 whitespace-pre-wrap">{loan.internal_notes}</p>
           </div>
         )}
       </div>
@@ -321,6 +331,18 @@ export function LoanDetailPage() {
               rows={3}
               className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 resize-y"
             />
+            {isOutward && <p className="mt-1 text-xs text-surface-500">Appears on the printed release form.</p>}
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-surface-400 mb-1">Internal Notes</label>
+            <textarea
+              value={editForm.internal_notes}
+              onChange={(e) => setEditForm((p) => ({ ...p, internal_notes: e.target.value }))}
+              rows={3}
+              className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 resize-y"
+              placeholder="Internal monitoring notes — follow-ups, reminders, status, etc."
+            />
+            <p className="mt-1 text-xs text-surface-500">For internal monitoring only — not shown on the release form.</p>
           </div>
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" onClick={() => setShowEdit(false)}>Cancel</Button>

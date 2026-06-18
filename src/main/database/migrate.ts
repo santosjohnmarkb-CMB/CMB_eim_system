@@ -373,6 +373,15 @@ const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    // Internal-only monitoring notes on a loan. Never printed on the release form.
+    id: '014_loan_internal_notes',
+    up: (db: any) => {
+      if (tableExists(db, 'equipment_loans') && !columnExists(db, 'equipment_loans', 'internal_notes')) {
+        db.exec(`ALTER TABLE equipment_loans ADD COLUMN internal_notes TEXT NOT NULL DEFAULT ''`);
+      }
+    },
+  },
 ];
 
 export function runMigrations(db: any): void {

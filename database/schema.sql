@@ -150,6 +150,7 @@ CREATE TABLE IF NOT EXISTS equipment_loans (
   duration TEXT NOT NULL DEFAULT '',
   tentative_return_date TEXT,
   remarks TEXT NOT NULL DEFAULT '',
+  internal_notes TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'PARTIAL', 'RETURNED')),
   created_by TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),

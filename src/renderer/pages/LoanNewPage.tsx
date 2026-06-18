@@ -51,6 +51,7 @@ export function LoanNewPage() {
   const [duration, setDuration] = useState('');
   const [tentativeReturn, setTentativeReturn] = useState('');
   const [remarks, setRemarks] = useState('');
+  const [internalNotes, setInternalNotes] = useState('');
   const [rows, setRows] = useState<ItemRow[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -149,6 +150,7 @@ export function LoanNewPage() {
         duration,
         tentative_return_date: tentativeReturn || null,
         remarks,
+        internal_notes: internalNotes,
         items: isOutward
           ? rows.map((r) => ({ equipment_id: r.equipment!.id }))
           : rows.map((r) => ({ item_name: r.itemName, notes: r.notes || null })),
@@ -275,6 +277,19 @@ export function LoanNewPage() {
               className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 resize-y"
               placeholder="Additional notes (duration, return conditions, etc.)"
             />
+            {isOutward && <p className="mt-1 text-xs text-surface-500">Appears on the printed release form.</p>}
+          </div>
+
+          <div className="w-full">
+            <label className="block text-xs font-medium text-surface-400 mb-1">Internal Notes</label>
+            <textarea
+              value={internalNotes}
+              onChange={(e) => setInternalNotes(e.target.value)}
+              rows={3}
+              className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 resize-y"
+              placeholder="Internal monitoring notes — follow-ups, reminders, status, etc."
+            />
+            <p className="mt-1 text-xs text-surface-500">For internal monitoring only — not shown on the release form.</p>
           </div>
         </div>
 

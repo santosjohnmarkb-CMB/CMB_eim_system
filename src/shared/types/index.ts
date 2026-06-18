@@ -324,6 +324,7 @@ export interface EquipmentLoan {
   duration: string;
   tentative_return_date: string | null;
   remarks: string;
+  internal_notes: string;
   status: LoanStatus;
   created_by: string;
   created_at: string;

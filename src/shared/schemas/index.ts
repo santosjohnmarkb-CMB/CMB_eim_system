@@ -196,6 +196,7 @@ export const LoanCreateSchema = z.object({
   duration: z.string().max(200).default(''),
   tentative_return_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   remarks: z.string().max(2000).default(''),
+  internal_notes: z.string().max(2000).default(''),
   items: z.array(z.object({
     equipment_id: z.string().uuid().nullable().optional(),
     item_name: z.string().max(200).nullable().optional(),
@@ -227,6 +228,7 @@ export const LoanUpdateSchema = z.object({
   duration: z.string().max(200).default(''),
   tentative_return_date: optionalDate.nullable(),
   remarks: z.string().max(2000).default(''),
+  internal_notes: z.string().max(2000).default(''),
 });
 
 export const LoanReturnSchema = z.object({

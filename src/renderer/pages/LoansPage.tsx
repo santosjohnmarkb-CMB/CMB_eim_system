@@ -32,6 +32,16 @@ function fmtDate(d: string | null | undefined) {
   return d ? new Date(d).toLocaleDateString() : '—';
 }
 
+// A loan is overdue when its expected return date has passed but items are still out.
+function isOverdue(l: EquipmentLoan): boolean {
+  if (!l.tentative_return_date) return false;
+  if (l.status === 'RETURNED' || (l.out_count ?? 0) === 0) return false;
+  const due = new Date(l.tentative_return_date);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return due < today;
+}
+
 export function LoansPage() {
   const navigate = useNavigate();
   const { loans, loading, fetchAll } = useLoansStore();
@@ -109,7 +119,12 @@ export function LoansPage() {
     { key: 'purpose', header: 'Purpose', render: (l) => <span className="text-surface-400">{l.purpose || '—'}</span> },
     { key: 'items', header: 'Items Out', render: (l) => <span className="text-surface-300">{l.out_count ?? 0} / {l.item_count ?? 0}</span> },
     { key: 'tentative_return_date', header: isOutward ? 'Tentative Return' : 'Return By', render: (l) => <span className="text-surface-400">{fmtDate(l.tentative_return_date)}</span> },
-    { key: 'status', header: 'Status', render: (l) => <Badge variant={STATUS_VARIANT[l.status] || 'default'}>{LOAN_STATUS_CONFIG[l.status]?.label || l.status}</Badge> },
+    { key: 'status', header: 'Status', render: (l) => (
+      <span className="inline-flex items-center gap-1.5">
+        <Badge variant={STATUS_VARIANT[l.status] || 'default'}>{LOAN_STATUS_CONFIG[l.status]?.label || l.status}</Badge>
+        {isOverdue(l) && <Badge variant="danger">Overdue</Badge>}
+      </span>
+    ) },
   ];
 
   if (loading) return <LoadingSpinner size="lg" className="py-24" />;
@@ -193,6 +208,7 @@ export function LoansPage() {
               onRowClick={(l) => navigate(`/loans/${l.id}`)}
               loading={false}
               emptyMessage={isOutward ? 'No loans recorded' : 'No inward loans recorded'}
+              rowClassName={(l) => (isOverdue(l) ? 'bg-danger-500/10 hover:bg-danger-500/20' : undefined)}
             />
           </div>
         );
