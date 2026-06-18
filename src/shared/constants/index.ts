@@ -172,6 +172,25 @@ export const LOAN_DIRECTION_CONFIG: Record<'OUTWARD' | 'INWARD', { label: string
   INWARD:  { label: 'Inward',  shortLabel: 'In',  description: 'Equipment loaned to us by others', numberCode: 'IN' },
 };
 
+export const PURCHASE_REQUEST_STATUS_CONFIG: Record<string, { label: string; color: string; bgColor: string }> = {
+  PENDING:   { label: 'Pending',   color: 'text-warning-400', bgColor: 'bg-warning-500/15' },
+  FULFILLED: { label: 'Fulfilled', color: 'text-success-400', bgColor: 'bg-success-500/15' },
+  CANCELLED: { label: 'Cancelled', color: 'text-surface-400', bgColor: 'bg-surface-500/15' },
+};
+
+export const PURCHASE_REQUEST_DEPT_PREFIX: Record<Department, string> = {
+  camera: 'CD',
+  lights_grips: 'LG',
+};
+
+export const REQUEST_TYPE_CONFIG: Record<string, { label: string; shortLabel: string }> = {
+  NEW_EQUIPMENT:        { label: 'New Equipment',        shortLabel: 'New' },
+  ACCESSORY:            { label: 'Accessory',            shortLabel: 'Accessory' },
+  SPARE_PART:           { label: 'Spare Part',           shortLabel: 'Spare' },
+  REPLACEMENT:          { label: 'Replacement (Wear & Tear)', shortLabel: 'Replacement' },
+  ADDITIONAL_INVENTORY: { label: 'Additional Inventory', shortLabel: 'Additional' },
+};
+
 export const CATEGORY_PREFIXES: Record<string, string> = {
   'Camera': 'CAM',
   'Dollies Mounts & Cranes': 'DMC',

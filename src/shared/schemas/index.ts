@@ -258,6 +258,39 @@ export const LoanReturnSchema = z.object({
   item_ids: z.array(z.string().uuid()).min(1),
 });
 
+// ── Purchase Requests ──
+const PURCHASE_REQUEST_TYPES = [
+  'NEW_EQUIPMENT',
+  'ACCESSORY',
+  'SPARE_PART',
+  'REPLACEMENT',
+  'ADDITIONAL_INVENTORY',
+] as const;
+
+export const PurchaseRequestCreateSchema = z.object({
+  department: z.enum(['camera', 'lights_grips']),
+  request_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  requested_asset: z.string().min(1).max(200),
+  request_type: z.enum(PURCHASE_REQUEST_TYPES).default('NEW_EQUIPMENT'),
+  current_quantity: z.number().int().min(0).default(0),
+  requested_quantity: z.number().int().min(1).default(1),
+  reason: z.string().max(2000).default(''),
+  supplier: z.string().max(200).default(''),
+  amount: z.number().min(0).default(0),
+});
+
+// Editable fields. Department is excluded since it drives the request number.
+export const PurchaseRequestUpdateSchema = z.object({
+  request_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  requested_asset: z.string().min(1).max(200),
+  request_type: z.enum(PURCHASE_REQUEST_TYPES).default('NEW_EQUIPMENT'),
+  current_quantity: z.number().int().min(0).default(0),
+  requested_quantity: z.number().int().min(1).default(1),
+  reason: z.string().max(2000).default(''),
+  supplier: z.string().max(200).default(''),
+  amount: z.number().min(0).default(0),
+});
+
 // ── Inferred types ──
 export type LoginInput = z.infer<typeof LoginSchema>;
 export type UserCreateInput = z.infer<typeof UserCreateSchema>;
@@ -275,6 +308,8 @@ export type VendorCreateInput = z.infer<typeof VendorCreateSchema>;
 export type VendorUpdateInput = z.infer<typeof VendorUpdateSchema>;
 export type PreventiveScheduleInput = z.infer<typeof PreventiveScheduleSchema>;
 export type TicketActionInput = z.infer<typeof TicketActionSchema>;
+export type PurchaseRequestCreateInput = z.infer<typeof PurchaseRequestCreateSchema>;
+export type PurchaseRequestUpdateInput = z.infer<typeof PurchaseRequestUpdateSchema>;
 export type TicketActionUpdateInput = z.infer<typeof TicketActionUpdateSchema>;
 export type LoanCreateInput = z.infer<typeof LoanCreateSchema>;
 export type LoanUpdateInput = z.infer<typeof LoanUpdateSchema>;

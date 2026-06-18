@@ -179,6 +179,35 @@ CREATE TABLE IF NOT EXISTS equipment_loan_items (
 CREATE INDEX IF NOT EXISTS idx_equipment_loan_items_loan ON equipment_loan_items(loan_id);
 CREATE INDEX IF NOT EXISTS idx_equipment_loan_items_equipment ON equipment_loan_items(equipment_id);
 
+-- Equipment purchase requests. Standalone tracking only; fully independent of the
+-- inventory tables. Each request covers one free-text asset (new equipment,
+-- accessory, spare part, wear-and-tear replacement, or additional inventory).
+-- A request stays PENDING on the active list until an admin marks it FULFILLED,
+-- after which it moves to the completed list (grouped by month). CANCELLED requests
+-- are dropped from the active list.
+CREATE TABLE IF NOT EXISTS purchase_requests (
+  id TEXT PRIMARY KEY,
+  request_number TEXT UNIQUE NOT NULL,
+  department TEXT NOT NULL CHECK (department IN ('camera', 'lights_grips')),
+  request_date TEXT NOT NULL DEFAULT (date('now')),
+  requested_asset TEXT NOT NULL DEFAULT '',
+  request_type TEXT NOT NULL DEFAULT 'NEW_EQUIPMENT' CHECK (request_type IN ('NEW_EQUIPMENT', 'ACCESSORY', 'SPARE_PART', 'REPLACEMENT', 'ADDITIONAL_INVENTORY')),
+  current_quantity INTEGER NOT NULL DEFAULT 0,
+  requested_quantity INTEGER NOT NULL DEFAULT 1,
+  reason TEXT NOT NULL DEFAULT '',
+  supplier TEXT NOT NULL DEFAULT '',
+  amount REAL NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'FULFILLED', 'CANCELLED')),
+  fulfilled_at TEXT,
+  fulfilled_by TEXT,
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_purchase_requests_department ON purchase_requests(department);
+CREATE INDEX IF NOT EXISTS idx_purchase_requests_status ON purchase_requests(status);
+
 -- Repair and maintenance work orders
 CREATE TABLE IF NOT EXISTS maintenance_tickets (
   id TEXT PRIMARY KEY,

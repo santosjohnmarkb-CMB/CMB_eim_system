@@ -338,6 +338,37 @@ export interface EquipmentLoanWithItems extends EquipmentLoan {
   items: EquipmentLoanItem[];
 }
 
+// ── Purchase Requests ──
+// Standalone tracking for buying new equipment, accessories, spare parts,
+// wear-and-tear replacements, or additional inventory. Independent of inventory.
+export type PurchaseRequestStatus = 'PENDING' | 'FULFILLED' | 'CANCELLED';
+export type PurchaseRequestType =
+  | 'NEW_EQUIPMENT'
+  | 'ACCESSORY'
+  | 'SPARE_PART'
+  | 'REPLACEMENT'
+  | 'ADDITIONAL_INVENTORY';
+
+export interface PurchaseRequest {
+  id: string;
+  request_number: string;
+  department: 'camera' | 'lights_grips';
+  request_date: string;
+  requested_asset: string;
+  request_type: PurchaseRequestType;
+  current_quantity: number;
+  requested_quantity: number;
+  reason: string;
+  supplier: string;
+  amount: number;
+  status: PurchaseRequestStatus;
+  fulfilled_at: string | null;
+  fulfilled_by: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DashboardStats {
   totalEquipment: number;
   availableCount: number;
