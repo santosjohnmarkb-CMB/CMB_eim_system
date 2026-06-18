@@ -1,6 +1,15 @@
+import { randomUUID } from 'node:crypto';
+
 interface Migration {
   id: string;
   up: (db: any) => void;
+}
+
+function indexExists(db: any, index: string): boolean {
+  const row = db.prepare(
+    "SELECT COUNT(*) as count FROM sqlite_master WHERE type='index' AND name=?"
+  ).get(index);
+  return row.count > 0;
 }
 
 function columnExists(db: any, table: string, column: string): boolean {
@@ -379,6 +388,100 @@ const MIGRATIONS: Migration[] = [
     up: (db: any) => {
       if (tableExists(db, 'equipment_loans') && !columnExists(db, 'equipment_loans', 'internal_notes')) {
         db.exec(`ALTER TABLE equipment_loans ADD COLUMN internal_notes TEXT NOT NULL DEFAULT ''`);
+      }
+    },
+  },
+  {
+    // Move from one asset row per equipment to one asset row per unit of quantity.
+    // The old unique index enforced a strict 1:1 relationship; drop it and recreate
+    // as a plain (non-unique) index so each unit can have its own asset record.
+    // Backfill: top up each item to `quantity` unit rows (cloning the original asset's
+    // supplier/dates but blanking the per-unit serial), then derive available_qty from
+    // the per-unit AVAILABLE status counts.
+    id: '015_multi_unit_assets',
+    up: (db: any) => {
+      if (!tableExists(db, 'equipment_assets')) return;
+
+      if (indexExists(db, 'idx_equipment_assets_equipment_id')) {
+        db.exec(`DROP INDEX idx_equipment_assets_equipment_id`);
+      }
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_equipment_assets_equipment_id ON equipment_assets(equipment_id)`);
+
+      const now = new Date().toISOString();
+      const items: any[] = db.prepare('SELECT id, quantity FROM equipment_items').all();
+      for (const item of items) {
+        const targetQty = Math.max(1, item.quantity || 1);
+        const assets: any[] = db.prepare('SELECT * FROM equipment_assets WHERE equipment_id = ? ORDER BY created_at').all(item.id);
+        const template = assets[0];
+        const toCreate = targetQty - assets.length;
+        for (let i = 0; i < toCreate; i++) {
+          db.prepare(`
+            INSERT INTO equipment_assets (id, equipment_id, serial_number, asset_tag, purchase_date, delivered_date, purchase_price, vendor_name, warranty_expiry, current_location, current_status, created_at, updated_at)
+            VALUES (?, ?, '', NULL, ?, ?, ?, ?, ?, ?, 'AVAILABLE', ?, ?)
+          `).run(
+            randomUUID(), item.id,
+            template?.purchase_date ?? null,
+            template?.delivered_date ?? null,
+            template?.purchase_price ?? 0,
+            template?.vendor_name ?? null,
+            template?.warranty_expiry ?? null,
+            template?.current_location ?? 'Warehouse',
+            now, now,
+          );
+        }
+        const avail: any = db.prepare(
+          "SELECT COUNT(*) as count FROM equipment_assets WHERE equipment_id = ? AND current_status = 'AVAILABLE'"
+        ).get(item.id);
+        const totalUnits: any = db.prepare(
+          'SELECT COUNT(*) as count FROM equipment_assets WHERE equipment_id = ?'
+        ).get(item.id);
+        db.prepare("UPDATE equipment_items SET quantity = ?, available_qty = ?, updated_at = datetime('now') WHERE id = ?")
+          .run(totalUnits.count, avail.count, item.id);
+      }
+    },
+  },
+  {
+    // Reconcile legacy open tickets (created before per-unit assets) so they hold a
+    // unit out of service. Without this, an open ticket whose asset_id is NULL no
+    // longer reduces availability after the multi-unit backfill. For each such ticket,
+    // claim one AVAILABLE unit, set it to the matching status, link it, and recompute.
+    id: '016_link_open_tickets_to_units',
+    up: (db: any) => {
+      if (!tableExists(db, 'maintenance_tickets') || !tableExists(db, 'equipment_assets')) return;
+
+      const openTickets: any[] = db.prepare(`
+        SELECT id, equipment_id, repair_status, document_type
+        FROM maintenance_tickets
+        WHERE repair_status NOT IN ('COMPLETED', 'CANCELLED') AND (asset_id IS NULL OR asset_id = '')
+      `).all();
+
+      const affected = new Set<string>();
+      for (const ticket of openTickets) {
+        const unit: any = db.prepare(
+          "SELECT id, current_status FROM equipment_assets WHERE equipment_id = ? AND current_status = 'AVAILABLE' ORDER BY created_at, id LIMIT 1",
+        ).get(ticket.equipment_id);
+        if (!unit) continue; // nothing available to reserve; leave as-is
+
+        const newStatus = ticket.repair_status === 'IN_PROGRESS' ? 'IN_REPAIR' : 'FOR_INSPECTION';
+        db.prepare("UPDATE equipment_assets SET current_status = ?, updated_at = datetime('now') WHERE id = ?")
+          .run(newStatus, unit.id);
+        db.prepare('UPDATE maintenance_tickets SET asset_id = ? WHERE id = ?').run(unit.id, ticket.id);
+        db.prepare(`
+          INSERT INTO asset_status_log (id, asset_id, equipment_id, previous_status, new_status, changed_by, reason, related_ticket_id)
+          VALUES (?, ?, ?, 'AVAILABLE', ?, 'System (migration)', 'Reserved for existing open ticket', ?)
+        `).run(randomUUID(), unit.id, ticket.equipment_id, newStatus, ticket.id);
+        affected.add(ticket.equipment_id);
+      }
+
+      for (const equipmentId of affected) {
+        const avail: any = db.prepare(
+          "SELECT COUNT(*) as count FROM equipment_assets WHERE equipment_id = ? AND current_status = 'AVAILABLE'",
+        ).get(equipmentId);
+        const total: any = db.prepare(
+          "SELECT COUNT(*) as count FROM equipment_assets WHERE equipment_id = ? AND current_status NOT IN ('RETIRED', 'MISSING')",
+        ).get(equipmentId);
+        db.prepare("UPDATE equipment_items SET quantity = ?, available_qty = ?, updated_at = datetime('now') WHERE id = ?")
+          .run(total.count, avail.count, equipmentId);
       }
     },
   },

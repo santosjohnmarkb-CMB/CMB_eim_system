@@ -6,6 +6,7 @@ import { MaintenanceTicketCreateSchema, MaintenanceTicketUpdateSchema, Maintenan
 import { pushOperationalToCloud } from '../sync/operational-sync';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { sessionDepartment, categoriesForDepartment, departmentForCategory, assertEquipmentInDepartment } from './department';
+import { recomputeAvailability, pickAvailableAsset } from './availability';
 
 const DEPT_PREFIX: Record<string, string> = {
   'Camera': 'CD',
@@ -99,7 +100,22 @@ export function registerMaintenanceHandlers(): void {
     const docType = input.document_type || 'repair';
     const ticketNumber = generateTicketNumber(db, input.equipment_id, input.maintenance_type);
     const now = new Date().toISOString();
-    const asset: any = db.prepare('SELECT id FROM equipment_assets WHERE equipment_id = ?').get(input.equipment_id);
+    // Opening a ticket is strictly dependent on availability: it takes one AVAILABLE
+    // unit out of service. A ticket cannot be opened for a unit that is deployed,
+    // already under maintenance, retired, or missing.
+    let asset: any;
+    if (input.asset_id) {
+      asset = db.prepare('SELECT id, current_status FROM equipment_assets WHERE id = ? AND equipment_id = ?').get(input.asset_id, input.equipment_id);
+      if (!asset) throw new Error('Selected unit was not found for this equipment.');
+      if (asset.current_status !== 'AVAILABLE') {
+        throw new Error('That unit is not available. A ticket can only be opened for an available unit.');
+      }
+    } else {
+      asset = pickAvailableAsset(db, input.equipment_id);
+      if (!asset) {
+        throw new Error('No available unit for this equipment. A ticket can only be opened when at least one unit is available.');
+      }
+    }
 
     const tx = db.transaction(() => {
       db.prepare(`
@@ -110,17 +126,15 @@ export function registerMaintenanceHandlers(): void {
         input.project_name || null, input.production_name || null,
         input.project_date || null, input.verified_by || null, docType, now, now);
 
-      // Auto-decrement available_qty
-      db.prepare("UPDATE equipment_items SET available_qty = MAX(available_qty - 1, 0), updated_at = datetime('now') WHERE id = ?")
-        .run(input.equipment_id);
-
       if (asset) {
         // Capture the prior status before mutating it (log first, then update).
         const prev: any = db.prepare('SELECT current_status FROM equipment_assets WHERE id = ?').get(asset.id);
-        db.prepare("UPDATE equipment_assets SET current_status = 'FOR_INSPECTION', updated_at = datetime('now') WHERE equipment_id = ?").run(input.equipment_id);
+        db.prepare("UPDATE equipment_assets SET current_status = 'FOR_INSPECTION', updated_at = datetime('now') WHERE id = ?").run(asset.id);
         db.prepare(`INSERT INTO asset_status_log (id, asset_id, equipment_id, previous_status, new_status, changed_by, reason, related_ticket_id) VALUES (?, ?, ?, ?, 'FOR_INSPECTION', ?, ?, ?)`)
           .run(uuidv4(), asset.id, input.equipment_id, prev?.current_status || '', user.full_name, docType === 'loss' ? 'Loss ticket created' : 'Maintenance ticket created', id);
       }
+      // Availability is derived from per-unit statuses; the affected unit is now FOR_INSPECTION.
+      recomputeAvailability(db, input.equipment_id);
     });
     tx();
 
@@ -166,8 +180,6 @@ export function registerMaintenanceHandlers(): void {
     if (newStatus === 'COMPLETED') {
       finalOutcome = outcome || (isLoss ? 'found' : 'repaired');
     }
-    // Write-off outcomes permanently remove one unit from total inventory.
-    const writeOff = finalOutcome === 'unrepairable' || finalOutcome === 'total_loss' || finalOutcome === 'not_found';
 
     const tx = db.transaction(() => {
       const updates: string[] = [`repair_status = ?`, "updated_at = datetime('now')"];
@@ -183,24 +195,8 @@ export function registerMaintenanceHandlers(): void {
       db.prepare(`INSERT INTO maintenance_notes (id, ticket_id, author, note_text, note_type) VALUES (?, ?, ?, ?, 'status_change')`)
         .run(uuidv4(), id, user.full_name, `Status changed from ${ticket.repair_status} to ${newStatus}${noteSuffix}`);
 
-      // Inventory adjustments
-      if (newStatus === 'COMPLETED') {
-        if (writeOff) {
-          // Unit is gone: drop total quantity by 1 and clamp availability to the new total.
-          // (available_qty was already decremented at ticket creation.)
-          db.prepare("UPDATE equipment_items SET quantity = MAX(quantity - 1, 0), available_qty = MIN(available_qty, MAX(quantity - 1, 0)), updated_at = datetime('now') WHERE id = ?")
-            .run(ticket.equipment_id);
-        } else {
-          // Returned to service: restore availability.
-          db.prepare("UPDATE equipment_items SET available_qty = MIN(available_qty + 1, quantity), updated_at = datetime('now') WHERE id = ?")
-            .run(ticket.equipment_id);
-        }
-      } else if (newStatus === 'CANCELLED') {
-        db.prepare("UPDATE equipment_items SET available_qty = MIN(available_qty + 1, quantity), updated_at = datetime('now') WHERE id = ?")
-          .run(ticket.equipment_id);
-      }
-
-      // Asset status transitions
+      // Asset status transitions for the single unit this ticket targets. Availability
+      // (and total quantity for write-offs/losses) is derived from the unit statuses below.
       if (ticket.asset_id) {
         let assetStatus: string | null = null;
         let reason = '';
@@ -215,6 +211,10 @@ export function registerMaintenanceHandlers(): void {
         } else if (newStatus === 'IN_PROGRESS') {
           assetStatus = 'IN_REPAIR';
           reason = isLoss ? 'Search in progress' : 'Repair in progress';
+        } else if (newStatus === 'CANCELLED') {
+          // Ticket dropped: return the unit to service.
+          assetStatus = 'AVAILABLE';
+          reason = 'Ticket cancelled';
         }
 
         if (assetStatus) {
@@ -229,6 +229,10 @@ export function registerMaintenanceHandlers(): void {
           db.prepare(`INSERT INTO asset_status_log (id, asset_id, equipment_id, previous_status, new_status, changed_by, reason, related_ticket_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
             .run(uuidv4(), ticket.asset_id, ticket.equipment_id, prev?.current_status || '', assetStatus, user.full_name, reason, id);
         }
+      }
+
+      if (newStatus === 'COMPLETED' || newStatus === 'CANCELLED') {
+        recomputeAvailability(db, ticket.equipment_id);
       }
     });
     tx();
@@ -263,12 +267,11 @@ export function registerMaintenanceHandlers(): void {
       // Only an open ticket holds the unit out of service — restore it on delete.
       // A completed ticket already settled inventory (incl. write-offs); leave it alone.
       if (wasOpen) {
-        db.prepare("UPDATE equipment_items SET available_qty = MIN(available_qty + 1, quantity), updated_at = datetime('now') WHERE id = ?")
-          .run(ticket.equipment_id);
         if (ticket.asset_id) {
           db.prepare("UPDATE equipment_assets SET current_status = 'AVAILABLE', updated_at = datetime('now') WHERE id = ?")
             .run(ticket.asset_id);
         }
+        recomputeAvailability(db, ticket.equipment_id);
       }
     });
     tx();

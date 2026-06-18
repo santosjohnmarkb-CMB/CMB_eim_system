@@ -17,6 +17,8 @@ interface EquipmentState {
   deleteEquipment: (id: string) => Promise<void>;
   updateStatus: (equipmentId: string, newStatus: string, reason: string) => Promise<void>;
   batchUpdateStatus: (ids: string[], newStatus: string, reason: string) => Promise<void>;
+  updateAsset: (data: { asset_id: string; serial_number?: string; vendor_name?: string | null; delivered_date?: string | null }) => Promise<void>;
+  updateAssetStatus: (data: { asset_id: string; status: string; reason?: string }) => Promise<void>;
   getStatusLog: (equipmentId: string) => Promise<AssetStatusLogEntry[]>;
   generateCode: (categoryId: string) => Promise<string>;
   importCsv: (csvContent: string) => Promise<any>;
@@ -85,6 +87,17 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
 
   batchUpdateStatus: async (ids: string[], newStatus: string, reason: string) => {
     await ipcInvoke('db:equipment:batchUpdateStatus', ids, newStatus, reason);
+    await get().fetchAll();
+    await get().fetchDashboardStats();
+  },
+
+  updateAsset: async (data) => {
+    await ipcInvoke('db:equipment:updateAsset', data);
+    await get().fetchAll();
+  },
+
+  updateAssetStatus: async (data) => {
+    await ipcInvoke('db:equipment:updateAssetStatus', data);
     await get().fetchAll();
     await get().fetchDashboardStats();
   },

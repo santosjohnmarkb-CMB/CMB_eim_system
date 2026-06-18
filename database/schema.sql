@@ -115,7 +115,8 @@ CREATE TABLE IF NOT EXISTS equipment_assets (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_equipment_assets_equipment_id ON equipment_assets(equipment_id);
+-- One asset row per unit of quantity, so this is intentionally NOT unique.
+CREATE INDEX IF NOT EXISTS idx_equipment_assets_equipment_id ON equipment_assets(equipment_id);
 
 -- Audit trail of every status change
 CREATE TABLE IF NOT EXISTS asset_status_log (

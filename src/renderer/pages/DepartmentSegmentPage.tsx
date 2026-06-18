@@ -241,9 +241,11 @@ function ReportsTab({ dept }: { dept: Department }) {
     const deptItems = items.filter((i) => validCatIds.has(i.category_id));
 
     const total = deptItems.length;
-    const available = deptItems.filter((i) => !i.asset?.current_status || i.asset.current_status === 'AVAILABLE').length;
-    const inRepair = deptItems.filter((i) => i.asset?.current_status === 'IN_REPAIR').length;
-    const deployed = deptItems.filter((i) => i.asset?.current_status === 'DEPLOYED').length;
+    // Status is tracked per unit now, so count individual units, not items.
+    const deptUnits = deptItems.flatMap((i) => i.assets ?? (i.asset ? [i.asset] : []));
+    const available = deptUnits.filter((a) => (a.current_status || 'AVAILABLE') === 'AVAILABLE').length;
+    const inRepair = deptUnits.filter((a) => a.current_status === 'IN_REPAIR').length;
+    const deployed = deptUnits.filter((a) => a.current_status === 'DEPLOYED').length;
 
     const equipmentCategoryMap = new Map<string, string>();
     for (const eq of items) equipmentCategoryMap.set(eq.id, eq.category_id);

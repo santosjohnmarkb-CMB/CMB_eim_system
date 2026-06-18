@@ -27,6 +27,59 @@ function fmtDate(d: string | null | undefined) {
   return d ? new Date(d).toLocaleDateString() : '—';
 }
 
+// An item now holds one asset per unit. Collapse a per-unit field to a single label
+// for the list: show the shared value, or "Multiple" when units differ.
+function unitsOf(item: EquipmentWithAsset) {
+  return item.assets ?? (item.asset ? [item.asset] : []);
+}
+
+function summarizeField(item: EquipmentWithAsset, pick: (a: NonNullable<EquipmentWithAsset['asset']>) => string | null | undefined) {
+  const units = unitsOf(item);
+  if (units.length === 0) return '—';
+  const distinct = Array.from(new Set(units.map((a) => (pick(a) || '').trim())));
+  if (distinct.length === 1) return distinct[0] || '—';
+  return 'Multiple';
+}
+
+// Overall status label for the list: the shared unit status, or "Mixed" when units differ.
+function summarizeStatus(item: EquipmentWithAsset): { status: string; mixed: boolean } {
+  const units = unitsOf(item);
+  if (units.length === 0) return { status: item.asset?.current_status || 'AVAILABLE', mixed: false };
+  const distinct = Array.from(new Set(units.map((a) => a.current_status || 'AVAILABLE')));
+  if (distinct.length === 1) return { status: distinct[0]!, mixed: false };
+  return { status: 'Mixed', mixed: true };
+}
+
+// Camera "CAM-CAMPKG" package components are stored at a price of 0 because they are
+// only billed as part of the package. They should stay in the database but be hidden
+// from the equipment list (only priced items are shown). Not a deletion — just a filter.
+function isZeroPricedPackageComponent(item: EquipmentWithAsset): boolean {
+  const code = item.equipment_code?.toLowerCase() ?? '';
+  return code.includes('campkg') && (item.base_price ?? 0) === 0;
+}
+
+// Default ordering for the equipment list. Certain groups should surface first on
+// initial viewing: camera/lens/special for the camera dept, lighting for lights & grips.
+// Lower rank sorts first; items within the same rank keep their existing order.
+function defaultGroupRank(item: EquipmentWithAsset, department: Department | null): number {
+  const sub = (item.subcategory_name ?? '').toLowerCase();
+  if (department === 'camera') {
+    // Rank by subcategory only — the category is "Camera" for every item here, so a
+    // category-name match would lump lens/special rigs in with the camera group.
+    if (sub.includes('camera')) return 0;
+    if (sub.includes('lens')) return 1;
+    if (sub.includes('special')) return 2;
+    return 3;
+  }
+  if (department === 'lights_grips') {
+    // Grip and Lighting share the "Lights and Grips" category, so rank by subcategory
+    // only — otherwise the category name ("Lights and Grips") matches grips too.
+    if (sub.includes('light')) return 0;
+    return 1;
+  }
+  return 0;
+}
+
 export function EquipmentListPage() {
   const { dept } = useParams<{ dept: string }>();
   const department = (dept === 'camera' || dept === 'lights_grips') ? dept as Department : null;
@@ -62,11 +115,12 @@ export function EquipmentListPage() {
   }, [deptConfig]);
 
   const deptItems = useMemo(() => {
-    if (!deptCategoryNames) return items;
+    const visible = items.filter((i) => !isZeroPricedPackageComponent(i));
+    if (!deptCategoryNames) return visible;
     const catIdSet = new Set(
       categories.filter((c) => deptCategoryNames.has(c.name)).map((c) => c.id)
     );
-    return items.filter((i) => catIdSet.has(i.category_id));
+    return visible.filter((i) => catIdSet.has(i.category_id));
   }, [items, categories, deptCategoryNames]);
 
   const usedCategoryIds = useMemo(() => new Set(deptItems.map((i) => i.category_id)), [deptItems]);
@@ -98,17 +152,32 @@ export function EquipmentListPage() {
   // Shared predicate for the active search/category/subcategory/status filters, so the
   // on-screen table and the printed output stay in sync.
   const matchesFilters = useCallback((item: EquipmentWithAsset) => {
+    if (isZeroPricedPackageComponent(item)) return false;
     if (search) {
       const q = search.toLowerCase();
       if (!item.name.toLowerCase().includes(q) && !item.equipment_code.toLowerCase().includes(q) && !item.brand.toLowerCase().includes(q)) return false;
     }
     if (categoryFilter && item.category_id !== categoryFilter) return false;
     if (subcategoryFilter && item.subcategory_id !== subcategoryFilter) return false;
-    if (statusFilter && item.asset?.current_status !== statusFilter) return false;
+    if (statusFilter) {
+      const units = unitsOf(item);
+      const matches = units.length > 0
+        ? units.some((a) => (a.current_status || 'AVAILABLE') === statusFilter)
+        : item.asset?.current_status === statusFilter;
+      if (!matches) return false;
+    }
     return true;
   }, [search, categoryFilter, subcategoryFilter, statusFilter]);
 
-  const filtered = useMemo(() => deptItems.filter(matchesFilters), [deptItems, matchesFilters]);
+  const filtered = useMemo(() => {
+    const list = deptItems.filter(matchesFilters);
+    // Stable sort: priority groups first, original relative order preserved within a group.
+    return list
+      .map((item, index) => ({ item, index }))
+      .sort((a, b) =>
+        defaultGroupRank(a.item, department) - defaultGroupRank(b.item, department) || a.index - b.index)
+      .map((x) => x.item);
+  }, [deptItems, matchesFilters, department]);
 
   // Departments this user is allowed to print. Admins get both; a department user only theirs.
   const printableDepts = useMemo<Department[]>(() => {
@@ -120,17 +189,24 @@ export function EquipmentListPage() {
 
   const buildPrintSection = (d: Department) => {
     // Respect the active page filters so the printout matches what's visible on screen.
-    const list = items.filter((i) => i.category_name && CATEGORY_TO_DEPARTMENT[i.category_name] === d && matchesFilters(i));
+    const list = items
+      .filter((i) => i.category_name && CATEGORY_TO_DEPARTMENT[i.category_name] === d && matchesFilters(i))
+      .map((item, index) => ({ item, index }))
+      .sort((a, b) => defaultGroupRank(a.item, d) - defaultGroupRank(b.item, d) || a.index - b.index)
+      .map((x) => x.item);
     const rows = list.map((i) => {
-      const status = i.asset?.current_status || 'AVAILABLE';
-      const statusLabel = EQUIPMENT_STATUS_CONFIG[status as EquipmentStatus]?.label || status;
+      const { status, mixed } = summarizeStatus(i);
+      const statusLabel = mixed ? 'Mixed' : (EQUIPMENT_STATUS_CONFIG[status as EquipmentStatus]?.label || status);
       const sub = [i.brand, i.model].filter(Boolean).join(' ');
+      const deliveredUnits = unitsOf(i);
+      const deliveredDistinct = Array.from(new Set(deliveredUnits.map((a) => a.delivered_date || '')));
+      const deliveredLabel = deliveredUnits.length === 0 ? '—' : deliveredDistinct.length === 1 ? fmtDate(deliveredDistinct[0] || null) : 'Multiple';
       return `<tr>
         <td>${escapeHtml(i.equipment_code)}</td>
         <td>${escapeHtml(i.name)}${sub ? `<br/><span style="color:#888;font-size:10px">${escapeHtml(sub)}</span>` : ''}</td>
         <td>${escapeHtml(i.category_name || '—')}</td>
-        <td>${escapeHtml(i.asset?.vendor_name || '—')}</td>
-        <td>${escapeHtml(fmtDate(i.asset?.delivered_date))}</td>
+        <td>${escapeHtml(summarizeField(i, (a) => a.vendor_name))}</td>
+        <td>${escapeHtml(deliveredLabel)}</td>
         <td>${i.quantity ?? 1}</td>
         <td>${i.available_qty ?? i.quantity ?? 1}</td>
         <td>${escapeHtml(statusLabel)}</td>
@@ -162,10 +238,16 @@ export function EquipmentListPage() {
     { key: 'equipment_code', header: 'Code', className: 'w-24' },
     { key: 'name', header: 'Name', render: (item) => (<div><p className="font-medium text-surface-100">{item.name}</p><p className="text-xs text-surface-500">{item.brand} {item.model}</p></div>) },
     { key: 'category_name', header: 'Category', render: (item) => (<span className="text-surface-400">{item.category_name}</span>) },
-    { key: 'supplier', header: 'Supplier', render: (item) => (<span className="text-surface-400">{item.asset?.vendor_name || '—'}</span>) },
-    { key: 'delivered_date', header: 'Delivered', render: (item) => (<span className="text-surface-400">{fmtDate(item.asset?.delivered_date)}</span>) },
+    { key: 'supplier', header: 'Supplier', render: (item) => (<span className="text-surface-400">{summarizeField(item, (a) => a.vendor_name)}</span>) },
+    { key: 'delivered_date', header: 'Delivered', render: (item) => {
+      const units = unitsOf(item);
+      const distinct = Array.from(new Set(units.map((a) => a.delivered_date || '')));
+      const label = units.length === 0 ? '—' : distinct.length === 1 ? fmtDate(distinct[0] || null) : 'Multiple';
+      return <span className="text-surface-400">{label}</span>;
+    }},
     { key: 'status', header: 'Status', render: (item) => {
-      const status = item.asset?.current_status || 'AVAILABLE';
+      const { status, mixed } = summarizeStatus(item);
+      if (mixed) return <Badge variant="default">Mixed</Badge>;
       const config = EQUIPMENT_STATUS_CONFIG[status as EquipmentStatus];
       return <Badge variant={statusVariantMap[status] || 'default'}>{config?.label || status}</Badge>;
     }},

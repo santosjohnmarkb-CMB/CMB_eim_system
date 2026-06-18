@@ -7,6 +7,7 @@ import { LOAN_DEPT_PREFIX, LOAN_DIRECTION_CONFIG } from '../../shared/constants'
 import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { pushOperationalToCloud } from '../sync/operational-sync';
 import { sessionDepartment, assertEquipmentInDepartment } from './department';
+import { recomputeAvailability, pickAvailableAsset } from './availability';
 
 function generateLoanNumber(db: any, department: 'camera' | 'lights_grips', direction: 'OUTWARD' | 'INWARD'): string {
   const deptCode = LOAN_DEPT_PREFIX[department] || 'CD';
@@ -50,9 +51,6 @@ function returnSingleItem(db: any, item: any, changedBy: string): void {
 
   if (!item.equipment_id) return;
 
-  db.prepare("UPDATE equipment_items SET available_qty = MIN(available_qty + 1, quantity), updated_at = datetime('now') WHERE id = ?")
-    .run(item.equipment_id);
-
   if (item.asset_id) {
     const prev: any = db.prepare('SELECT current_status FROM equipment_assets WHERE id = ?').get(item.asset_id);
     db.prepare("UPDATE equipment_assets SET current_status = 'AVAILABLE', updated_at = datetime('now') WHERE id = ?")
@@ -60,6 +58,8 @@ function returnSingleItem(db: any, item: any, changedBy: string): void {
     db.prepare(`INSERT INTO asset_status_log (id, asset_id, equipment_id, previous_status, new_status, changed_by, reason, related_ticket_id) VALUES (?, ?, ?, ?, 'AVAILABLE', ?, ?, ?)`)
       .run(uuidv4(), item.asset_id, item.equipment_id, prev?.current_status || '', changedBy, 'Returned from loan', null);
   }
+  // Availability is derived from the per-unit statuses of this equipment.
+  recomputeAvailability(db, item.equipment_id);
 }
 
 // Push the post-mutation equipment_items/equipment_assets rows to the cloud so the
@@ -135,6 +135,7 @@ export function registerLoanHandlers(): void {
     const loanNumber = generateLoanNumber(db, input.department, input.direction);
     const now = new Date().toISOString();
 
+    const affected: { equipment_id: string; asset_id: string | null }[] = [];
     const tx = db.transaction(() => {
       db.prepare(`
         INSERT INTO equipment_loans (id, loan_number, direction, department, person_or_org, purpose, location, loaned_date, duration, tentative_return_date, remarks, internal_notes, status, created_by, created_at, updated_at)
@@ -143,6 +144,9 @@ export function registerLoanHandlers(): void {
         input.loaned_date, input.duration || '', input.tentative_return_date || null, input.remarks || '', input.internal_notes || '',
         user.full_name, now, now);
 
+      // Track units already claimed in this loan so the same equipment added twice
+      // draws two distinct units instead of double-booking one.
+      const claimed: string[] = [];
       for (const item of input.items) {
         const itemId = uuidv4();
 
@@ -153,31 +157,26 @@ export function registerLoanHandlers(): void {
           continue;
         }
 
-        const asset: any = db.prepare('SELECT id, current_status FROM equipment_assets WHERE equipment_id = ?').get(item.equipment_id);
+        const asset: any = pickAvailableAsset(db, item.equipment_id as string, claimed);
+        if (asset) claimed.push(asset.id);
         db.prepare(`INSERT INTO equipment_loan_items (id, loan_id, equipment_id, asset_id, item_name, status, notes, created_at) VALUES (?, ?, ?, ?, NULL, 'OUT', ?, ?)`)
           .run(itemId, id, item.equipment_id, asset?.id || null, item.notes || null, now);
-
-        // Each loaned unit reduces availability by one.
-        db.prepare("UPDATE equipment_items SET available_qty = MAX(available_qty - 1, 0), updated_at = datetime('now') WHERE id = ?")
-          .run(item.equipment_id);
 
         if (asset) {
           db.prepare("UPDATE equipment_assets SET current_status = 'DEPLOYED', updated_at = datetime('now') WHERE id = ?").run(asset.id);
           db.prepare(`INSERT INTO asset_status_log (id, asset_id, equipment_id, previous_status, new_status, changed_by, reason, related_ticket_id) VALUES (?, ?, ?, ?, 'DEPLOYED', ?, ?, ?)`)
             .run(uuidv4(), asset.id, item.equipment_id, asset.current_status || '', user.full_name, `Loaned out (${loanNumber})`, null);
         }
+        // Each loaned unit reduces availability by one (derived from per-unit statuses).
+        recomputeAvailability(db, item.equipment_id as string);
+        affected.push({ equipment_id: item.equipment_id as string, asset_id: asset?.id || null });
       }
     });
     tx();
 
     // Propagate availability/asset changes to the shared catalog after the transaction commits.
     // Inward loans never touch inventory, so there is nothing to sync.
-    if (isOutward) {
-      for (const item of input.items) {
-        const asset: any = db.prepare('SELECT id FROM equipment_assets WHERE equipment_id = ?').get(item.equipment_id);
-        pushItemAvailabilityToCloud(db, item.equipment_id as string, asset?.id || null);
-      }
-    }
+    for (const a of affected) pushItemAvailabilityToCloud(db, a.equipment_id, a.asset_id);
 
     return db.prepare('SELECT * FROM equipment_loans WHERE id = ?').get(id);
   });

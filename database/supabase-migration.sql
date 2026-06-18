@@ -27,9 +27,12 @@ CREATE TABLE IF NOT EXISTS equipment_assets (
   retirement_reason TEXT,
   notes TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE(equipment_id)
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  -- One asset row per unit of quantity; intentionally no UNIQUE(equipment_id).
 );
+
+-- Existing cloud databases: drop the legacy 1:1 constraint if present.
+ALTER TABLE equipment_assets DROP CONSTRAINT IF EXISTS equipment_assets_equipment_id_key;
 
 CREATE TABLE IF NOT EXISTS asset_status_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

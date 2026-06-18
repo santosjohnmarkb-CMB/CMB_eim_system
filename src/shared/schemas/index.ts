@@ -58,11 +58,34 @@ export const EquipmentCreateSchema = z.object({
   vendor_name: z.string().max(200).nullable().optional(),
   warranty_expiry: optionalDate,
   quantity: z.number().int().min(0).default(1),
+  // Optional per-unit details. When provided, one asset row is created per entry
+  // (overriding `quantity`); when omitted, `quantity` blank units are created.
+  units: z.array(z.object({
+    serial_number: z.string().max(100).default(''),
+    vendor_name: z.string().max(200).nullable().optional(),
+    delivered_date: optionalDate,
+  })).optional(),
+});
+
+// Per-unit asset detail edit (serial number, supplier, delivery date).
+export const AssetUpdateSchema = z.object({
+  asset_id: z.string().uuid(),
+  serial_number: z.string().max(100).optional(),
+  vendor_name: z.string().max(200).nullable().optional(),
+  delivered_date: optionalDate.nullable(),
+});
+
+// Per-unit status change.
+export const AssetStatusUpdateSchema = z.object({
+  asset_id: z.string().uuid(),
+  status: z.enum(['AVAILABLE', 'DEPLOYED', 'IN_REPAIR', 'ON_HOLD', 'IN_TRANSIT', 'RETIRED', 'MISSING', 'FOR_INSPECTION']),
+  reason: z.string().max(2000).default(''),
 });
 
 // ── Maintenance ──
 export const MaintenanceTicketCreateSchema = z.object({
   equipment_id: z.string().uuid(),
+  asset_id: z.string().uuid().nullable().optional(),
   issue_description: z.string().min(1).max(5000),
   severity: z.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']).default('MEDIUM'),
   maintenance_type: z.enum(['routine_maintenance', 'update', 'repair', 'corrective', 'preventive', 'predictive']).default('repair'),
@@ -240,6 +263,8 @@ export type LoginInput = z.infer<typeof LoginSchema>;
 export type UserCreateInput = z.infer<typeof UserCreateSchema>;
 export type UserUpdateInput = z.infer<typeof UserUpdateSchema>;
 export type EquipmentCreateInput = z.infer<typeof EquipmentCreateSchema>;
+export type AssetUpdateInput = z.infer<typeof AssetUpdateSchema>;
+export type AssetStatusUpdateInput = z.infer<typeof AssetStatusUpdateSchema>;
 export type MaintenanceTicketCreateInput = z.infer<typeof MaintenanceTicketCreateSchema>;
 export type MaintenanceTicketUpdateInput = z.infer<typeof MaintenanceTicketUpdateSchema>;
 export type MaintenanceNoteInput = z.infer<typeof MaintenanceNoteSchema>;

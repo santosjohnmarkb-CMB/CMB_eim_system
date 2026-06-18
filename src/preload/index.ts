@@ -14,6 +14,8 @@ const ALLOWED_CHANNELS = new Set([
   'db:equipment:search',
   'db:equipment:updateStatus',
   'db:equipment:batchUpdateStatus',
+  'db:equipment:updateAsset',
+  'db:equipment:updateAssetStatus',
   'db:equipment:getStatusLog',
   'db:equipment:getDashboardStats',
   'db:equipment:getUseCounts',

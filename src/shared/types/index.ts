@@ -117,6 +117,7 @@ export interface EquipmentAsset {
 
 export interface EquipmentWithAsset extends EquipmentItem {
   asset?: EquipmentAsset;
+  assets?: EquipmentAsset[];
   category_name?: string;
   subcategory_name?: string;
 }

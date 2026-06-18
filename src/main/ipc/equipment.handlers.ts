@@ -2,11 +2,12 @@ import { ipcMain } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../database/index';
 import { requireSession } from './session';
-import { EquipmentCreateSchema } from '../../shared/schemas';
+import { EquipmentCreateSchema, AssetUpdateSchema, AssetStatusUpdateSchema } from '../../shared/schemas';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { pushOperationalToCloud } from '../sync/operational-sync';
 import { CATEGORY_PREFIXES } from '../../shared/constants';
 import { sessionDepartment, categoriesForDepartment, departmentForCategory } from './department';
+import { recomputeAvailability } from './availability';
 
 export function registerEquipmentHandlers(): void {
   const db = getDatabase();
@@ -23,46 +24,46 @@ export function registerEquipmentHandlers(): void {
     return db.prepare('SELECT * FROM subcategories WHERE category_id = ? AND is_active = 1 ORDER BY display_order').all(categoryId);
   });
 
+  // Load every unit (asset) for the given equipment ids, grouped by equipment_id.
+  // Each unit of quantity has its own equipment_assets row, so an item can have many.
+  const loadAssetsByEquipment = (equipmentIds: string[]): Map<string, any[]> => {
+    const grouped = new Map<string, any[]>();
+    if (equipmentIds.length === 0) return grouped;
+    const placeholders = equipmentIds.map(() => '?').join(', ');
+    const rows: any[] = db.prepare(
+      `SELECT * FROM equipment_assets WHERE equipment_id IN (${placeholders}) ORDER BY created_at, id`,
+    ).all(...equipmentIds);
+    for (const a of rows) {
+      const list = grouped.get(a.equipment_id) || [];
+      list.push(a);
+      grouped.set(a.equipment_id, list);
+    }
+    return grouped;
+  };
+
   ipcMain.handle('db:equipment:getAll', (event: any) => {
     const cats = categoriesForDepartment(sessionDepartment(event));
     const catWhere = cats ? `AND c.name IN (${cats.map(() => '?').join(', ')})` : '';
-    return db.prepare(`
-      SELECT e.*, ea.id as asset_db_id, ea.serial_number, ea.asset_tag, ea.purchase_date,
-             ea.delivered_date, ea.purchase_price, ea.vendor_name as asset_vendor, ea.warranty_expiry,
-             ea.current_location, ea.current_status,
-             ea.last_inspection_date, ea.notes as asset_notes,
-             c.name as category_name, sc.name as subcategory_name
+    const items: any[] = db.prepare(`
+      SELECT e.*, c.name as category_name, sc.name as subcategory_name
       FROM equipment_items e
-      LEFT JOIN equipment_assets ea ON ea.equipment_id = e.id
       LEFT JOIN categories c ON c.id = e.category_id
       LEFT JOIN subcategories sc ON sc.id = e.subcategory_id
       WHERE e.is_active = 1
       ${catWhere}
       ORDER BY e.equipment_code
-    `).all(...(cats || [])).map((row: any) => ({
-      ...row,
-      is_active: !!row.is_active,
-      asset: row.asset_db_id ? {
-        id: row.asset_db_id, equipment_id: row.id, serial_number: row.serial_number,
-        asset_tag: row.asset_tag, purchase_date: row.purchase_date,
-        delivered_date: row.delivered_date,
-        purchase_price: row.purchase_price, vendor_name: row.asset_vendor,
-        warranty_expiry: row.warranty_expiry,
-        current_location: row.current_location, current_status: row.current_status,
-        last_inspection_date: row.last_inspection_date, notes: row.asset_notes,
-      } : undefined,
-    }));
+    `).all(...(cats || []));
+    const grouped = loadAssetsByEquipment(items.map((i) => i.id));
+    return items.map((row: any) => {
+      const assets = grouped.get(row.id) || [];
+      return { ...row, is_active: !!row.is_active, assets, asset: assets[0] };
+    });
   });
 
   ipcMain.handle('db:equipment:getById', (event: any, id: string) => {
     const row: any = db.prepare(`
-      SELECT e.*, ea.id as asset_db_id, ea.serial_number, ea.asset_tag, ea.purchase_date,
-             ea.delivered_date, ea.purchase_price, ea.vendor_name as asset_vendor, ea.warranty_expiry,
-             ea.current_location, ea.current_status,
-             ea.last_inspection_date, ea.retirement_date, ea.retirement_reason, ea.notes as asset_notes,
-             c.name as category_name, sc.name as subcategory_name
+      SELECT e.*, c.name as category_name, sc.name as subcategory_name
       FROM equipment_items e
-      LEFT JOIN equipment_assets ea ON ea.equipment_id = e.id
       LEFT JOIN categories c ON c.id = e.category_id
       LEFT JOIN subcategories sc ON sc.id = e.subcategory_id
       WHERE e.id = ?
@@ -70,20 +71,8 @@ export function registerEquipmentHandlers(): void {
     if (!row) return null;
     const dept = sessionDepartment(event);
     if (dept && departmentForCategory(row.category_name) !== dept) return null;
-    return {
-      ...row,
-      is_active: !!row.is_active,
-      asset: row.asset_db_id ? {
-        id: row.asset_db_id, equipment_id: row.id, serial_number: row.serial_number,
-        asset_tag: row.asset_tag, purchase_date: row.purchase_date,
-        delivered_date: row.delivered_date,
-        purchase_price: row.purchase_price, vendor_name: row.asset_vendor,
-        warranty_expiry: row.warranty_expiry,
-        current_location: row.current_location, current_status: row.current_status,
-        last_inspection_date: row.last_inspection_date, retirement_date: row.retirement_date,
-        retirement_reason: row.retirement_reason, notes: row.asset_notes,
-      } : undefined,
-    };
+    const assets = loadAssetsByEquipment([id]).get(id) || [];
+    return { ...row, is_active: !!row.is_active, assets, asset: assets[0] };
   });
 
   ipcMain.handle('db:equipment:generateCode', (_e: any, categoryId: string) => {
@@ -120,8 +109,26 @@ export function registerEquipmentHandlers(): void {
     }
     const equipmentCode = `${prefix}-${String(seq).padStart(3, '0')}`;
 
-    const qty = input.quantity ?? 1;
+    // Build the per-unit list. When explicit `units` are provided, one asset row is
+    // created per entry; otherwise `quantity` units are created with the first unit
+    // carrying the form's serial/asset tag and the rest sharing supplier/dates.
+    const units: { serial_number: string; vendor_name: string | null; delivered_date: string | null; asset_tag: string | null }[] =
+      input.units && input.units.length > 0
+        ? input.units.map((u) => ({
+            serial_number: u.serial_number || '',
+            vendor_name: (u.vendor_name ?? input.vendor_name) || null,
+            delivered_date: (u.delivered_date ?? input.delivered_date) || null,
+            asset_tag: null,
+          }))
+        : Array.from({ length: Math.max(1, input.quantity ?? 1) }, (_, i) => ({
+            serial_number: i === 0 ? (input.serial_number || '') : '',
+            vendor_name: input.vendor_name || null,
+            delivered_date: input.delivered_date || null,
+            asset_tag: i === 0 ? (input.asset_tag || null) : null,
+          }));
+    const qty = units.length;
 
+    const assetIds: string[] = [];
     const tx = db.transaction(() => {
       db.prepare(`
         INSERT INTO equipment_items (id, equipment_code, name, display_name, category_id, subcategory_id, sub_subcategory, item_type, brand, model, description, pricing_type, base_price, notes, quantity, available_qty, is_active, created_at, updated_at)
@@ -130,60 +137,151 @@ export function registerEquipmentHandlers(): void {
         input.sub_subcategory || null, input.item_type, input.brand, input.model, input.description,
         input.pricing_type, input.base_price, input.notes || null, qty, qty, now, now);
 
-      db.prepare(`
-        INSERT INTO equipment_assets (id, equipment_id, serial_number, asset_tag, purchase_date, delivered_date, purchase_price, vendor_name, warranty_expiry, current_location, current_status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Warehouse', 'AVAILABLE', ?, ?)
-      `).run(assetId, equipmentId, input.serial_number || '', input.asset_tag || null,
-        input.purchase_date || null, input.delivered_date || null, input.purchase_price || 0, input.vendor_name || null,
-        input.warranty_expiry || null, now, now);
+      for (let i = 0; i < units.length; i++) {
+        const unit = units[i]!;
+        const unitId = i === 0 ? assetId : uuidv4();
+        assetIds.push(unitId);
+        db.prepare(`
+          INSERT INTO equipment_assets (id, equipment_id, serial_number, asset_tag, purchase_date, delivered_date, purchase_price, vendor_name, warranty_expiry, current_location, current_status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Warehouse', 'AVAILABLE', ?, ?)
+        `).run(unitId, equipmentId, unit.serial_number, unit.asset_tag,
+          input.purchase_date || null, unit.delivered_date, input.purchase_price || 0, unit.vendor_name,
+          input.warranty_expiry || null, now, now);
+      }
     });
     tx();
 
     const equipmentRow: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(equipmentId);
     void pushCatalogToCloud('equipment_items', 'INSERT', equipmentRow);
 
-    const assetRow: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(assetId);
-    void pushOperationalToCloud('equipment_assets', 'INSERT', assetRow);
+    for (const aid of assetIds) {
+      const assetRow: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(aid);
+      if (assetRow) void pushOperationalToCloud('equipment_assets', 'INSERT', assetRow);
+    }
 
     return { ...equipmentRow, is_active: true };
   });
 
+  // True if a unit has maintenance/loan/schedule history, in which case it must not
+  // be hard-deleted when shrinking quantity (it stays as part of the record).
+  const hasAssetReferences = (assetId: string): boolean => {
+    const t: any = db.prepare('SELECT COUNT(*) as c FROM maintenance_tickets WHERE asset_id = ?').get(assetId);
+    if (t.c > 0) return true;
+    const l: any = db.prepare('SELECT COUNT(*) as c FROM equipment_loan_items WHERE asset_id = ?').get(assetId);
+    if (l.c > 0) return true;
+    const p: any = db.prepare('SELECT COUNT(*) as c FROM preventive_schedules WHERE asset_id = ?').get(assetId);
+    return p.c > 0;
+  };
+
+  // Reconcile the number of unit (asset) rows to match a desired quantity.
+  // Growing adds blank AVAILABLE units (inheriting supplier/dates from an existing one).
+  // Shrinking removes spare AVAILABLE units that have no maintenance/loan history.
+  const reconcileUnits = (equipmentId: string, desiredQty: number): void => {
+    const desired = Math.max(0, Math.floor(desiredQty));
+    const liveUnits: any[] = db.prepare(
+      "SELECT * FROM equipment_assets WHERE equipment_id = ? AND current_status NOT IN ('RETIRED', 'MISSING') ORDER BY created_at, id",
+    ).all(equipmentId);
+
+    if (desired > liveUnits.length) {
+      const template = liveUnits[0];
+      const now = new Date().toISOString();
+      for (let i = 0; i < desired - liveUnits.length; i++) {
+        const newId = uuidv4();
+        db.prepare(`
+          INSERT INTO equipment_assets (id, equipment_id, serial_number, asset_tag, purchase_date, delivered_date, purchase_price, vendor_name, warranty_expiry, current_location, current_status, created_at, updated_at)
+          VALUES (?, ?, '', NULL, ?, ?, ?, ?, ?, ?, 'AVAILABLE', ?, ?)
+        `).run(newId, equipmentId,
+          template?.purchase_date ?? null, template?.delivered_date ?? null, template?.purchase_price ?? 0,
+          template?.vendor_name ?? null, template?.warranty_expiry ?? null, template?.current_location ?? 'Warehouse', now, now);
+        const created: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(newId);
+        if (created) void pushOperationalToCloud('equipment_assets', 'INSERT', created);
+      }
+    } else if (desired < liveUnits.length) {
+      // Only remove spare AVAILABLE units with no references, to preserve history/availability.
+      const removable = liveUnits.filter((u) => u.current_status === 'AVAILABLE' && !hasAssetReferences(u.id));
+      const toRemove = Math.min(liveUnits.length - desired, removable.length);
+      for (let i = 0; i < toRemove; i++) {
+        const unit = removable[i]!;
+        db.prepare('DELETE FROM equipment_assets WHERE id = ?').run(unit.id);
+        void pushOperationalToCloud('equipment_assets', 'DELETE', { id: unit.id });
+      }
+    }
+  };
+
   ipcMain.handle('db:equipment:update', (event: any, id: string, data: unknown) => {
     requireSession(event);
     const allowedFields = ['name', 'display_name', 'category_id', 'subcategory_id', 'sub_subcategory',
-      'item_type', 'brand', 'model', 'description', 'pricing_type', 'base_price', 'notes', 'quantity', 'available_qty'];
-    const assetFields = ['serial_number', 'asset_tag', 'purchase_date', 'delivered_date', 'purchase_price',
-      'vendor_name', 'warranty_expiry', 'current_location'];
+      'item_type', 'brand', 'model', 'description', 'pricing_type', 'base_price', 'notes'];
     const updates: string[] = [];
     const values: any[] = [];
-    const assetUpdates: string[] = [];
-    const assetValues: any[] = [];
     const input = data as Record<string, any>;
 
     for (const field of allowedFields) {
       if (input[field] !== undefined) { updates.push(`${field} = ?`); values.push(input[field]); }
-    }
-    for (const field of assetFields) {
-      if (input[field] !== undefined) { assetUpdates.push(`${field} = ?`); assetValues.push(input[field]); }
     }
 
     if (updates.length > 0) {
       updates.push("updated_at = datetime('now')");
       values.push(id);
       db.prepare(`UPDATE equipment_items SET ${updates.join(', ')} WHERE id = ?`).run(...values);
-      const row: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(id);
-      void pushCatalogToCloud('equipment_items', 'UPDATE', row);
     }
 
-    if (assetUpdates.length > 0) {
-      assetUpdates.push("updated_at = datetime('now')");
-      assetValues.push(id);
-      db.prepare(`UPDATE equipment_assets SET ${assetUpdates.join(', ')} WHERE equipment_id = ?`).run(...assetValues);
-      const assetRow: any = db.prepare('SELECT * FROM equipment_assets WHERE equipment_id = ?').get(id);
-      if (assetRow) void pushOperationalToCloud('equipment_assets', 'UPDATE', assetRow);
+    // Quantity changes add/remove unit rows; availability is then derived from units.
+    if (input.quantity !== undefined) {
+      reconcileUnits(id, parseInt(input.quantity, 10) || 0);
     }
+    recomputeAvailability(db, id);
 
     return db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(id);
+  });
+
+  ipcMain.handle('db:equipment:updateAsset', (event: any, data: unknown) => {
+    requireSession(event);
+    const input = AssetUpdateSchema.parse(data);
+    const asset: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(input.asset_id);
+    if (!asset) throw new Error('Asset not found');
+
+    const fields: string[] = [];
+    const vals: any[] = [];
+    if (input.serial_number !== undefined) { fields.push('serial_number = ?'); vals.push(input.serial_number); }
+    if (input.vendor_name !== undefined) { fields.push('vendor_name = ?'); vals.push(input.vendor_name || null); }
+    if (input.delivered_date !== undefined) { fields.push('delivered_date = ?'); vals.push(input.delivered_date || null); }
+    if (fields.length === 0) return asset;
+
+    fields.push("updated_at = datetime('now')");
+    vals.push(input.asset_id);
+    db.prepare(`UPDATE equipment_assets SET ${fields.join(', ')} WHERE id = ?`).run(...vals);
+    const updated: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(input.asset_id);
+    if (updated) void pushOperationalToCloud('equipment_assets', 'UPDATE', updated);
+    return updated;
+  });
+
+  ipcMain.handle('db:equipment:updateAssetStatus', (event: any, data: unknown) => {
+    const user = requireSession(event);
+    const input = AssetStatusUpdateSchema.parse(data);
+    const asset: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(input.asset_id);
+    if (!asset) throw new Error('Asset not found');
+    const previousStatus = asset.current_status;
+
+    const tx = db.transaction(() => {
+      if (input.status === 'RETIRED') {
+        db.prepare("UPDATE equipment_assets SET current_status = 'RETIRED', retirement_date = ?, retirement_reason = ?, updated_at = datetime('now') WHERE id = ?")
+          .run(new Date().toISOString(), input.reason || 'Retired', input.asset_id);
+      } else {
+        db.prepare("UPDATE equipment_assets SET current_status = ?, updated_at = datetime('now') WHERE id = ?")
+          .run(input.status, input.asset_id);
+      }
+      db.prepare(`
+        INSERT INTO asset_status_log (id, asset_id, equipment_id, previous_status, new_status, changed_by, reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(uuidv4(), input.asset_id, asset.equipment_id, previousStatus, input.status, user.full_name, input.reason || '');
+      recomputeAvailability(db, asset.equipment_id);
+    });
+    tx();
+
+    const updatedAsset: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(input.asset_id);
+    if (updatedAsset) void pushOperationalToCloud('equipment_assets', 'UPDATE', updatedAsset);
+    return { success: true };
   });
 
   ipcMain.handle('db:equipment:delete', (event: any, id: string) => {
@@ -203,29 +301,44 @@ export function registerEquipmentHandlers(): void {
     `).all(pattern, pattern, pattern, pattern, pattern);
   });
 
-  ipcMain.handle('db:equipment:updateStatus', (event: any, equipmentId: string, newStatus: string, reason: string) => {
-    const user = requireSession(event);
-    const asset: any = db.prepare('SELECT * FROM equipment_assets WHERE equipment_id = ?').get(equipmentId);
-    if (!asset) throw new Error('Equipment asset not found');
-    const previousStatus = asset.current_status;
-
-    const tx = db.transaction(() => {
-      db.prepare("UPDATE equipment_assets SET current_status = ?, updated_at = datetime('now') WHERE equipment_id = ?")
-        .run(newStatus, equipmentId);
-
+  // Apply a status to every live unit of an equipment (bulk). Per-unit changes use
+  // db:equipment:updateAssetStatus instead. Availability is recomputed from the units.
+  const setStatusForAllUnits = (equipmentId: string, newStatus: string, reason: string, changedBy: string): string[] => {
+    const assets: any[] = db.prepare(
+      "SELECT * FROM equipment_assets WHERE equipment_id = ? AND current_status NOT IN ('RETIRED', 'MISSING')",
+    ).all(equipmentId);
+    for (const asset of assets) {
+      if (newStatus === 'RETIRED') {
+        db.prepare("UPDATE equipment_assets SET current_status = 'RETIRED', retirement_date = ?, retirement_reason = ?, updated_at = datetime('now') WHERE id = ?")
+          .run(new Date().toISOString(), reason || 'Retired', asset.id);
+      } else {
+        db.prepare("UPDATE equipment_assets SET current_status = ?, updated_at = datetime('now') WHERE id = ?")
+          .run(newStatus, asset.id);
+      }
       db.prepare(`
         INSERT INTO asset_status_log (id, asset_id, equipment_id, previous_status, new_status, changed_by, reason)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(uuidv4(), asset.id, equipmentId, previousStatus, newStatus, user.full_name, reason || '');
+      `).run(uuidv4(), asset.id, equipmentId, asset.current_status, newStatus, changedBy, reason || '');
+    }
+    recomputeAvailability(db, equipmentId);
+    return assets.map((a) => a.id);
+  };
 
+  ipcMain.handle('db:equipment:updateStatus', (event: any, equipmentId: string, newStatus: string, reason: string) => {
+    const user = requireSession(event);
+    let assetIds: string[] = [];
+    const tx = db.transaction(() => {
+      assetIds = setStatusForAllUnits(equipmentId, newStatus, reason, user.full_name);
       if (newStatus === 'RETIRED') {
         db.prepare("UPDATE equipment_items SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(equipmentId);
       }
     });
     tx();
 
-    const updatedAsset: any = db.prepare('SELECT * FROM equipment_assets WHERE equipment_id = ?').get(equipmentId);
-    void pushOperationalToCloud('equipment_assets', 'UPDATE', updatedAsset);
+    for (const aid of assetIds) {
+      const updatedAsset: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(aid);
+      if (updatedAsset) void pushOperationalToCloud('equipment_assets', 'UPDATE', updatedAsset);
+    }
     return { success: true };
   });
 
@@ -233,15 +346,7 @@ export function registerEquipmentHandlers(): void {
     const user = requireSession(event);
     const tx = db.transaction(() => {
       for (const equipmentId of ids) {
-        const asset: any = db.prepare('SELECT * FROM equipment_assets WHERE equipment_id = ?').get(equipmentId);
-        if (!asset) continue;
-        const previousStatus = asset.current_status;
-        db.prepare("UPDATE equipment_assets SET current_status = ?, updated_at = datetime('now') WHERE equipment_id = ?")
-          .run(newStatus, equipmentId);
-        db.prepare(`
-          INSERT INTO asset_status_log (id, asset_id, equipment_id, previous_status, new_status, changed_by, reason)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(uuidv4(), asset.id, equipmentId, previousStatus, newStatus, user.full_name, reason || '');
+        setStatusForAllUnits(equipmentId, newStatus, reason, user.full_name);
         if (newStatus === 'RETIRED') {
           db.prepare("UPDATE equipment_items SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(equipmentId);
         }

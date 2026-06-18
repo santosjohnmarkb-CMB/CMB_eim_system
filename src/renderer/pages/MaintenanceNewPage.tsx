@@ -41,6 +41,7 @@ export function MaintenanceNewPage() {
   const [reportedBy, setReportedBy] = useState(user?.full_name || '');
   const [verifiedBy, setVerifiedBy] = useState('');
   const [equipmentId, setEquipmentId] = useState('');
+  const [assetId, setAssetId] = useState('');
   const [maintenanceType, setMaintenanceType] = useState('repair');
   const [issueDescription, setIssueDescription] = useState('');
   const [actionRows, setActionRows] = useState<ActionRow[]>([]);
@@ -81,6 +82,7 @@ export function MaintenanceNewPage() {
   const selectEquipment = (eq: EquipmentWithAsset) => {
     setSelectedEquipment(eq);
     setEquipmentId(eq.id);
+    setAssetId('');
     setEquipmentSearch('');
     setEquipmentOpen(false);
   };
@@ -88,8 +90,14 @@ export function MaintenanceNewPage() {
   const clearEquipment = () => {
     setSelectedEquipment(null);
     setEquipmentId('');
+    setAssetId('');
     setEquipmentSearch('');
   };
+
+  // A ticket can only be opened against an AVAILABLE unit (one unit goes out of service).
+  const unitsForSelected = selectedEquipment?.assets ?? (selectedEquipment?.asset ? [selectedEquipment.asset] : []);
+  const availableUnits = unitsForSelected.filter((a) => a.current_status === 'AVAILABLE');
+  const noAvailableUnits = !!selectedEquipment && availableUnits.length === 0;
 
   const addRow = () => {
     setActionRows((prev) => [
@@ -112,6 +120,10 @@ export function MaintenanceNewPage() {
       toast.error('Please select equipment');
       return;
     }
+    if (noAvailableUnits) {
+      toast.error('No available unit for this equipment. A ticket can only be opened when a unit is available.');
+      return;
+    }
     if (!issueDescription.trim()) {
       toast.error('Please describe the issue');
       return;
@@ -121,6 +133,7 @@ export function MaintenanceNewPage() {
     try {
       const ticket = await create({
         equipment_id: equipmentId,
+        asset_id: assetId || null,
         issue_description: issueDescription,
         maintenance_type: maintenanceType,
         reported_by: reportedBy,
@@ -304,20 +317,31 @@ export function MaintenanceNewPage() {
               <div className="col-span-2" ref={comboRef}>
                 <label className={labelClass}>Equipment *</label>
                 {selectedEquipment ? (
-                  <div className="flex items-center justify-between px-3 py-2 bg-amber-50 border border-amber-300 rounded text-sm">
-                    <span>
-                      <span className="font-semibold">{selectedEquipment.equipment_code}</span>
-                      {' — '}
-                      {selectedEquipment.name}
-                      <span className="text-gray-500 ml-2">({selectedEquipment.brand})</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={clearEquipment}
-                      className="text-gray-400 hover:text-red-500 transition-colors"
-                    >
-                      <X size={16} />
-                    </button>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between px-3 py-2 bg-amber-50 border border-amber-300 rounded text-sm">
+                      <span>
+                        <span className="font-semibold">{selectedEquipment.equipment_code}</span>
+                        {' — '}
+                        {selectedEquipment.name}
+                        <span className="text-gray-500 ml-2">({selectedEquipment.brand})</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={clearEquipment}
+                        className="text-gray-400 hover:text-red-500 transition-colors"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                    {noAvailableUnits ? (
+                      <p className="text-xs font-semibold text-red-600">
+                        No available units — a ticket cannot be opened until a unit is available.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-gray-500">
+                        {availableUnits.length} of {selectedEquipment.quantity ?? unitsForSelected.length} unit(s) available
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <div className="relative">
@@ -364,6 +388,23 @@ export function MaintenanceNewPage() {
                   </div>
                 )}
               </div>
+              {selectedEquipment && availableUnits.length > 1 && (
+                <div>
+                  <label className={labelClass}>Unit</label>
+                  <select
+                    value={assetId}
+                    onChange={(e) => setAssetId(e.target.value)}
+                    className={inputClass}
+                  >
+                    <option value="">Auto (next available unit)</option>
+                    {availableUnits.map((a, idx) => (
+                      <option key={a.id} value={a.id}>
+                        {`Unit ${idx + 1}`}{a.serial_number ? ` — ${a.serial_number}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className={labelClass}>Maintenance Type</label>
                 <select
@@ -507,6 +548,7 @@ export function MaintenanceNewPage() {
               <Button
                 type="submit"
                 loading={saving}
+                disabled={noAvailableUnits}
                 className="!bg-amber-600 hover:!bg-amber-700 !text-white"
               >
                 Submit Report
