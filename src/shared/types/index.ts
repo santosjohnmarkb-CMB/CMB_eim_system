@@ -349,11 +349,26 @@ export type PurchaseRequestType =
   | 'REPLACEMENT'
   | 'ADDITIONAL_INVENTORY';
 
+export interface PurchaseRequestItem {
+  id: string;
+  request_id: string;
+  requested_asset: string;
+  request_type: PurchaseRequestType;
+  current_quantity: number;
+  requested_quantity: number;
+  supplier: string;
+  amount: number;
+  photo_data: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
 export interface PurchaseRequest {
   id: string;
   request_number: string;
   department: 'camera' | 'lights_grips';
   request_date: string;
+  // Mirrors the first line item for backward-compatible single-item displays.
   requested_asset: string;
   request_type: PurchaseRequestType;
   current_quantity: number;
@@ -368,6 +383,10 @@ export interface PurchaseRequest {
   created_by: string;
   created_at: string;
   updated_at: string;
+  // Populated by getById; getAll provides aggregates only.
+  items?: PurchaseRequestItem[];
+  item_count?: number;
+  total_amount?: number;
 }
 
 export interface DashboardStats {

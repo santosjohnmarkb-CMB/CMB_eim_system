@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Trash2, ShoppingCart, Pencil, Printer, CheckCircle2, XCircle } from 'lucide-react';
 import { usePurchaseRequestsStore } from '../stores/purchaseRequests.store';
@@ -6,27 +6,25 @@ import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { Input } from '../components/common/Input';
-import { PhotoUpload } from '../components/common/PhotoUpload';
 import { Modal } from '../components/common/Modal';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { useToast } from '../hooks';
+import {
+  PurchaseRequestItemsEditor,
+  prItemFromRecord,
+  toItemsPayload,
+  validatePRItems,
+  type PRItemForm,
+} from '../components/purchase/PurchaseRequestItemsEditor';
 import { DEPARTMENT_CONFIG, PURCHASE_REQUEST_STATUS_CONFIG, REQUEST_TYPE_CONFIG } from '../../shared/constants';
 import { printPurchaseRequestForm } from '../lib/purchaseForms';
-import type { PurchaseRequest, PurchaseRequestType } from '../../shared/types';
+import type { PurchaseRequest, PurchaseRequestItem } from '../../shared/types';
 
 const STATUS_VARIANT: Record<string, 'info' | 'warning' | 'success' | 'default'> = {
   PENDING: 'warning',
   FULFILLED: 'success',
   CANCELLED: 'default',
 };
-
-const REQUEST_TYPES: PurchaseRequestType[] = [
-  'NEW_EQUIPMENT',
-  'ACCESSORY',
-  'SPARE_PART',
-  'REPLACEMENT',
-  'ADDITIONAL_INVENTORY',
-];
 
 const MANAGER_ROLES = ['equipment_manager', 'inventory_manager'];
 
@@ -36,6 +34,25 @@ function fmtDate(d: string | null | undefined) {
 
 function fmtAmount(n: number | null | undefined) {
   return Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Older single-item requests may arrive without an items array; fall back to the
+// parent row's mirrored columns so the page still renders a line item.
+function resolveItems(request: PurchaseRequest): PurchaseRequestItem[] {
+  if (request.items && request.items.length > 0) return request.items;
+  return [{
+    id: `${request.id}-legacy`,
+    request_id: request.id,
+    requested_asset: request.requested_asset,
+    request_type: request.request_type,
+    current_quantity: request.current_quantity,
+    requested_quantity: request.requested_quantity,
+    supplier: request.supplier,
+    amount: request.amount,
+    photo_data: request.photo_data,
+    sort_order: 0,
+    created_at: request.created_at,
+  }];
 }
 
 export function PurchaseRequestDetailPage() {
@@ -53,11 +70,9 @@ export function PurchaseRequestDetailPage() {
 
   const [showEdit, setShowEdit] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
-  const [editForm, setEditForm] = useState({
-    request_date: '', requested_asset: '', request_type: 'NEW_EQUIPMENT' as PurchaseRequestType,
-    current_quantity: '0', requested_quantity: '1', reason: '', supplier: '', amount: '0',
-    photo_data: null as string | null,
-  });
+  const [editDate, setEditDate] = useState('');
+  const [editReason, setEditReason] = useState('');
+  const [editItems, setEditItems] = useState<PRItemForm[]>([]);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -72,40 +87,31 @@ export function PurchaseRequestDetailPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  const items = useMemo(() => (request ? resolveItems(request) : []), [request]);
+  const grandTotal = useMemo(
+    () => items.reduce((sum, i) => sum + Number(i.amount || 0) * Number(i.requested_quantity || 0), 0),
+    [items],
+  );
+
   const openEdit = () => {
     if (!request) return;
-    setEditForm({
-      request_date: request.request_date || '',
-      requested_asset: request.requested_asset || '',
-      request_type: request.request_type,
-      current_quantity: String(request.current_quantity ?? 0),
-      requested_quantity: String(request.requested_quantity ?? 1),
-      reason: request.reason || '',
-      supplier: request.supplier || '',
-      amount: String(request.amount ?? 0),
-      photo_data: request.photo_data ?? null,
-    });
+    setEditDate(request.request_date || '');
+    setEditReason(request.reason || '');
+    setEditItems(resolveItems(request).map(prItemFromRecord));
     setShowEdit(true);
   };
 
   const handleSaveEdit = async () => {
     if (!id) return;
-    if (!editForm.requested_asset.trim()) { toast.error('Requested asset is required'); return; }
-    if (!editForm.request_date) { toast.error('Date is required'); return; }
-    const reqQty = parseInt(editForm.requested_quantity, 10);
-    if (!reqQty || reqQty < 1) { toast.error('Requested quantity must be at least 1'); return; }
+    if (!editDate) { toast.error('Date is required'); return; }
+    const itemsError = validatePRItems(editItems);
+    if (itemsError) { toast.error(itemsError); return; }
     setSavingEdit(true);
     try {
       await update(id, {
-        request_date: editForm.request_date,
-        requested_asset: editForm.requested_asset.trim(),
-        request_type: editForm.request_type,
-        current_quantity: Math.max(0, parseInt(editForm.current_quantity, 10) || 0),
-        requested_quantity: reqQty,
-        reason: editForm.reason.trim(),
-        supplier: editForm.supplier.trim(),
-        amount: Math.max(0, Number(editForm.amount) || 0),
-        photo_data: editForm.photo_data,
+        request_date: editDate,
+        reason: editReason.trim(),
+        items: toItemsPayload(editItems),
       });
       setShowEdit(false);
       await load();
@@ -169,7 +175,7 @@ export function PurchaseRequestDetailPage() {
   }
 
   const isPending = request.status === 'PENDING';
-  const estTotal = Number(request.amount || 0) * Number(request.requested_quantity || 0);
+  const photoItems = items.filter((i) => i.photo_data);
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -189,7 +195,7 @@ export function PurchaseRequestDetailPage() {
             </Badge>
           </div>
           <p className="text-sm text-surface-500">
-            {DEPARTMENT_CONFIG[request.department].label} · {REQUEST_TYPE_CONFIG[request.request_type]?.label || request.request_type}
+            {DEPARTMENT_CONFIG[request.department].label} · {items.length} equipment item{items.length === 1 ? '' : 's'}
           </p>
         </div>
         <div className="flex gap-2 flex-wrap justify-end">
@@ -203,19 +209,14 @@ export function PurchaseRequestDetailPage() {
         </div>
       </div>
 
-      {/* Details */}
+      {/* Request-level details */}
       <div className="glass-panel rounded-xl p-5">
         <h2 className="text-xs font-bold text-surface-500 uppercase tracking-widest mb-4">Request Details</h2>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-4">
           <Detail label="Date of Request" value={fmtDate(request.request_date)} />
-          <Detail label="Requested Asset" value={request.requested_asset} />
-          <Detail label="Request Type" value={REQUEST_TYPE_CONFIG[request.request_type]?.label || request.request_type} />
-          <Detail label="Current Quantity" value={String(request.current_quantity)} />
-          <Detail label="Requested Quantity" value={String(request.requested_quantity)} />
-          <Detail label="Supplier" value={request.supplier || '—'} />
-          <Detail label="Amount (per unit)" value={fmtAmount(request.amount)} />
-          <Detail label="Estimated Total" value={fmtAmount(estTotal)} />
+          <Detail label="Department" value={DEPARTMENT_CONFIG[request.department].label} />
           <Detail label="Requested By" value={request.created_by || '—'} />
+          <Detail label="Estimated Total" value={fmtAmount(grandTotal)} />
           {request.status === 'FULFILLED' && (
             <>
               <Detail label="Fulfilled On" value={fmtDate(request.fulfilled_at)} />
@@ -229,14 +230,61 @@ export function PurchaseRequestDetailPage() {
             <p className="text-sm text-surface-300 whitespace-pre-wrap">{request.reason}</p>
           </div>
         )}
-        {request.photo_data && (
+      </div>
+
+      {/* Line items */}
+      <div className="glass-panel rounded-xl p-5">
+        <h2 className="text-xs font-bold text-surface-500 uppercase tracking-widest mb-4">Equipment ({items.length})</h2>
+        <div className="border border-surface-800 rounded-lg overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-surface-900/60 text-surface-400">
+                <th className="text-left px-4 py-2.5 text-xs font-medium uppercase tracking-wide">Asset</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium uppercase tracking-wide">Type</th>
+                <th className="text-center px-4 py-2.5 text-xs font-medium uppercase tracking-wide">Current</th>
+                <th className="text-center px-4 py-2.5 text-xs font-medium uppercase tracking-wide">Requested</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium uppercase tracking-wide">Supplier</th>
+                <th className="text-right px-4 py-2.5 text-xs font-medium uppercase tracking-wide">Unit Amount</th>
+                <th className="text-right px-4 py-2.5 text-xs font-medium uppercase tracking-wide">Line Total</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-surface-800/60">
+              {items.map((item) => (
+                <tr key={item.id}>
+                  <td className="px-4 py-2.5 text-surface-100 font-medium">{item.requested_asset}</td>
+                  <td className="px-4 py-2.5 text-surface-300">{REQUEST_TYPE_CONFIG[item.request_type]?.shortLabel || item.request_type}</td>
+                  <td className="px-4 py-2.5 text-center text-surface-400">{item.current_quantity}</td>
+                  <td className="px-4 py-2.5 text-center text-surface-300">{item.requested_quantity}</td>
+                  <td className="px-4 py-2.5 text-surface-400">{item.supplier || '—'}</td>
+                  <td className="px-4 py-2.5 text-right text-surface-300">{fmtAmount(item.amount)}</td>
+                  <td className="px-4 py-2.5 text-right text-surface-200">{fmtAmount(Number(item.amount || 0) * Number(item.requested_quantity || 0))}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-surface-800 bg-surface-900/40">
+                <td colSpan={6} className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wide text-surface-400">Estimated Total</td>
+                <td className="px-4 py-2.5 text-right font-bold text-surface-100">{fmtAmount(grandTotal)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        {photoItems.length > 0 && (
           <div className="mt-4 pt-4 border-t border-surface-800">
-            <p className="text-xs font-medium text-surface-500 uppercase tracking-wide mb-2">Equipment Photo</p>
-            <img
-              src={request.photo_data}
-              alt="Requested equipment"
-              className="max-h-64 rounded-lg border border-surface-700 object-contain bg-surface-800"
-            />
+            <p className="text-xs font-medium text-surface-500 uppercase tracking-wide mb-2">Equipment Photos</p>
+            <div className="flex flex-wrap gap-3">
+              {photoItems.map((item) => (
+                <figure key={item.id} className="w-40">
+                  <img
+                    src={item.photo_data as string}
+                    alt={item.requested_asset}
+                    className="h-32 w-40 rounded-lg border border-surface-700 object-cover bg-surface-800"
+                  />
+                  <figcaption className="mt-1 text-xs text-surface-400 truncate">{item.requested_asset}</figcaption>
+                </figure>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -254,40 +302,17 @@ export function PurchaseRequestDetailPage() {
 
       <Modal isOpen={showEdit} onClose={() => setShowEdit(false)} title="Edit Purchase Request" size="lg">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <Input label="Date of Request *" type="date" value={editForm.request_date} onChange={(e) => setEditForm((p) => ({ ...p, request_date: e.target.value }))} />
-            <Input label="Requested Asset / Item *" value={editForm.requested_asset} onChange={(e) => setEditForm((p) => ({ ...p, requested_asset: e.target.value }))} />
-            <div className="w-full">
-              <label className="block text-xs font-medium text-surface-400 mb-1">Request Type</label>
-              <select
-                value={editForm.request_type}
-                onChange={(e) => setEditForm((p) => ({ ...p, request_type: e.target.value as PurchaseRequestType }))}
-                className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
-              >
-                {REQUEST_TYPES.map((t) => (
-                  <option key={t} value={t}>{REQUEST_TYPE_CONFIG[t]?.label || t}</option>
-                ))}
-              </select>
-            </div>
-            <Input label="Current Quantity" type="number" min={0} value={editForm.current_quantity} onChange={(e) => setEditForm((p) => ({ ...p, current_quantity: e.target.value }))} />
-            <Input label="Requested Quantity *" type="number" min={1} value={editForm.requested_quantity} onChange={(e) => setEditForm((p) => ({ ...p, requested_quantity: e.target.value }))} />
-            <Input label="Supplier" value={editForm.supplier} onChange={(e) => setEditForm((p) => ({ ...p, supplier: e.target.value }))} />
-            <Input label="Amount (per unit)" type="number" min={0} step="0.01" value={editForm.amount} onChange={(e) => setEditForm((p) => ({ ...p, amount: e.target.value }))} />
-          </div>
+          <Input label="Date of Request *" type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} />
           <div>
             <label className="block text-xs font-medium text-surface-400 mb-1">Reason for Request</label>
             <textarea
-              value={editForm.reason}
-              onChange={(e) => setEditForm((p) => ({ ...p, reason: e.target.value }))}
+              value={editReason}
+              onChange={(e) => setEditReason(e.target.value)}
               rows={3}
               className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 resize-y"
             />
           </div>
-          <PhotoUpload
-            value={editForm.photo_data}
-            onChange={(photo_data) => setEditForm((p) => ({ ...p, photo_data }))}
-            disabled={savingEdit}
-          />
+          <PurchaseRequestItemsEditor items={editItems} onChange={setEditItems} disabled={savingEdit} />
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" onClick={() => setShowEdit(false)}>Cancel</Button>
             <Button onClick={handleSaveEdit} loading={savingEdit}>Save Changes</Button>

@@ -211,6 +211,26 @@ CREATE TABLE IF NOT EXISTS purchase_requests (
 CREATE INDEX IF NOT EXISTS idx_purchase_requests_department ON purchase_requests(department);
 CREATE INDEX IF NOT EXISTS idx_purchase_requests_status ON purchase_requests(status);
 
+-- Line items for a purchase request. A single request can cover 1–5 distinct
+-- equipment items, each with its own type, quantities, supplier, amount, and photo.
+-- The parent purchase_requests row mirrors the first item's values for backward
+-- compatibility with single-item displays and printed forms.
+CREATE TABLE IF NOT EXISTS purchase_request_items (
+  id TEXT PRIMARY KEY,
+  request_id TEXT NOT NULL REFERENCES purchase_requests(id) ON DELETE CASCADE,
+  requested_asset TEXT NOT NULL DEFAULT '',
+  request_type TEXT NOT NULL DEFAULT 'NEW_EQUIPMENT' CHECK (request_type IN ('NEW_EQUIPMENT', 'ACCESSORY', 'SPARE_PART', 'REPLACEMENT', 'ADDITIONAL_INVENTORY')),
+  current_quantity INTEGER NOT NULL DEFAULT 0,
+  requested_quantity INTEGER NOT NULL DEFAULT 1,
+  supplier TEXT NOT NULL DEFAULT '',
+  amount REAL NOT NULL DEFAULT 0,
+  photo_data TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_purchase_request_items_request ON purchase_request_items(request_id);
+
 -- Repair and maintenance work orders
 CREATE TABLE IF NOT EXISTS maintenance_tickets (
   id TEXT PRIMARY KEY,

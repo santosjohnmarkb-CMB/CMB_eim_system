@@ -38,12 +38,40 @@ export function registerPurchaseRequestHandlers(): void {
     return request;
   };
 
+  // Inserts the line items for a request and mirrors the first item onto the parent
+  // row so single-item displays, list columns, and legacy code keep working.
+  const insertItems = (requestId: string, items: any[]): void => {
+    items.forEach((item, idx) => {
+      db.prepare(`
+        INSERT INTO purchase_request_items (
+          id, request_id, requested_asset, request_type, current_quantity,
+          requested_quantity, supplier, amount, photo_data, sort_order, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `).run(
+        uuidv4(), requestId, item.requested_asset, item.request_type, item.current_quantity,
+        item.requested_quantity, item.supplier, item.amount, item.photo_data ?? null, idx,
+      );
+    });
+  };
+
+  // Returns the column values that the parent row mirrors from the first line item.
+  const firstItemMirror = (items: any[]) => {
+    const first = items[0];
+    return [
+      first.requested_asset, first.request_type, first.current_quantity,
+      first.requested_quantity, first.supplier, first.amount, first.photo_data ?? null,
+    ];
+  };
+
   ipcMain.handle('db:purchaseRequests:getAll', (event: any) => {
     const dept = sessionDepartment(event);
     const where = dept ? 'WHERE department = ?' : '';
     return db
       .prepare(`
-        SELECT * FROM purchase_requests
+        SELECT *,
+          (SELECT COUNT(*) FROM purchase_request_items i WHERE i.request_id = purchase_requests.id) AS item_count,
+          (SELECT COALESCE(SUM(i.amount * i.requested_quantity), 0) FROM purchase_request_items i WHERE i.request_id = purchase_requests.id) AS total_amount
+        FROM purchase_requests
         ${where}
         ORDER BY
           CASE status WHEN 'PENDING' THEN 0 WHEN 'FULFILLED' THEN 1 ELSE 2 END,
@@ -57,7 +85,10 @@ export function registerPurchaseRequestHandlers(): void {
     if (!request) return null;
     const dept = sessionDepartment(event);
     if (dept && request.department !== dept) return null;
-    return request;
+    const items = db
+      .prepare('SELECT * FROM purchase_request_items WHERE request_id = ? ORDER BY sort_order ASC, created_at ASC')
+      .all(id);
+    return { ...request, items };
   });
 
   ipcMain.handle('db:purchaseRequests:create', (event: any, data: unknown) => {
@@ -70,18 +101,26 @@ export function registerPurchaseRequestHandlers(): void {
     const id = uuidv4();
     const requestNumber = generateRequestNumber(db, input.department);
     const now = new Date().toISOString();
-    db.prepare(`
-      INSERT INTO purchase_requests (
-        id, request_number, department, request_date, requested_asset, request_type,
-        current_quantity, requested_quantity, reason, supplier, amount, photo_data, status,
-        created_by, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)
-    `).run(
-      id, requestNumber, input.department, input.request_date, input.requested_asset, input.request_type,
-      input.current_quantity, input.requested_quantity, input.reason, input.supplier, input.amount,
-      input.photo_data ?? null, user.full_name, now, now,
-    );
-    return db.prepare('SELECT * FROM purchase_requests WHERE id = ?').get(id);
+    const [reqAsset, reqType, curQty, reqQty, supplier, amount, photo] = firstItemMirror(input.items);
+
+    const tx = db.transaction(() => {
+      db.prepare(`
+        INSERT INTO purchase_requests (
+          id, request_number, department, request_date, requested_asset, request_type,
+          current_quantity, requested_quantity, reason, supplier, amount, photo_data, status,
+          created_by, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)
+      `).run(
+        id, requestNumber, input.department, input.request_date, reqAsset, reqType,
+        curQty, reqQty, input.reason, supplier, amount, photo, user.full_name, now, now,
+      );
+      insertItems(id, input.items);
+    });
+    tx();
+
+    const request: any = db.prepare('SELECT * FROM purchase_requests WHERE id = ?').get(id);
+    const items = db.prepare('SELECT * FROM purchase_request_items WHERE request_id = ? ORDER BY sort_order ASC').all(id);
+    return { ...request, items };
   });
 
   ipcMain.handle('db:purchaseRequests:update', (event: any, id: string, data: unknown) => {
@@ -94,16 +133,26 @@ export function registerPurchaseRequestHandlers(): void {
       throw new Error('Only pending requests can be edited.');
     }
     const input = PurchaseRequestUpdateSchema.parse(data);
-    db.prepare(`
-      UPDATE purchase_requests
-      SET request_date = ?, requested_asset = ?, request_type = ?, current_quantity = ?,
-          requested_quantity = ?, reason = ?, supplier = ?, amount = ?, photo_data = ?, updated_at = datetime('now')
-      WHERE id = ?
-    `).run(
-      input.request_date, input.requested_asset, input.request_type, input.current_quantity,
-      input.requested_quantity, input.reason, input.supplier, input.amount, input.photo_data ?? null, id,
-    );
-    return db.prepare('SELECT * FROM purchase_requests WHERE id = ?').get(id);
+    const [reqAsset, reqType, curQty, reqQty, supplier, amount, photo] = firstItemMirror(input.items);
+
+    const tx = db.transaction(() => {
+      db.prepare(`
+        UPDATE purchase_requests
+        SET request_date = ?, requested_asset = ?, request_type = ?, current_quantity = ?,
+            requested_quantity = ?, reason = ?, supplier = ?, amount = ?, photo_data = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(
+        input.request_date, reqAsset, reqType, curQty, reqQty, input.reason, supplier, amount, photo, id,
+      );
+      // Replace the full line-item set: simplest correct approach for an edit.
+      db.prepare('DELETE FROM purchase_request_items WHERE request_id = ?').run(id);
+      insertItems(id, input.items);
+    });
+    tx();
+
+    const updated: any = db.prepare('SELECT * FROM purchase_requests WHERE id = ?').get(id);
+    const items = db.prepare('SELECT * FROM purchase_request_items WHERE request_id = ? ORDER BY sort_order ASC').all(id);
+    return { ...updated, items };
   });
 
   // Mark a request fulfilled (admin only): moves it to the completed list.
@@ -135,7 +184,11 @@ export function registerPurchaseRequestHandlers(): void {
     const user = requireSession(event);
     if (user.role !== 'admin') throw new Error('Only admins can delete purchase requests.');
     getRequestInDept(event, id);
-    db.prepare('DELETE FROM purchase_requests WHERE id = ?').run(id);
+    const tx = db.transaction(() => {
+      db.prepare('DELETE FROM purchase_request_items WHERE request_id = ?').run(id);
+      db.prepare('DELETE FROM purchase_requests WHERE id = ?').run(id);
+    });
+    tx();
     return { success: true };
   });
 }

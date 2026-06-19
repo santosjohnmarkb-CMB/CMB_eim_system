@@ -5,22 +5,19 @@ import { usePurchaseRequestsStore } from '../stores/purchaseRequests.store';
 import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
-import { PhotoUpload } from '../components/common/PhotoUpload';
 import { useToast } from '../hooks';
 import { printPurchaseRequestForm } from '../lib/purchaseForms';
-import { DEPARTMENT_CONFIG, REQUEST_TYPE_CONFIG } from '../../shared/constants';
+import {
+  PurchaseRequestItemsEditor,
+  makeEmptyPRItem,
+  toItemsPayload,
+  validatePRItems,
+  type PRItemForm,
+} from '../components/purchase/PurchaseRequestItemsEditor';
+import { DEPARTMENT_CONFIG } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
-import type { PurchaseRequestType } from '../../shared/types';
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
-
-const REQUEST_TYPES: PurchaseRequestType[] = [
-  'NEW_EQUIPMENT',
-  'ACCESSORY',
-  'SPARE_PART',
-  'REPLACEMENT',
-  'ADDITIONAL_INVENTORY',
-];
 
 export function PurchaseRequestNewPage() {
   const navigate = useNavigate();
@@ -40,37 +37,22 @@ export function PurchaseRequestNewPage() {
 
   const [department, setDepartment] = useState<Department>(lockedDept || navState.department || 'camera');
   const [requestDate, setRequestDate] = useState(todayISO());
-  const [requestedAsset, setRequestedAsset] = useState('');
-  const [requestType, setRequestType] = useState<PurchaseRequestType>('NEW_EQUIPMENT');
-  const [currentQuantity, setCurrentQuantity] = useState('0');
-  const [requestedQuantity, setRequestedQuantity] = useState('1');
   const [reason, setReason] = useState('');
-  const [supplier, setSupplier] = useState('');
-  const [amount, setAmount] = useState('0');
-  const [photoData, setPhotoData] = useState<string | null>(null);
+  const [items, setItems] = useState<PRItemForm[]>([makeEmptyPRItem()]);
   const [saving, setSaving] = useState(false);
 
-  const estTotal = (Number(amount) || 0) * (Number(requestedQuantity) || 0);
-
   const submit = async (withPrint: boolean) => {
-    if (!requestedAsset.trim()) { toast.error('Requested asset is required'); return; }
     if (!requestDate) { toast.error('Date is required'); return; }
-    const reqQty = parseInt(requestedQuantity, 10);
-    if (!reqQty || reqQty < 1) { toast.error('Requested quantity must be at least 1'); return; }
+    const itemsError = validatePRItems(items);
+    if (itemsError) { toast.error(itemsError); return; }
 
     setSaving(true);
     try {
       const request = await create({
         department,
         request_date: requestDate,
-        requested_asset: requestedAsset.trim(),
-        request_type: requestType,
-        current_quantity: Math.max(0, parseInt(currentQuantity, 10) || 0),
-        requested_quantity: reqQty,
         reason: reason.trim(),
-        supplier: supplier.trim(),
-        amount: Math.max(0, Number(amount) || 0),
-        photo_data: photoData,
+        items: toItemsPayload(items),
       });
 
       if (withPrint) printPurchaseRequestForm(request);
@@ -96,7 +78,7 @@ export function PurchaseRequestNewPage() {
         </div>
         <div>
           <h1 className="text-xl font-bold text-surface-100">New Purchase Request</h1>
-          <p className="text-sm text-surface-500">Request new equipment, accessories, spare parts, or additional inventory</p>
+          <p className="text-sm text-surface-500">Request up to 5 equipment items, accessories, spare parts, or additional inventory</p>
         </div>
       </div>
 
@@ -126,65 +108,6 @@ export function PurchaseRequestNewPage() {
             </div>
 
             <Input label="Date of Request *" type="date" value={requestDate} onChange={(e) => setRequestDate(e.target.value)} />
-
-            <Input
-              label="Requested Asset / Item *"
-              value={requestedAsset}
-              onChange={(e) => setRequestedAsset(e.target.value)}
-              placeholder="e.g. Sony FX9 body, ND filter set, gimbal motor"
-            />
-
-            <div className="w-full">
-              <label className="block text-xs font-medium text-surface-400 mb-1">Request Type</label>
-              <select
-                value={requestType}
-                onChange={(e) => setRequestType(e.target.value as PurchaseRequestType)}
-                className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
-              >
-                {REQUEST_TYPES.map((t) => (
-                  <option key={t} value={t}>{REQUEST_TYPE_CONFIG[t]?.label || t}</option>
-                ))}
-              </select>
-            </div>
-
-            <Input
-              label="Current Quantity On Hand"
-              type="number"
-              min={0}
-              value={currentQuantity}
-              onChange={(e) => setCurrentQuantity(e.target.value)}
-            />
-
-            <Input
-              label="Requested Quantity *"
-              type="number"
-              min={1}
-              value={requestedQuantity}
-              onChange={(e) => setRequestedQuantity(e.target.value)}
-            />
-
-            <Input
-              label="Supplier"
-              value={supplier}
-              onChange={(e) => setSupplier(e.target.value)}
-              placeholder="e.g. ABC Camera Supplies"
-            />
-
-            <Input
-              label="Amount (per unit)"
-              type="number"
-              min={0}
-              step="0.01"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-            />
-          </div>
-
-          <div className="flex items-center justify-end gap-2 text-sm">
-            <span className="text-surface-500">Estimated Total:</span>
-            <span className="font-semibold text-surface-100">
-              {estTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </span>
           </div>
 
           <div className="w-full">
@@ -197,8 +120,10 @@ export function PurchaseRequestNewPage() {
               placeholder="Why is this purchase needed? (e.g. replacement for damaged unit, additional capacity for upcoming productions)"
             />
           </div>
+        </div>
 
-          <PhotoUpload value={photoData} onChange={setPhotoData} disabled={saving} />
+        <div className="glass-panel rounded-xl p-5">
+          <PurchaseRequestItemsEditor items={items} onChange={setItems} disabled={saving} />
         </div>
 
         <div className="flex justify-end gap-3">

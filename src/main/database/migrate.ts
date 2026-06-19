@@ -529,6 +529,51 @@ const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    // Support multiple equipment line items per purchase request (1–5 per request).
+    // The parent purchase_requests row keeps mirroring the first item for backward
+    // compatibility. Existing single-item requests are backfilled as one line item.
+    id: '019_purchase_request_items',
+    up: (db: any) => {
+      if (!tableExists(db, 'purchase_request_items')) {
+        db.exec(`
+          CREATE TABLE purchase_request_items (
+            id TEXT PRIMARY KEY,
+            request_id TEXT NOT NULL REFERENCES purchase_requests(id) ON DELETE CASCADE,
+            requested_asset TEXT NOT NULL DEFAULT '',
+            request_type TEXT NOT NULL DEFAULT 'NEW_EQUIPMENT' CHECK (request_type IN ('NEW_EQUIPMENT', 'ACCESSORY', 'SPARE_PART', 'REPLACEMENT', 'ADDITIONAL_INVENTORY')),
+            current_quantity INTEGER NOT NULL DEFAULT 0,
+            requested_quantity INTEGER NOT NULL DEFAULT 1,
+            supplier TEXT NOT NULL DEFAULT '',
+            amount REAL NOT NULL DEFAULT 0,
+            photo_data TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+          CREATE INDEX IF NOT EXISTS idx_purchase_request_items_request ON purchase_request_items(request_id);
+        `);
+      }
+
+      // Backfill: every existing request becomes a single line item mirroring its columns.
+      if (tableExists(db, 'purchase_requests')) {
+        const requests: any[] = db.prepare(`
+          SELECT p.* FROM purchase_requests p
+          WHERE NOT EXISTS (SELECT 1 FROM purchase_request_items i WHERE i.request_id = p.id)
+        `).all();
+        for (const r of requests) {
+          db.prepare(`
+            INSERT INTO purchase_request_items
+              (id, request_id, requested_asset, request_type, current_quantity, requested_quantity, supplier, amount, photo_data, sort_order, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+          `).run(
+            randomUUID(), r.id, r.requested_asset || '', r.request_type || 'NEW_EQUIPMENT',
+            r.current_quantity ?? 0, r.requested_quantity ?? 1, r.supplier || '', r.amount ?? 0,
+            r.photo_data ?? null, r.created_at || new Date().toISOString(),
+          );
+        }
+      }
+    },
+  },
 ];
 
 export function runMigrations(db: any): void {

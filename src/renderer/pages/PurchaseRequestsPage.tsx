@@ -42,6 +42,13 @@ function fmtAmount(n: number | null | undefined) {
   return Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// Total estimated cost of a request: the per-item aggregate when available,
+// otherwise the mirrored first-item amount × quantity (legacy single-item rows).
+function requestTotal(r: PurchaseRequest) {
+  if (typeof r.total_amount === 'number') return r.total_amount;
+  return Number(r.amount || 0) * Number(r.requested_quantity || 0);
+}
+
 // Group label for the completed list, e.g. "June 2026", derived from the fulfilled date.
 function monthKey(d: string | null | undefined): string {
   if (!d) return 'Unknown';
@@ -97,17 +104,20 @@ export function PurchaseRequestsPage() {
 
   const printList = () => {
     const cfg = VIEWS.find((v) => v.key === view);
-    const rows = viewRequests.map((r) => `
+    const rows = viewRequests.map((r) => {
+      const extra = (r.item_count ?? 1) > 1 ? ` (+${(r.item_count as number) - 1} more)` : '';
+      return `
       <tr>
         <td>${escapeHtml(r.request_number)}</td>
         <td>${escapeHtml(fmtDate(r.request_date))}</td>
-        <td>${escapeHtml(r.requested_asset)}</td>
+        <td>${escapeHtml(r.requested_asset)}${escapeHtml(extra)}</td>
         <td>${escapeHtml(REQUEST_TYPE_CONFIG[r.request_type]?.label || r.request_type)}</td>
         <td style="text-align:center;">${escapeHtml(String(r.current_quantity))}</td>
         <td style="text-align:center;">${escapeHtml(String(r.requested_quantity))}</td>
         <td>${escapeHtml(r.supplier) || '—'}</td>
-        <td style="text-align:right;">${fmtAmount(r.amount)}</td>
-      </tr>`).join('');
+        <td style="text-align:right;">${fmtAmount(requestTotal(r))}</td>
+      </tr>`;
+    }).join('');
     const body = `
       <div class="header">
         <h1>${escapeHtml(DEPARTMENT_CONFIG[activeDept].label)} — ${escapeHtml(cfg?.label || '')} Purchase Requests</h1>
@@ -123,12 +133,23 @@ export function PurchaseRequestsPage() {
   const columns: Column<PurchaseRequest>[] = [
     { key: 'request_number', header: 'Request #', render: (r) => <span className="font-mono text-xs text-primary-400">{r.request_number}</span> },
     { key: 'request_date', header: 'Date', render: (r) => <span className="text-surface-400">{fmtDate(r.request_date)}</span> },
-    { key: 'requested_asset', header: 'Requested Asset', render: (r) => <span className="font-medium text-surface-100">{r.requested_asset}</span> },
+    {
+      key: 'requested_asset',
+      header: 'Requested Asset',
+      render: (r) => (
+        <span className="font-medium text-surface-100">
+          {r.requested_asset}
+          {(r.item_count ?? 1) > 1 && (
+            <span className="ml-2 text-xs font-normal text-surface-500">+{(r.item_count as number) - 1} more</span>
+          )}
+        </span>
+      ),
+    },
     { key: 'request_type', header: 'Type', render: (r) => <span className="text-surface-300">{REQUEST_TYPE_CONFIG[r.request_type]?.shortLabel || r.request_type}</span> },
     { key: 'current_quantity', header: 'Current', render: (r) => <span className="text-surface-400">{r.current_quantity}</span> },
     { key: 'requested_quantity', header: 'Requested', render: (r) => <span className="text-surface-300">{r.requested_quantity}</span> },
     { key: 'supplier', header: 'Supplier', render: (r) => <span className="text-surface-400">{r.supplier || '—'}</span> },
-    { key: 'amount', header: 'Amount', render: (r) => <span className="text-surface-300">{fmtAmount(r.amount)}</span> },
+    { key: 'amount', header: 'Amount', render: (r) => <span className="text-surface-300">{fmtAmount(requestTotal(r))}</span> },
     { key: 'status', header: 'Status', render: (r) => <Badge variant={STATUS_VARIANT[r.status] || 'default'}>{PURCHASE_REQUEST_STATUS_CONFIG[r.status]?.label || r.status}</Badge> },
   ];
 

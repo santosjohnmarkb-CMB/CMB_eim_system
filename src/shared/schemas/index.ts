@@ -276,30 +276,32 @@ const PhotoDataSchema = z
   .nullable()
   .optional();
 
-export const PurchaseRequestCreateSchema = z.object({
-  department: z.enum(['camera', 'lights_grips']),
-  request_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+// A single equipment line item on a purchase request.
+export const PurchaseRequestItemSchema = z.object({
   requested_asset: z.string().min(1).max(200),
   request_type: z.enum(PURCHASE_REQUEST_TYPES).default('NEW_EQUIPMENT'),
   current_quantity: z.number().int().min(0).default(0),
   requested_quantity: z.number().int().min(1).default(1),
-  reason: z.string().max(2000).default(''),
   supplier: z.string().max(200).default(''),
   amount: z.number().min(0).default(0),
   photo_data: PhotoDataSchema,
 });
 
+// A request covers 1–5 distinct equipment line items.
+const PurchaseRequestItemsArray = z.array(PurchaseRequestItemSchema).min(1).max(5);
+
+export const PurchaseRequestCreateSchema = z.object({
+  department: z.enum(['camera', 'lights_grips']),
+  request_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  reason: z.string().max(2000).default(''),
+  items: PurchaseRequestItemsArray,
+});
+
 // Editable fields. Department is excluded since it drives the request number.
 export const PurchaseRequestUpdateSchema = z.object({
   request_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  requested_asset: z.string().min(1).max(200),
-  request_type: z.enum(PURCHASE_REQUEST_TYPES).default('NEW_EQUIPMENT'),
-  current_quantity: z.number().int().min(0).default(0),
-  requested_quantity: z.number().int().min(1).default(1),
   reason: z.string().max(2000).default(''),
-  supplier: z.string().max(200).default(''),
-  amount: z.number().min(0).default(0),
-  photo_data: PhotoDataSchema,
+  items: PurchaseRequestItemsArray,
 });
 
 // ── Inferred types ──
@@ -319,6 +321,7 @@ export type VendorCreateInput = z.infer<typeof VendorCreateSchema>;
 export type VendorUpdateInput = z.infer<typeof VendorUpdateSchema>;
 export type PreventiveScheduleInput = z.infer<typeof PreventiveScheduleSchema>;
 export type TicketActionInput = z.infer<typeof TicketActionSchema>;
+export type PurchaseRequestItemInput = z.infer<typeof PurchaseRequestItemSchema>;
 export type PurchaseRequestCreateInput = z.infer<typeof PurchaseRequestCreateSchema>;
 export type PurchaseRequestUpdateInput = z.infer<typeof PurchaseRequestUpdateSchema>;
 export type TicketActionUpdateInput = z.infer<typeof TicketActionUpdateSchema>;
