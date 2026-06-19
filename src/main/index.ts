@@ -58,13 +58,10 @@ process.on('unhandledRejection', (reason) => {
 
 const isDev = !app.isPackaged;
 
-if (isDev) {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  require('electron-reload')(path.join(__dirname, '..'), {
-    electron: process.execPath,
-    hardResetMethod: 'exit',
-  });
-}
+// Main-process hot-restart is handled in development by nodemon (see nodemon.json +
+// scripts/start-electron.mjs), which watches the compiled dist-main output and
+// relaunches Electron. We intentionally do not use electron-reload here, since two
+// independent restart mechanisms race and leave a stale main process running.
 
 let mainWindow: any = null;
 

@@ -197,6 +197,9 @@ CREATE TABLE IF NOT EXISTS purchase_requests (
   reason TEXT NOT NULL DEFAULT '',
   supplier TEXT NOT NULL DEFAULT '',
   amount REAL NOT NULL DEFAULT 0,
+  -- Optional photo of the requested equipment, stored as a base64 data URL so it can
+  -- be embedded directly into the printed request document.
+  photo_data TEXT,
   status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'FULFILLED', 'CANCELLED')),
   fulfilled_at TEXT,
   fulfilled_by TEXT,

@@ -10,10 +10,10 @@
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
-    "dev": "npm run build:main && concurrently \"npm run dev:main\" \"npm run dev:renderer\" \"npm run dev:electron\"",
-    "dev:main": "tsc -p tsconfig.main.json --watch",
+    "dev": "npm run build:main && concurrently -k -n MAIN,RENDERER,ELECTRON -c blue,green,magenta \"npm run dev:main\" \"npm run dev:renderer\" \"npm run dev:electron\"",
+    "dev:main": "tsc -p tsconfig.main.json --watch --preserveWatchOutput",
     "dev:renderer": "vite",
-    "dev:electron": "sleep 2 && unset ELECTRON_RUN_AS_NODE && electron .",
+    "dev:electron": "nodemon",
     "build": "npm run build:main && npm run build:renderer",
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
@@ -54,10 +54,11 @@
     "concurrently": "^8.2.2",
     "electron": "^33.4.11",
     "electron-builder": "^26.8.1",
-    "electron-reload": "^2.0.0-alpha.1",
+    "nodemon": "^3.1.10",
     "postcss": "^8.4.33",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.3.3",
-    "vite": "^5.0.12"
+    "vite": "^5.0.12",
+    "wait-on": "^8.0.5"
   }
 }

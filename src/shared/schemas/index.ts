@@ -267,6 +267,15 @@ const PURCHASE_REQUEST_TYPES = [
   'ADDITIONAL_INVENTORY',
 ] as const;
 
+// Optional equipment photo as a base64 data URL. The renderer downscales images
+// before upload, but cap the payload (~8MB of base64) to guard against oversized data.
+const PhotoDataSchema = z
+  .string()
+  .max(8_000_000)
+  .regex(/^data:image\/(png|jpeg|jpg|webp);base64,/, 'Photo must be an image')
+  .nullable()
+  .optional();
+
 export const PurchaseRequestCreateSchema = z.object({
   department: z.enum(['camera', 'lights_grips']),
   request_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -277,6 +286,7 @@ export const PurchaseRequestCreateSchema = z.object({
   reason: z.string().max(2000).default(''),
   supplier: z.string().max(200).default(''),
   amount: z.number().min(0).default(0),
+  photo_data: PhotoDataSchema,
 });
 
 // Editable fields. Department is excluded since it drives the request number.
@@ -289,6 +299,7 @@ export const PurchaseRequestUpdateSchema = z.object({
   reason: z.string().max(2000).default(''),
   supplier: z.string().max(200).default(''),
   amount: z.number().min(0).default(0),
+  photo_data: PhotoDataSchema,
 });
 
 // ── Inferred types ──

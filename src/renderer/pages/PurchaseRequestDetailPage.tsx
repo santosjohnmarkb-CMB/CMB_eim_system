@@ -6,6 +6,7 @@ import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { Input } from '../components/common/Input';
+import { PhotoUpload } from '../components/common/PhotoUpload';
 import { Modal } from '../components/common/Modal';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { useToast } from '../hooks';
@@ -55,6 +56,7 @@ export function PurchaseRequestDetailPage() {
   const [editForm, setEditForm] = useState({
     request_date: '', requested_asset: '', request_type: 'NEW_EQUIPMENT' as PurchaseRequestType,
     current_quantity: '0', requested_quantity: '1', reason: '', supplier: '', amount: '0',
+    photo_data: null as string | null,
   });
 
   const load = useCallback(async () => {
@@ -81,6 +83,7 @@ export function PurchaseRequestDetailPage() {
       reason: request.reason || '',
       supplier: request.supplier || '',
       amount: String(request.amount ?? 0),
+      photo_data: request.photo_data ?? null,
     });
     setShowEdit(true);
   };
@@ -102,6 +105,7 @@ export function PurchaseRequestDetailPage() {
         reason: editForm.reason.trim(),
         supplier: editForm.supplier.trim(),
         amount: Math.max(0, Number(editForm.amount) || 0),
+        photo_data: editForm.photo_data,
       });
       setShowEdit(false);
       await load();
@@ -225,6 +229,16 @@ export function PurchaseRequestDetailPage() {
             <p className="text-sm text-surface-300 whitespace-pre-wrap">{request.reason}</p>
           </div>
         )}
+        {request.photo_data && (
+          <div className="mt-4 pt-4 border-t border-surface-800">
+            <p className="text-xs font-medium text-surface-500 uppercase tracking-wide mb-2">Equipment Photo</p>
+            <img
+              src={request.photo_data}
+              alt="Requested equipment"
+              className="max-h-64 rounded-lg border border-surface-700 object-contain bg-surface-800"
+            />
+          </div>
+        )}
       </div>
 
       {(canEdit || isAdmin) && (
@@ -269,6 +283,11 @@ export function PurchaseRequestDetailPage() {
               className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 resize-y"
             />
           </div>
+          <PhotoUpload
+            value={editForm.photo_data}
+            onChange={(photo_data) => setEditForm((p) => ({ ...p, photo_data }))}
+            disabled={savingEdit}
+          />
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" onClick={() => setShowEdit(false)}>Cancel</Button>
             <Button onClick={handleSaveEdit} loading={savingEdit}>Save Changes</Button>

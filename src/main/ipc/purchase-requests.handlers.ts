@@ -73,13 +73,13 @@ export function registerPurchaseRequestHandlers(): void {
     db.prepare(`
       INSERT INTO purchase_requests (
         id, request_number, department, request_date, requested_asset, request_type,
-        current_quantity, requested_quantity, reason, supplier, amount, status,
+        current_quantity, requested_quantity, reason, supplier, amount, photo_data, status,
         created_by, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)
     `).run(
       id, requestNumber, input.department, input.request_date, input.requested_asset, input.request_type,
       input.current_quantity, input.requested_quantity, input.reason, input.supplier, input.amount,
-      user.full_name, now, now,
+      input.photo_data ?? null, user.full_name, now, now,
     );
     return db.prepare('SELECT * FROM purchase_requests WHERE id = ?').get(id);
   });
@@ -97,11 +97,11 @@ export function registerPurchaseRequestHandlers(): void {
     db.prepare(`
       UPDATE purchase_requests
       SET request_date = ?, requested_asset = ?, request_type = ?, current_quantity = ?,
-          requested_quantity = ?, reason = ?, supplier = ?, amount = ?, updated_at = datetime('now')
+          requested_quantity = ?, reason = ?, supplier = ?, amount = ?, photo_data = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(
       input.request_date, input.requested_asset, input.request_type, input.current_quantity,
-      input.requested_quantity, input.reason, input.supplier, input.amount, id,
+      input.requested_quantity, input.reason, input.supplier, input.amount, input.photo_data ?? null, id,
     );
     return db.prepare('SELECT * FROM purchase_requests WHERE id = ?').get(id);
   });

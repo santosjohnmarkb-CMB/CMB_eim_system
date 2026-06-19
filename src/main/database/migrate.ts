@@ -504,6 +504,7 @@ const MIGRATIONS: Migration[] = [
           reason TEXT NOT NULL DEFAULT '',
           supplier TEXT NOT NULL DEFAULT '',
           amount REAL NOT NULL DEFAULT 0,
+          photo_data TEXT,
           status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'FULFILLED', 'CANCELLED')),
           fulfilled_at TEXT,
           fulfilled_by TEXT,
@@ -514,6 +515,18 @@ const MIGRATIONS: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_purchase_requests_department ON purchase_requests(department);
         CREATE INDEX IF NOT EXISTS idx_purchase_requests_status ON purchase_requests(status);
       `);
+    },
+  },
+  {
+    // Add an optional equipment photo to purchase requests. Stored as a base64 data
+    // URL so it embeds directly into the printed request document. Installs that
+    // created the table via migration 017 before this column existed need the ALTER.
+    id: '018_purchase_requests_photo',
+    up: (db: any) => {
+      if (!tableExists(db, 'purchase_requests')) return;
+      if (!columnExists(db, 'purchase_requests', 'photo_data')) {
+        db.exec('ALTER TABLE purchase_requests ADD COLUMN photo_data TEXT');
+      }
     },
   },
 ];

@@ -65,6 +65,11 @@ export function buildPurchaseRequestForm(req: PurchaseRequest): string {
 
     ${req.reason ? `<h2>Reason for Request</h2><p>${escapeHtml(req.reason)}</p>` : ''}
 
+    ${req.photo_data ? `<h2>Equipment Photo</h2>
+    <div style="margin-top:10px; page-break-inside:avoid;">
+      <img src="${escapeHtml(req.photo_data)}" alt="Requested equipment" style="max-width:320px; max-height:300px; border:1px solid #d4d8e0; object-fit:contain;" />
+    </div>` : ''}
+
     <h2>Approval</h2>
     <p>The undersigned confirm that this purchase request has been reviewed and is approved for procurement. All purchased items remain the property of ${escapeHtml(COMPANY.name)}.</p>
 

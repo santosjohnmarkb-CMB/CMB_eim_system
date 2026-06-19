@@ -219,15 +219,15 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6 max-w-[1400px] mx-auto">
-      {/* ?? Header ???????????????????????????????????? */}
+      {/* ── Header ── */}
       <div>
         <h1 className="text-2xl font-bold text-surface-100">Admin Dashboard</h1>
         <p className="text-sm text-surface-500 mt-1">
-          Combined overview � {user?.full_name ?? 'Admin'}
+          Combined overview · {user?.full_name ?? 'Admin'}
         </p>
       </div>
 
-      {/* ?? Equipment Inventory Summary ??????????????? */}
+      {/* ── Equipment Inventory Summary ── */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         {(Object.keys(DEPARTMENT_CONFIG) as Department[]).map((dept) => {
           const cfg = DEPARTMENT_CONFIG[dept];
@@ -246,13 +246,13 @@ export function DashboardPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <h2 className="text-sm font-semibold text-surface-100">{cfg.label}</h2>
-                  <p className="text-2xs text-surface-500">{cfg.categories.join(' � ')}</p>
+                  <p className="text-2xs text-surface-500">{cfg.categories.join(' · ')}</p>
                 </div>
                 <button
                   onClick={() => navigate(`/dept/${dept}`)}
                   className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium whitespace-nowrap"
                 >
-                  View List ?
+                  View List →
                 </button>
               </div>
 
@@ -271,7 +271,7 @@ export function DashboardPage() {
         })}
       </div>
 
-      {/* ?? Maintenance Tally ???????????????????????? */}
+      {/* ── Maintenance Tally ── */}
       <div className="glass-panel rounded-xl px-5 py-4">
         <div className="flex items-center gap-2 mb-4">
           <ClipboardList size={16} className="text-surface-400" />
@@ -321,7 +321,7 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* ?? Open Tickets ???????????????????????????? */}
+      {/* ── Open Tickets ── */}
       <div className="glass-panel rounded-xl overflow-hidden">
         <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
           <AlertTriangle size={16} className="text-danger-400" />
@@ -344,7 +344,7 @@ export function DashboardPage() {
                   onClick={() => navigate(`/dept/${dept}`)}
                   className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium ml-auto"
                 >
-                  View All ?
+                  View All →
                 </button>
               </div>
 
@@ -396,12 +396,12 @@ export function DashboardPage() {
                                   <p className="text-2xs text-surface-500 mt-0.5">
                                     {new Date(ticket.last_action_date).toLocaleDateString()}
                                     {ticket.last_action_personnel && (
-                                      <> � {ticket.last_action_personnel}</>
+                                      <> · {ticket.last_action_personnel}</>
                                     )}
                                   </p>
                                 </div>
                               ) : (
-                                <span className="text-surface-600">�</span>
+                                <span className="text-surface-600">—</span>
                               )}
                             </td>
                           </tr>
@@ -416,7 +416,7 @@ export function DashboardPage() {
         })}
       </div>
 
-      {/* ?? Loaned Equipment ???????????????????????? */}
+      {/* ── Loaned Equipment ── */}
       <div className="glass-panel rounded-xl overflow-hidden">
         <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
           <PackageCheck size={18} className="text-primary-400" />
@@ -425,7 +425,7 @@ export function DashboardPage() {
             onClick={() => navigate('/loans')}
             className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium ml-auto"
           >
-            View All ?
+            View All →
           </button>
         </div>
 
@@ -478,7 +478,7 @@ export function DashboardPage() {
                               {loan.out_count ?? 0} / {loan.item_count ?? 0}
                             </td>
                             <td className="px-3 py-3 text-xs text-surface-300 whitespace-nowrap">
-                              {loan.tentative_return_date ? new Date(loan.tentative_return_date).toLocaleDateString() : '�'}
+                              {loan.tentative_return_date ? new Date(loan.tentative_return_date).toLocaleDateString() : '—'}
                             </td>
                             <td className="px-3 py-3 whitespace-nowrap">
                               <span className={`text-xs font-medium ${statusCfg?.color ?? 'text-surface-400'}`}>
@@ -497,7 +497,7 @@ export function DashboardPage() {
         })}
       </div>
 
-      {/* ?? Equipment Repair & Maintenance History ?? */}
+      {/* ── Equipment Repair & Maintenance History ── */}
       <div className="glass-panel rounded-xl overflow-hidden">
         <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
           <ShoppingCart size={18} className="text-primary-400" />
@@ -506,7 +506,7 @@ export function DashboardPage() {
             onClick={() => navigate('/purchase-requests')}
             className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium ml-auto"
           >
-            View All ?
+            View All →
           </button>
         </div>
 
@@ -560,7 +560,7 @@ export function DashboardPage() {
                             {req.requested_quantity}
                           </td>
                           <td className="px-3 py-3 text-xs text-surface-300 whitespace-nowrap">
-                            {req.request_date ? new Date(req.request_date).toLocaleDateString() : '�'}
+                            {req.request_date ? new Date(req.request_date).toLocaleDateString() : '—'}
                           </td>
                         </tr>
                       ))}
@@ -638,7 +638,7 @@ export function DashboardPage() {
         })}
       </div>
 
-      {/* ?? Equipment Use Count ?????????????????????? */}
+      {/* ── Equipment Use Count ── */}
       <div className="glass-panel rounded-xl overflow-hidden">
         <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
           <BarChart3 size={16} className="text-primary-400" />
@@ -693,7 +693,7 @@ export function DashboardPage() {
                   onClick={() => navigate('/equipment/use-count')}
                   className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium"
                 >
-                  View Complete List ?
+                  View Complete List →
                 </button>
               </div>
             );
@@ -701,7 +701,7 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* ?? History Modal ?? */}
+      {/* ── History Modal ── */}
       {historyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-surface-900 border border-surface-700 rounded-xl shadow-2xl w-full max-w-[900px] max-h-[80vh] flex flex-col mx-4">
@@ -755,13 +755,13 @@ export function DashboardPage() {
                           <td className={`px-3 py-3 text-xs whitespace-nowrap ${isLatest ? 'text-surface-100 font-medium' : 'text-surface-400'}`}>
                             {entry.completion_date
                               ? new Date(entry.completion_date).toLocaleDateString()
-                              : '�'}
+                              : '—'}
                           </td>
                           <td className={`px-3 py-3 text-xs max-w-[240px] ${isLatest ? 'text-surface-100' : 'text-surface-400'}`}>
                             <p className="truncate">{entry.issue_description}</p>
                           </td>
                           <td className={`px-3 py-3 text-xs max-w-[200px] ${isLatest ? 'text-surface-100' : 'text-surface-400'}`}>
-                            <p className="truncate">{entry.last_remarks || '�'}</p>
+                            <p className="truncate">{entry.last_remarks || '—'}</p>
                           </td>
                         </tr>
                       );

@@ -361,6 +361,7 @@ export interface PurchaseRequest {
   reason: string;
   supplier: string;
   amount: number;
+  photo_data: string | null;
   status: PurchaseRequestStatus;
   fulfilled_at: string | null;
   fulfilled_by: string | null;

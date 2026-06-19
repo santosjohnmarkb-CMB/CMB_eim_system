@@ -1,0 +1,7 @@
+{
+  "watch": ["dist-main"],
+  "ext": "js",
+  "delay": 800,
+  "exec": "node scripts/start-electron.mjs",
+  "signal": "SIGTERM"
+}

@@ -5,6 +5,7 @@ import { usePurchaseRequestsStore } from '../stores/purchaseRequests.store';
 import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
+import { PhotoUpload } from '../components/common/PhotoUpload';
 import { useToast } from '../hooks';
 import { printPurchaseRequestForm } from '../lib/purchaseForms';
 import { DEPARTMENT_CONFIG, REQUEST_TYPE_CONFIG } from '../../shared/constants';
@@ -46,6 +47,7 @@ export function PurchaseRequestNewPage() {
   const [reason, setReason] = useState('');
   const [supplier, setSupplier] = useState('');
   const [amount, setAmount] = useState('0');
+  const [photoData, setPhotoData] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const estTotal = (Number(amount) || 0) * (Number(requestedQuantity) || 0);
@@ -68,6 +70,7 @@ export function PurchaseRequestNewPage() {
         reason: reason.trim(),
         supplier: supplier.trim(),
         amount: Math.max(0, Number(amount) || 0),
+        photo_data: photoData,
       });
 
       if (withPrint) printPurchaseRequestForm(request);
@@ -194,6 +197,8 @@ export function PurchaseRequestNewPage() {
               placeholder="Why is this purchase needed? (e.g. replacement for damaged unit, additional capacity for upcoming productions)"
             />
           </div>
+
+          <PhotoUpload value={photoData} onChange={setPhotoData} disabled={saving} />
         </div>
 
         <div className="flex justify-end gap-3">
