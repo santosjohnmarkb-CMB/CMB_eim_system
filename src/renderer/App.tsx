@@ -20,6 +20,9 @@ import { EquipmentUseCountPage } from './pages/EquipmentUseCountPage';
 import { LoansPage } from './pages/LoansPage';
 import { LoanNewPage } from './pages/LoanNewPage';
 import { LoanDetailPage } from './pages/LoanDetailPage';
+import { PurchaseRequestsPage } from './pages/PurchaseRequestsPage';
+import { PurchaseRequestNewPage } from './pages/PurchaseRequestNewPage';
+import { PurchaseRequestDetailPage } from './pages/PurchaseRequestDetailPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ToastContainer } from './components/common/Toast';
 
@@ -90,6 +93,9 @@ export default function App() {
                   <Route path="/loans" element={<LoansPage />} />
                   <Route path="/loans/new" element={<RoleGuard roles={['equipment_manager', 'inventory_manager']}><LoanNewPage /></RoleGuard>} />
                   <Route path="/loans/:id" element={<LoanDetailPage />} />
+                  <Route path="/purchase-requests" element={<PurchaseRequestsPage />} />
+                  <Route path="/purchase-requests/new" element={<RoleGuard roles={['equipment_manager', 'inventory_manager']}><PurchaseRequestNewPage /></RoleGuard>} />
+                  <Route path="/purchase-requests/:id" element={<PurchaseRequestDetailPage />} />
                   <Route path="/maintenance" element={<MaintenanceQueuePage />} />
                   <Route path="/maintenance/new" element={<RoleGuard roles={['equipment_manager', 'inventory_manager', 'maintenance_lead']}><MaintenanceNewPage /></RoleGuard>} />
                   <Route path="/maintenance/:id" element={<RoleGuard roles={['equipment_manager', 'inventory_manager', 'maintenance_lead', 'technician']}><MaintenanceDetailPage /></RoleGuard>} />

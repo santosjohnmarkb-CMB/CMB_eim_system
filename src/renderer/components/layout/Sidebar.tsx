@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Wrench, Settings, LogOut, Package,
-  ChevronRight, ChevronDown, Camera, Lightbulb, PackageCheck,
+  ChevronRight, ChevronDown, Camera, Lightbulb, PackageCheck, ShoppingCart,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuthStore } from '../../stores/auth.store';
@@ -147,6 +147,13 @@ export function Sidebar() {
           />
 
           <NavButton
+            icon={<ShoppingCart size={20} />}
+            label="Purchase Requests"
+            active={location.pathname.startsWith('/purchase-requests')}
+            onClick={() => navigate('/purchase-requests')}
+          />
+
+          <NavButton
             icon={<Settings size={20} />}
             label="Settings"
             active={location.pathname === '/settings'}
@@ -200,6 +207,12 @@ export function Sidebar() {
           label="Loaned Equipment"
           active={location.pathname.startsWith('/loans')}
           onClick={() => navigate('/loans')}
+        />
+        <NavButton
+          icon={<ShoppingCart size={20} />}
+          label="Purchase Requests"
+          active={location.pathname.startsWith('/purchase-requests')}
+          onClick={() => navigate('/purchase-requests')}
         />
       </nav>
 

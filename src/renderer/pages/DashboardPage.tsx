@@ -1,13 +1,14 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Camera, Lightbulb, AlertTriangle, ClipboardList, BarChart3, History, X, PackageCheck } from 'lucide-react';
+import { Camera, Lightbulb, AlertTriangle, ClipboardList, BarChart3, History, X, PackageCheck, ShoppingCart } from 'lucide-react';
 import { useMaintenanceStore } from '../stores/maintenance.store';
 import { useLoansStore } from '../stores/loans.store';
+import { usePurchaseRequestsStore } from '../stores/purchaseRequests.store';
 import { useAuthStore } from '../stores/auth.store';
-import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT, USE_COUNT_SUBCATEGORIES, LOAN_STATUS_CONFIG } from '../../shared/constants';
+import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT, USE_COUNT_SUBCATEGORIES, LOAN_STATUS_CONFIG, REQUEST_TYPE_CONFIG } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG } from '../lib/constants';
-import type { DashboardStats, MaintenanceTicket, RepairStatus, EquipmentUseCount, CompletedHistoryEntry, EquipmentLoan } from '../../shared/types';
+import type { DashboardStats, MaintenanceTicket, RepairStatus, EquipmentUseCount, CompletedHistoryEntry, EquipmentLoan, PurchaseRequest } from '../../shared/types';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { ipcInvoke } from '../lib/ipc';
 
@@ -43,6 +44,8 @@ export function DashboardPage() {
   const getEquipmentHistory = useMaintenanceStore((s) => s.getEquipmentHistory);
   const loans = useLoansStore((s) => s.loans);
   const fetchLoans = useLoansStore((s) => s.fetchAll);
+  const purchaseRequests = usePurchaseRequestsStore((s) => s.requests);
+  const fetchPurchaseRequests = usePurchaseRequestsStore((s) => s.fetchAll);
 
   const [deptStats, setDeptStats] = useState<Record<Department, DashboardStats | null>>({
     camera: null,
@@ -82,6 +85,8 @@ export function DashboardPage() {
   useEffect(() => { fetchTickets(); }, [fetchTickets]);
 
   useEffect(() => { fetchLoans(); }, [fetchLoans]);
+
+  useEffect(() => { fetchPurchaseRequests(); }, [fetchPurchaseRequests]);
 
   useEffect(() => {
     let cancelled = false;
@@ -184,6 +189,14 @@ export function DashboardPage() {
     return result;
   }, [loans]);
 
+  const pendingRequestsByDept = useMemo(() => {
+    const result: Record<Department, PurchaseRequest[]> = { camera: [], lights_grips: [] };
+    for (const req of purchaseRequests) {
+      if (req.status === 'PENDING' && result[req.department]) result[req.department].push(req);
+    }
+    return result;
+  }, [purchaseRequests]);
+
   const tallyByDept = useMemo(() => {
     const result: Record<Department, Record<string, number>> = { camera: {}, lights_grips: {} };
     for (const dept of DEPTS) {
@@ -206,15 +219,15 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6 max-w-[1400px] mx-auto">
-      {/* ── Header ──────────────────────────────────── */}
+      {/* ?? Header ???????????????????????????????????? */}
       <div>
         <h1 className="text-2xl font-bold text-surface-100">Admin Dashboard</h1>
         <p className="text-sm text-surface-500 mt-1">
-          Combined overview — {user?.full_name ?? 'Admin'}
+          Combined overview � {user?.full_name ?? 'Admin'}
         </p>
       </div>
 
-      {/* ── Equipment Inventory Summary ─────────────── */}
+      {/* ?? Equipment Inventory Summary ??????????????? */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         {(Object.keys(DEPARTMENT_CONFIG) as Department[]).map((dept) => {
           const cfg = DEPARTMENT_CONFIG[dept];
@@ -233,13 +246,13 @@ export function DashboardPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <h2 className="text-sm font-semibold text-surface-100">{cfg.label}</h2>
-                  <p className="text-2xs text-surface-500">{cfg.categories.join(' · ')}</p>
+                  <p className="text-2xs text-surface-500">{cfg.categories.join(' � ')}</p>
                 </div>
                 <button
                   onClick={() => navigate(`/dept/${dept}`)}
                   className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium whitespace-nowrap"
                 >
-                  View List →
+                  View List ?
                 </button>
               </div>
 
@@ -258,7 +271,7 @@ export function DashboardPage() {
         })}
       </div>
 
-      {/* ── Maintenance Tally ──────────────────────── */}
+      {/* ?? Maintenance Tally ???????????????????????? */}
       <div className="glass-panel rounded-xl px-5 py-4">
         <div className="flex items-center gap-2 mb-4">
           <ClipboardList size={16} className="text-surface-400" />
@@ -308,7 +321,7 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* ── Open Tickets ──────────────────────────── */}
+      {/* ?? Open Tickets ???????????????????????????? */}
       <div className="glass-panel rounded-xl overflow-hidden">
         <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
           <AlertTriangle size={16} className="text-danger-400" />
@@ -331,7 +344,7 @@ export function DashboardPage() {
                   onClick={() => navigate(`/dept/${dept}`)}
                   className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium ml-auto"
                 >
-                  View All →
+                  View All ?
                 </button>
               </div>
 
@@ -383,12 +396,12 @@ export function DashboardPage() {
                                   <p className="text-2xs text-surface-500 mt-0.5">
                                     {new Date(ticket.last_action_date).toLocaleDateString()}
                                     {ticket.last_action_personnel && (
-                                      <> · {ticket.last_action_personnel}</>
+                                      <> � {ticket.last_action_personnel}</>
                                     )}
                                   </p>
                                 </div>
                               ) : (
-                                <span className="text-surface-600">—</span>
+                                <span className="text-surface-600">�</span>
                               )}
                             </td>
                           </tr>
@@ -403,7 +416,7 @@ export function DashboardPage() {
         })}
       </div>
 
-      {/* ── Loaned Equipment ──────────────────────── */}
+      {/* ?? Loaned Equipment ???????????????????????? */}
       <div className="glass-panel rounded-xl overflow-hidden">
         <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
           <PackageCheck size={18} className="text-primary-400" />
@@ -412,7 +425,7 @@ export function DashboardPage() {
             onClick={() => navigate('/loans')}
             className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium ml-auto"
           >
-            View All →
+            View All ?
           </button>
         </div>
 
@@ -465,7 +478,7 @@ export function DashboardPage() {
                               {loan.out_count ?? 0} / {loan.item_count ?? 0}
                             </td>
                             <td className="px-3 py-3 text-xs text-surface-300 whitespace-nowrap">
-                              {loan.tentative_return_date ? new Date(loan.tentative_return_date).toLocaleDateString() : '—'}
+                              {loan.tentative_return_date ? new Date(loan.tentative_return_date).toLocaleDateString() : '�'}
                             </td>
                             <td className="px-3 py-3 whitespace-nowrap">
                               <span className={`text-xs font-medium ${statusCfg?.color ?? 'text-surface-400'}`}>
@@ -484,7 +497,83 @@ export function DashboardPage() {
         })}
       </div>
 
-      {/* ── Equipment Repair & Maintenance History ── */}
+      {/* ?? Equipment Repair & Maintenance History ?? */}
+      <div className="glass-panel rounded-xl overflow-hidden">
+        <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
+          <ShoppingCart size={18} className="text-primary-400" />
+          <h3 className="text-base font-semibold text-surface-200">Purchase Requests</h3>
+          <button
+            onClick={() => navigate('/purchase-requests')}
+            className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium ml-auto"
+          >
+            View All ?
+          </button>
+        </div>
+
+        {DEPTS.map((dept, deptIdx) => {
+          const Icon = DEPT_ICONS[dept];
+          const labelColor = DEPT_LABEL_COLOR[dept];
+          const cfg = DEPARTMENT_CONFIG[dept];
+          const deptRequests = pendingRequestsByDept[dept];
+
+          return (
+            <div key={dept}>
+              <div className={`flex items-center gap-2 px-5 py-2.5 bg-surface-900/40 ${deptIdx > 0 ? 'border-t border-surface-700/40 mt-4' : ''}`}>
+                <Icon size={16} className={labelColor} />
+                <span className={`text-sm font-semibold ${labelColor}`}>{cfg.shortLabel}</span>
+                <span className="text-xs text-surface-500 ml-1">({deptRequests.length})</span>
+              </div>
+
+              {deptRequests.length === 0 ? (
+                <div className="px-5 py-6 text-center text-sm text-surface-500">
+                  No active requests
+                </div>
+              ) : (
+                <div className="overflow-x-auto ml-5">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-xs text-surface-500 uppercase tracking-wider border-b border-surface-800">
+                        <th className="text-left px-5 py-2 font-medium">Request #</th>
+                        <th className="text-left px-3 py-2 font-medium">Requested Asset</th>
+                        <th className="text-left px-3 py-2 font-medium">Type</th>
+                        <th className="text-left px-3 py-2 font-medium">Qty</th>
+                        <th className="text-left px-3 py-2 font-medium">Date</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-surface-800/60">
+                      {deptRequests.map((req) => (
+                        <tr
+                          key={req.id}
+                          onClick={() => navigate(`/purchase-requests/${req.id}`)}
+                          className="hover:bg-surface-800/40 transition-colors cursor-pointer"
+                        >
+                          <td className="px-5 py-3 font-mono text-xs text-primary-400 whitespace-nowrap">
+                            {req.request_number}
+                          </td>
+                          <td className="px-3 py-3 text-surface-200 font-medium truncate max-w-[220px]">
+                            {req.requested_asset}
+                          </td>
+                          <td className="px-3 py-3 text-surface-300 whitespace-nowrap">
+                            {REQUEST_TYPE_CONFIG[req.request_type]?.shortLabel ?? req.request_type}
+                          </td>
+                          <td className="px-3 py-3 text-surface-300 whitespace-nowrap">
+                            {req.requested_quantity}
+                          </td>
+                          <td className="px-3 py-3 text-xs text-surface-300 whitespace-nowrap">
+                            {req.request_date ? new Date(req.request_date).toLocaleDateString() : '�'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Equipment Repair & Maintenance History */}
       <div className="glass-panel rounded-xl overflow-hidden">
         <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
           <History size={18} className="text-emerald-400" />
@@ -549,7 +638,7 @@ export function DashboardPage() {
         })}
       </div>
 
-      {/* ── Equipment Use Count ────────────────────── */}
+      {/* ?? Equipment Use Count ?????????????????????? */}
       <div className="glass-panel rounded-xl overflow-hidden">
         <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
           <BarChart3 size={16} className="text-primary-400" />
@@ -604,7 +693,7 @@ export function DashboardPage() {
                   onClick={() => navigate('/equipment/use-count')}
                   className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium"
                 >
-                  View Complete List →
+                  View Complete List ?
                 </button>
               </div>
             );
@@ -612,7 +701,7 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* ── History Modal ── */}
+      {/* ?? History Modal ?? */}
       {historyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-surface-900 border border-surface-700 rounded-xl shadow-2xl w-full max-w-[900px] max-h-[80vh] flex flex-col mx-4">
@@ -666,13 +755,13 @@ export function DashboardPage() {
                           <td className={`px-3 py-3 text-xs whitespace-nowrap ${isLatest ? 'text-surface-100 font-medium' : 'text-surface-400'}`}>
                             {entry.completion_date
                               ? new Date(entry.completion_date).toLocaleDateString()
-                              : '—'}
+                              : '�'}
                           </td>
                           <td className={`px-3 py-3 text-xs max-w-[240px] ${isLatest ? 'text-surface-100' : 'text-surface-400'}`}>
                             <p className="truncate">{entry.issue_description}</p>
                           </td>
                           <td className={`px-3 py-3 text-xs max-w-[200px] ${isLatest ? 'text-surface-100' : 'text-surface-400'}`}>
-                            <p className="truncate">{entry.last_remarks || '—'}</p>
+                            <p className="truncate">{entry.last_remarks || '�'}</p>
                           </td>
                         </tr>
                       );

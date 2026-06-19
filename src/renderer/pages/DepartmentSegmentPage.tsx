@@ -5,9 +5,10 @@ import { useMaintenanceStore } from '../stores/maintenance.store';
 import { usePartsStore } from '../stores/parts.store';
 import { useVendorsStore } from '../stores/vendors.store';
 import { useLoansStore } from '../stores/loans.store';
+import { usePurchaseRequestsStore } from '../stores/purchaseRequests.store';
 import { useAuthStore } from '../stores/auth.store';
 import { useDepartmentStore } from '../stores/department.store';
-import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT, LOAN_STATUS_CONFIG } from '../../shared/constants';
+import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT, LOAN_STATUS_CONFIG, REQUEST_TYPE_CONFIG } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import { REPAIR_STATUS_CONFIG } from '../lib/constants';
 import { Badge } from '../components/common/Badge';
@@ -17,8 +18,8 @@ import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
 import { Input } from '../components/common/Input';
 import { useToast } from '../hooks';
-import type { MaintenanceTicket, PartsCatalogItem, Vendor, CompletedHistoryEntry, EquipmentLoan } from '../../shared/types';
-import { Camera, Lightbulb, ArrowLeft, Wrench, Box, Truck, BarChart3, Plus, AlertTriangle, History, PackageCheck, ChevronRight } from 'lucide-react';
+import type { MaintenanceTicket, PartsCatalogItem, Vendor, CompletedHistoryEntry, EquipmentLoan, PurchaseRequest } from '../../shared/types';
+import { Camera, Lightbulb, ArrowLeft, Wrench, Box, Truck, BarChart3, Plus, AlertTriangle, History, PackageCheck, ChevronRight, ShoppingCart } from 'lucide-react';
 
 type TabKey = 'parts' | 'vendors' | 'reports';
 
@@ -220,10 +221,14 @@ function ReportsTab({ dept }: { dept: Department }) {
   const { tickets, getCompletedHistory } = useMaintenanceStore();
   const loans = useLoansStore((s) => s.loans);
   const fetchLoans = useLoansStore((s) => s.fetchAll);
+  const purchaseRequests = usePurchaseRequestsStore((s) => s.requests);
+  const fetchPurchaseRequests = usePurchaseRequestsStore((s) => s.fetchAll);
 
   const [completed, setCompleted] = useState<CompletedHistoryEntry[]>([]);
 
   useEffect(() => { fetchLoans(); }, [fetchLoans]);
+
+  useEffect(() => { fetchPurchaseRequests(); }, [fetchPurchaseRequests]);
 
   useEffect(() => {
     let cancelled = false;
@@ -297,6 +302,12 @@ function ReportsTab({ dept }: { dept: Department }) {
   const deptLoans = useMemo(
     () => loans.filter((l) => l.department === dept && l.status !== 'RETURNED').slice(0, 5),
     [loans, dept],
+  );
+
+  // Active (pending) purchase requests for this department.
+  const deptRequests = useMemo(
+    () => purchaseRequests.filter((r) => r.department === dept && r.status === 'PENDING').slice(0, 5),
+    [purchaseRequests, dept],
   );
 
   const statCards = [
@@ -435,6 +446,46 @@ function ReportsTab({ dept }: { dept: Department }) {
                     </span>
                     <p className="text-2xs text-surface-500 mt-1">
                       {loan.out_count ?? 0}/{loan.item_count ?? 0} out · {fmtDate(loan.tentative_return_date)}
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Purchase Requests */}
+        <div className="glass-panel rounded-xl overflow-hidden">
+          <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
+            <ShoppingCart size={18} className="text-primary-400" />
+            <h3 className="text-sm font-semibold text-surface-200">Purchase Requests</h3>
+            <button
+              onClick={() => navigate('/purchase-requests')}
+              className="ml-auto flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium"
+            >
+              Full List <ChevronRight size={13} />
+            </button>
+          </div>
+          {deptRequests.length === 0 ? (
+            <div className="px-5 py-8 text-center text-sm text-surface-500">No active requests</div>
+          ) : (
+            <div className="divide-y divide-surface-800/60">
+              {deptRequests.map((req: PurchaseRequest) => (
+                <button
+                  key={req.id}
+                  onClick={() => navigate(`/purchase-requests/${req.id}`)}
+                  className="w-full flex items-center gap-3 px-5 py-3 hover:bg-surface-800/40 transition-colors text-left"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-surface-200 font-medium truncate">{req.requested_asset}</p>
+                    <p className="text-2xs text-surface-500 font-mono">{req.request_number}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="text-xs font-medium text-surface-300">
+                      {REQUEST_TYPE_CONFIG[req.request_type]?.shortLabel ?? req.request_type}
+                    </span>
+                    <p className="text-2xs text-surface-500 mt-1">
+                      Qty {req.requested_quantity} · {fmtDate(req.request_date)}
                     </p>
                   </div>
                 </button>
