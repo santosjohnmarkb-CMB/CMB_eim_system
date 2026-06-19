@@ -18,9 +18,13 @@ let rowKeySeq = 0;
 interface ItemRow {
   key: number;
   equipment?: EquipmentWithAsset;
+  quantity?: number;
+  search?: string;
   itemName?: string;
   notes?: string;
 }
+
+const blankRow = (): ItemRow => ({ key: ++rowKeySeq, quantity: 1, search: '' });
 
 export function LoanNewPage() {
   const navigate = useNavigate();
@@ -52,11 +56,13 @@ export function LoanNewPage() {
   const [tentativeReturn, setTentativeReturn] = useState('');
   const [remarks, setRemarks] = useState('');
   const [internalNotes, setInternalNotes] = useState('');
-  const [rows, setRows] = useState<ItemRow[]>([]);
+  const [rows, setRows] = useState<ItemRow[]>(() =>
+    (navState.direction || 'OUTWARD') === 'OUTWARD' ? [blankRow()] : [],
+  );
   const [saving, setSaving] = useState(false);
 
-  const [search, setSearch] = useState('');
-  const [open, setOpen] = useState(false);
+  // Which outward row's equipment dropdown is currently open.
+  const [openRowKey, setOpenRowKey] = useState<number | null>(null);
   const comboRef = useRef<HTMLDivElement>(null);
 
   // Inward free-text item entry.
@@ -69,7 +75,7 @@ export function LoanNewPage() {
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (comboRef.current && !comboRef.current.contains(e.target as Node)) setOpen(false);
+      if (comboRef.current && !comboRef.current.contains(e.target as Node)) setOpenRowKey(null);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -81,33 +87,51 @@ export function LoanNewPage() {
     [allItems, department],
   );
 
-  // How many units of each equipment are already in this draft loan.
-  const addedCount = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const r of rows) if (r.equipment) map[r.equipment.id] = (map[r.equipment.id] || 0) + 1;
-    return map;
-  }, [rows]);
+  // Total units across all selected equipment rows (each row can loan a quantity).
+  const totalUnits = useMemo(
+    () => rows.reduce((s, r) => s + (r.equipment ? (r.quantity ?? 1) : 0), 0),
+    [rows],
+  );
 
-  const remainingFor = (eq: EquipmentWithAsset) => (eq.available_qty || 0) - (addedCount[eq.id] || 0);
+  // Units of an equipment already claimed by the *other* rows, so a row's own
+  // quantity isn't counted against itself when computing what's still available.
+  const otherRowsCount = (eqId: string, rowKey: number) =>
+    rows.reduce((s, r) => (r.equipment?.id === eqId && r.key !== rowKey ? s + (r.quantity ?? 1) : s), 0);
 
-  const filtered = useMemo(() => {
-    if (!search.trim()) return [];
-    const q = search.toLowerCase();
+  const availableForRow = (eq: EquipmentWithAsset, rowKey: number) =>
+    (eq.available_qty || 0) - otherRowsCount(eq.id, rowKey);
+
+  // Equipment suggestions for a single row's search box (only items with units left).
+  const filteredForRow = (row: ItemRow) => {
+    const q = (row.search || '').trim().toLowerCase();
+    if (!q) return [];
     return deptItems
-      .filter((eq) => remainingFor(eq) > 0)
+      .filter((eq) => availableForRow(eq, row.key) > 0)
       .filter((eq) =>
         eq.name.toLowerCase().includes(q) ||
         eq.equipment_code.toLowerCase().includes(q) ||
         (eq.brand || '').toLowerCase().includes(q),
       )
       .slice(0, 10);
-  }, [search, deptItems, addedCount]);
-
-  const addItem = (eq: EquipmentWithAsset) => {
-    setRows((prev) => [...prev, { key: ++rowKeySeq, equipment: eq }]);
-    setSearch('');
-    setOpen(false);
   };
+
+  const addRow = () => setRows((prev) => [...prev, blankRow()]);
+  const removeRow = (key: number) => setRows((prev) => prev.filter((r) => r.key !== key));
+  const clearRow = (key: number) =>
+    setRows((prev) => prev.map((r) => (r.key === key ? { ...r, equipment: undefined, quantity: 1, search: '' } : r)));
+  const setRowSearch = (key: number, value: string) =>
+    setRows((prev) => prev.map((r) => (r.key === key ? { ...r, search: value } : r)));
+  const selectRowEquipment = (key: number, eq: EquipmentWithAsset) => {
+    setRows((prev) => prev.map((r) => (r.key === key ? { ...r, equipment: eq, quantity: 1, search: '' } : r)));
+    setOpenRowKey(null);
+  };
+  const setRowQuantity = (key: number, qty: number) =>
+    setRows((prev) => prev.map((r) => {
+      if (r.key !== key || !r.equipment) return r;
+      const max = Math.max(1, availableForRow(r.equipment, r.key));
+      const n = Number.isNaN(qty) ? 1 : Math.min(Math.max(1, qty), max);
+      return { ...r, quantity: n };
+    }));
 
   const addInwardItem = () => {
     if (!inwardName.trim()) { toast.error('Enter the item name'); return; }
@@ -116,19 +140,18 @@ export function LoanNewPage() {
     setInwardNotes('');
   };
 
-  const removeItem = (key: number) => setRows((prev) => prev.filter((r) => r.key !== key));
-
   const changeDirection = (dir: LoanDirection) => {
     setDirection(dir);
-    setRows([]);
-    setSearch('');
+    setRows(dir === 'OUTWARD' ? [blankRow()] : []);
+    setOpenRowKey(null);
     setInwardName('');
     setInwardNotes('');
   };
 
   const changeDepartment = (dept: Department) => {
     setDepartment(dept);
-    setRows([]);
+    setRows(isOutward ? [blankRow()] : []);
+    setOpenRowKey(null);
   };
 
   const submitLoan = async (withRelease: boolean) => {
@@ -136,7 +159,11 @@ export function LoanNewPage() {
       toast.error(isOutward ? 'Person or organization is required' : 'Lender is required');
       return;
     }
-    if (rows.length === 0) { toast.error('Add at least one item'); return; }
+    const equipmentRows = rows.filter((r) => r.equipment);
+    if (isOutward ? equipmentRows.length === 0 : rows.length === 0) {
+      toast.error(isOutward ? 'Add at least one equipment' : 'Add at least one item');
+      return;
+    }
 
     setSaving(true);
     try {
@@ -152,7 +179,9 @@ export function LoanNewPage() {
         remarks,
         internal_notes: internalNotes,
         items: isOutward
-          ? rows.map((r) => ({ equipment_id: r.equipment!.id }))
+          ? equipmentRows.flatMap((r) =>
+              Array.from({ length: r.quantity ?? 1 }, () => ({ equipment_id: r.equipment!.id })),
+            )
           : rows.map((r) => ({ item_name: r.itemName, notes: r.notes || null })),
       });
 
@@ -169,7 +198,12 @@ export function LoanNewPage() {
           duration,
           remarks,
           released_by: user?.full_name || null,
-          items: rows.map((r) => ({ code: r.equipment?.equipment_code, name: r.equipment?.name || '' })),
+          items: equipmentRows.flatMap((r) =>
+            Array.from({ length: r.quantity ?? 1 }, () => ({
+              code: r.equipment!.equipment_code,
+              name: r.equipment!.name || '',
+            })),
+          ),
         });
       }
 
@@ -295,121 +329,166 @@ export function LoanNewPage() {
 
         {/* Items */}
         <div className="glass-panel rounded-xl p-5 space-y-4">
-          <h2 className="text-xs font-bold text-surface-500 uppercase tracking-widest">{isOutward ? 'Equipment' : 'Items'} ({rows.length})</h2>
+          <h2 className="text-xs font-bold text-surface-500 uppercase tracking-widest">
+            {isOutward ? `Equipment (${totalUnits})` : `Items (${rows.length})`}
+          </h2>
 
           {isOutward ? (
-            <div className="relative" ref={comboRef}>
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => { setSearch(e.target.value); setOpen(true); }}
-                onFocus={() => search.trim() && setOpen(true)}
-                className="w-full pl-9 pr-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
-                placeholder={`Search available ${DEPARTMENT_CONFIG[department].shortLabel} equipment...`}
-              />
-              {open && filtered.length > 0 && (
-                <div className="absolute z-10 mt-1 w-full bg-surface-800 border border-surface-700 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                  {filtered.map((eq) => (
-                    <button
-                      key={eq.id}
-                      type="button"
-                      onClick={() => addItem(eq)}
-                      className="w-full text-left px-4 py-2.5 text-sm hover:bg-surface-700/60 transition-colors border-b border-surface-700/50 last:border-0"
-                    >
-                      <span className="font-medium text-surface-100">{eq.equipment_code}</span>
-                      <span className="text-surface-300"> — {eq.name}</span>
-                      <span className="text-surface-500 text-xs ml-2">{remainingFor(eq)} available</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-              {open && search.trim() && filtered.length === 0 && (
-                <div className="absolute z-10 mt-1 w-full bg-surface-800 border border-surface-700 rounded-lg shadow-lg px-4 py-3 text-sm text-surface-500">
-                  No available equipment found
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
-              <div className="flex-1">
-                <label className="block text-xs font-medium text-surface-400 mb-1">Item name</label>
-                <input
-                  type="text"
-                  value={inwardName}
-                  onChange={(e) => setInwardName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addInwardItem(); } }}
-                  className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
-                  placeholder="e.g. Sony FX9 body, Aputure 600d"
-                />
-              </div>
-              <div className="flex-1">
-                <label className="block text-xs font-medium text-surface-400 mb-1">Notes (optional)</label>
-                <input
-                  type="text"
-                  value={inwardNotes}
-                  onChange={(e) => setInwardNotes(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addInwardItem(); } }}
-                  className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
-                  placeholder="Serial #, condition, accessories..."
-                />
-              </div>
-              <Button type="button" variant="secondary" onClick={addInwardItem}><Plus size={16} /> Add</Button>
-            </div>
-          )}
-
-          <div className="border border-surface-800 rounded-lg overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-surface-900/60 text-surface-400">
-                  {isOutward ? (
-                    <>
-                      <th className="text-left px-4 py-2.5 text-xs font-medium uppercase tracking-wide">Code</th>
-                      <th className="text-left px-4 py-2.5 text-xs font-medium uppercase tracking-wide">Equipment</th>
-                      <th className="text-left px-4 py-2.5 text-xs font-medium uppercase tracking-wide">Brand</th>
-                    </>
-                  ) : (
-                    <>
-                      <th className="text-left px-4 py-2.5 text-xs font-medium uppercase tracking-wide">Item</th>
-                      <th className="text-left px-4 py-2.5 text-xs font-medium uppercase tracking-wide">Notes</th>
-                    </>
-                  )}
-                  <th className="w-12" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-surface-800/60">
-                {rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={isOutward ? 4 : 3} className="px-4 py-8 text-center text-surface-500 text-sm">
-                      {isOutward ? 'No equipment added yet — search above to add items.' : 'No items added yet — enter item details above.'}
-                    </td>
-                  </tr>
-                ) : (
-                  rows.map((r) => (
-                    <tr key={r.key}>
-                      {isOutward ? (
-                        <>
-                          <td className="px-4 py-2.5 font-mono text-xs text-primary-400">{r.equipment!.equipment_code}</td>
-                          <td className="px-4 py-2.5 text-surface-200">{r.equipment!.name}</td>
-                          <td className="px-4 py-2.5 text-surface-400">{r.equipment!.brand || '-'}</td>
-                        </>
+            <div ref={comboRef} className="space-y-3">
+              {rows.map((row) => {
+                const maxQty = row.equipment ? Math.max(1, availableForRow(row.equipment, row.key)) : 1;
+                const results = filteredForRow(row);
+                return (
+                  <div key={row.key} className="flex items-start gap-2">
+                    <div className="flex-1 relative">
+                      {row.equipment ? (
+                        <div className="flex items-center justify-between gap-2 px-3 py-2 bg-surface-800 border border-surface-700 rounded-lg">
+                          <div className="min-w-0 truncate">
+                            <span className="font-mono text-xs text-primary-400">{row.equipment.equipment_code}</span>
+                            <span className="text-surface-200 text-sm ml-2">{row.equipment.name}</span>
+                            {row.equipment.brand && <span className="text-surface-500 text-xs ml-2">· {row.equipment.brand}</span>}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => clearRow(row.key)}
+                            className="shrink-0 text-xs font-medium text-surface-400 hover:text-primary-300 transition-colors"
+                          >
+                            Change
+                          </button>
+                        </div>
                       ) : (
                         <>
-                          <td className="px-4 py-2.5 text-surface-200">{r.itemName}</td>
-                          <td className="px-4 py-2.5 text-surface-400">{r.notes || '-'}</td>
+                          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500" />
+                          <input
+                            type="text"
+                            value={row.search || ''}
+                            onChange={(e) => { setRowSearch(row.key, e.target.value); setOpenRowKey(row.key); }}
+                            onFocus={() => setOpenRowKey(row.key)}
+                            className="w-full pl-9 pr-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
+                            placeholder={`Search available ${DEPARTMENT_CONFIG[department].shortLabel} equipment...`}
+                          />
+                          {openRowKey === row.key && results.length > 0 && (
+                            <div className="absolute z-10 mt-1 w-full bg-surface-800 border border-surface-700 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                              {results.map((eq) => (
+                                <button
+                                  key={eq.id}
+                                  type="button"
+                                  onClick={() => selectRowEquipment(row.key, eq)}
+                                  className="w-full text-left px-4 py-2.5 text-sm hover:bg-surface-700/60 transition-colors border-b border-surface-700/50 last:border-0"
+                                >
+                                  <span className="font-medium text-surface-100">{eq.equipment_code}</span>
+                                  <span className="text-surface-300"> — {eq.name}</span>
+                                  <span className="text-surface-500 text-xs ml-2">{availableForRow(eq, row.key)} available</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          {openRowKey === row.key && (row.search || '').trim() && results.length === 0 && (
+                            <div className="absolute z-10 mt-1 w-full bg-surface-800 border border-surface-700 rounded-lg shadow-lg px-4 py-3 text-sm text-surface-500">
+                              No available equipment found
+                            </div>
+                          )}
                         </>
                       )}
-                      <td className="px-4 py-2.5 text-center">
-                        <button type="button" onClick={() => removeItem(r.key)} className="text-surface-500 hover:text-danger-400 transition-colors">
-                          <Trash2 size={15} />
-                        </button>
-                      </td>
+                    </div>
+
+                    <div className="w-20 shrink-0">
+                      <input
+                        type="number"
+                        min={1}
+                        max={maxQty}
+                        value={row.quantity ?? 1}
+                        disabled={!row.equipment}
+                        onChange={(e) => setRowQuantity(row.key, parseInt(e.target.value, 10))}
+                        className="w-full px-2 py-2 text-sm text-center bg-surface-800 border border-surface-700 rounded-lg text-surface-100 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 disabled:opacity-40"
+                        title="Quantity"
+                      />
+                      {row.equipment && <p className="mt-1 text-[10px] text-surface-500 text-center">{maxQty} avail.</p>}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => removeRow(row.key)}
+                      disabled={rows.length === 1}
+                      className="mt-2 text-surface-500 hover:text-danger-400 transition-colors disabled:opacity-30 disabled:hover:text-surface-500"
+                      title="Remove equipment"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                );
+              })}
+
+              <button
+                type="button"
+                onClick={addRow}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-primary-400 hover:text-primary-300 border border-dashed border-surface-700 hover:border-primary-500/50 rounded-lg transition-colors"
+              >
+                <Plus size={16} /> More Equipment
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-surface-400 mb-1">Item name</label>
+                  <input
+                    type="text"
+                    value={inwardName}
+                    onChange={(e) => setInwardName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addInwardItem(); } }}
+                    className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
+                    placeholder="e.g. Sony FX9 body, Aputure 600d"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-surface-400 mb-1">Notes (optional)</label>
+                  <input
+                    type="text"
+                    value={inwardNotes}
+                    onChange={(e) => setInwardNotes(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addInwardItem(); } }}
+                    className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
+                    placeholder="Serial #, condition, accessories..."
+                  />
+                </div>
+                <Button type="button" variant="secondary" onClick={addInwardItem}><Plus size={16} /> Add</Button>
+              </div>
+
+              <div className="border border-surface-800 rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-surface-900/60 text-surface-400">
+                      <th className="text-left px-4 py-2.5 text-xs font-medium uppercase tracking-wide">Item</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-medium uppercase tracking-wide">Notes</th>
+                      <th className="w-12" />
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody className="divide-y divide-surface-800/60">
+                    {rows.length === 0 ? (
+                      <tr>
+                        <td colSpan={3} className="px-4 py-8 text-center text-surface-500 text-sm">
+                          No items added yet — enter item details above.
+                        </td>
+                      </tr>
+                    ) : (
+                      rows.map((r) => (
+                        <tr key={r.key}>
+                          <td className="px-4 py-2.5 text-surface-200">{r.itemName}</td>
+                          <td className="px-4 py-2.5 text-surface-400">{r.notes || '-'}</td>
+                          <td className="px-4 py-2.5 text-center">
+                            <button type="button" onClick={() => removeRow(r.key)} className="text-surface-500 hover:text-danger-400 transition-colors">
+                              <Trash2 size={15} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="flex justify-end gap-3">
