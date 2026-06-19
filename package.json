@@ -21,7 +21,8 @@
     "package": "npm run build && electron-builder",
     "package:win": "npm run build && electron-builder --win",
     "package:mac": "npm run build && electron-builder --mac",
-    "lint": "eslint src --ext .ts,.tsx",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
     "postinstall": "electron-builder install-app-deps"
   },
@@ -42,6 +43,7 @@
     "zustand": "^4.5.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/better-sqlite3": "^7.6.8",
     "@types/node": "^20.11.0",
     "@types/pdfkit": "^0.13.9",
@@ -54,10 +56,15 @@
     "concurrently": "^8.2.2",
     "electron": "^33.4.11",
     "electron-builder": "^26.8.1",
+    "eslint": "^10.5.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.6.0",
     "nodemon": "^3.1.10",
     "postcss": "^8.4.33",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.3.3",
+    "typescript-eslint": "^8.61.1",
     "vite": "^5.0.12",
     "wait-on": "^8.0.5"
   }

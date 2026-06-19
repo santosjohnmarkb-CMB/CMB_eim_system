@@ -92,11 +92,13 @@ const ALLOWED_CHANNELS = new Set([
 
 type WrappedListener = (event: IpcRendererEvent, ...args: unknown[]) => void;
 
+type RendererCallback = (...args: unknown[]) => void;
+
 const listenerMap = new Map<string, WrappedListener>();
-const callbackIds = new WeakMap<Function, number>();
+const callbackIds = new WeakMap<RendererCallback, number>();
 let nextId = 0;
 
-function listenerKey(channel: string, callback: Function): string {
+function listenerKey(channel: string, callback: RendererCallback): string {
   if (!callbackIds.has(callback)) {
     callbackIds.set(callback, nextId++);
   }
