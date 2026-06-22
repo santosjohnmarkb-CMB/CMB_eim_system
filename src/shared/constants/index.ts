@@ -149,7 +149,14 @@ export const USE_COUNT_SUBCATEGORIES: Record<Department, { label: string; subcat
   ],
   lights_grips: [
     { label: 'Lighting', subcategoryNames: ['Lighting'] },
-    { label: 'Cranes & Motorized Dolly', subcategoryNames: ['Crane', 'Motorized Dolly'] },
+    { label: 'Grip', subcategoryNames: ['Grip'] },
+    { label: 'Crane', subcategoryNames: ['Crane'] },
+    { label: 'Dolly', subcategoryNames: ['Dolly'] },
+    { label: 'Motorized Dolly', subcategoryNames: ['Motorized Dolly'] },
+    { label: 'Mounts', subcategoryNames: ['Mounts'] },
+    { label: 'Tracks', subcategoryNames: ['Tracks'] },
+    { label: 'Slider/Table Top Dolly', subcategoryNames: ['Slider/Table Top Dolly'] },
+    { label: 'SFX & Others', subcategoryNames: ['SFX & Others'] },
   ],
 };
 
