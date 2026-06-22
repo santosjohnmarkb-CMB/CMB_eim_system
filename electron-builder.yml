@@ -16,6 +16,10 @@ extraResources:
     to: database
     filter:
       - "**/*"
+  - from: resources
+    to: resources
+    filter:
+      - "**/*"
 
 asar: true
 asarUnpack:

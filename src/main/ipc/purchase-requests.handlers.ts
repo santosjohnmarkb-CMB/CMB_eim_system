@@ -5,6 +5,7 @@ import { requireSession } from './session';
 import { PurchaseRequestCreateSchema, PurchaseRequestUpdateSchema } from '../../shared/schemas';
 import { PURCHASE_REQUEST_DEPT_PREFIX } from '../../shared/constants';
 import { sessionDepartment } from './department';
+import { archivePurchaseRequest } from '../sync/archive-eim';
 
 // Build a sequential request number: CMB-PR-{deptCode}-{mmddyy}-{seq}.
 function generateRequestNumber(db: any, department: 'camera' | 'lights_grips'): string {
@@ -165,6 +166,9 @@ export function registerPurchaseRequestHandlers(): void {
       SET status = 'FULFILLED', fulfilled_at = ?, fulfilled_by = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(new Date().toISOString(), user.full_name, id);
+    // Auto-archive the fulfilled request's document to Google Drive (fire-and-forget;
+    // never blocks or fails the fulfillment action).
+    void archivePurchaseRequest(id);
     return db.prepare('SELECT * FROM purchase_requests WHERE id = ?').get(id);
   });
 

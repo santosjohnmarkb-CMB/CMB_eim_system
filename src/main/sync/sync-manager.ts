@@ -108,6 +108,10 @@ class SyncManager {
 
     this.setState({ status: 'syncing' });
     try {
+      // Drain any locally-queued mutations first; otherwise "Force Sync" pulls
+      // and pushes the catalog/operational tables but leaves the offline queue
+      // untouched, so the "Pending Changes" count never clears.
+      await offlineQueue.replay();
       await syncCatalogWithCloud();
       await syncOperationalWithCloud();
       this.setState({

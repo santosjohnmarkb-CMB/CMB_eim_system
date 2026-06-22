@@ -17,7 +17,8 @@ import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { REPAIR_STATUS_CONFIG, COMPLETION_OUTCOME_CONFIG, DOCUMENT_TYPE_CONFIG } from '../lib/constants';
-import { printHtml, escapeHtml } from '../lib/print';
+import { printHtml } from '../lib/print';
+import { buildMaintenanceForm } from '../../shared/forms/maintenanceForm';
 import { useToast } from '../hooks';
 import type { MaintenanceTicket, MaintenanceNote, TicketAction, CompletionOutcome } from '../../shared/types';
 
@@ -270,71 +271,8 @@ export function MaintenanceDetailPage() {
   // than screen-printing the live DOM.
   const handlePrint = () => {
     if (!ticket) return;
-    const statusLabel = REPAIR_STATUS_CONFIG[ticket.repair_status]?.label ?? ticket.repair_status;
-    const outcomeLabel = ticket.completion_outcome
-      ? (COMPLETION_OUTCOME_CONFIG[ticket.completion_outcome]?.label ?? ticket.completion_outcome)
-      : null;
-    const mtLabel = MAINTENANCE_TYPE_LABELS[ticket.maintenance_type] || ticket.maintenance_type;
-
-    const field = (label: string, value: string | null | undefined) =>
-      `<div class="field"><label>${escapeHtml(label)}</label><span>${escapeHtml(value || '—')}</span></div>`;
-
     const printableActions = actions.filter((a) => !(a._isNew && !a.action_taken));
-    const actionRows = printableActions.map((a, idx) => `
-      <tr>
-        <td>${idx + 1}</td>
-        <td>${escapeHtml(formatDate(a.action_date))}</td>
-        <td>${escapeHtml(a.action_taken || '—')}</td>
-        <td>${escapeHtml(a.remarks || '—')}</td>
-        <td>${escapeHtml(a.personnel || '—')}</td>
-      </tr>`).join('');
-
-    const signBlock = (label: string, name: string) => `
-      <div style="flex:1; text-align:center;">
-        <div style="min-height:18px; margin-bottom:4px; font-family:'Helvetica Neue',Arial,sans-serif; font-size:12px; color:#1a1f2b;">${escapeHtml(name || '')}</div>
-        <div style="border-top:1px solid #1a1f2b; padding-top:5px; font-family:'Helvetica Neue',Arial,sans-serif; font-size:9px; text-transform:uppercase; letter-spacing:0.08em; color:#6b7280;">${escapeHtml(label)}</div>
-      </div>`;
-
-    const body = `
-      <div class="header">
-        <h1>${escapeHtml(docTypeLabel)} — ${escapeHtml(ticket.ticket_number)}</h1>
-        <p class="muted">Status: ${escapeHtml(statusLabel)}${outcomeLabel ? ` · Outcome: ${escapeHtml(outcomeLabel)}` : ''}</p>
-      </div>
-
-      <h2>Equipment</h2>
-      <div class="grid">
-        ${field('Equipment Name', ticket.equipment_name)}
-        ${field('Equipment Code', ticket.equipment_code)}
-        ${field('Maintenance Type', mtLabel)}
-        ${field('Document Type', docTypeLabel)}
-      </div>
-
-      <h2>Project & Reporting Information</h2>
-      <div class="grid">
-        ${field('Project Name', ticket.project_name)}
-        ${field('Production Name', ticket.production_name)}
-        ${field('Project Date', formatDate(ticket.project_date))}
-        ${field('Date Reported', formatDate(ticket.reported_date))}
-        ${field('Reported By', ticket.reported_by)}
-        ${field('Verified By', ticket.verified_by)}
-      </div>
-
-      <h2>Issue Description</h2>
-      <p>${escapeHtml(ticket.issue_description || '—')}</p>
-      ${ticket.diagnosis ? `<h2>Diagnosis</h2><p>${escapeHtml(ticket.diagnosis)}</p>` : ''}
-
-      <h2>Action Log</h2>
-      <table>
-        <thead><tr><th style="width:32px;">#</th><th style="width:96px;">Date</th><th>Action Taken</th><th>Remarks</th><th style="width:120px;">Personnel</th></tr></thead>
-        <tbody>${actionRows || '<tr><td colspan="5">No actions recorded yet</td></tr>'}</tbody>
-      </table>
-
-      <div style="margin-top:44px; display:flex; gap:48px;">
-        ${signBlock('Reported By', ticket.reported_by || '')}
-        ${signBlock('Verified By', ticket.verified_by || '')}
-        ${signBlock('Approved By', '')}
-      </div>`;
-
+    const body = buildMaintenanceForm(ticket, printableActions);
     printHtml(`${docTypeLabel} ${ticket.ticket_number}`, body);
   };
 

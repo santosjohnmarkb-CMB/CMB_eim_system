@@ -1,62 +1,66 @@
-import eimLogo from '../assets/eim-hor.png';
-import { COMPANY, escapeHtml } from '../../shared/forms/document';
+import path from 'path';
+import fs from 'fs';
+import { app } from 'electron';
+import { COMPANY } from '../../shared/forms/document';
 
-// Re-export so existing imports (`import { COMPANY, escapeHtml } from './print'`)
-// keep working while the canonical definitions live in the shared, DOM-free module
-// that the main-process PDF pipeline also imports.
-export { COMPANY, escapeHtml };
+// Main-process equivalent of the renderer's print.ts letterhead + CSS wrapper.
+// Both wrap the SAME body HTML (built by src/shared/forms/*) so the PDF archived
+// to Google Drive matches what the user prints on screen. The logo is embedded as
+// a base64 data URL read from a bundled resource file rather than a Vite asset.
 
-// Prefer the full CMB company logo for the letterhead when it has been added to the
-// assets folder (src/renderer/assets/cmb_full_logo.png); otherwise fall back to the
-// bundled EIM logo. Using a glob keeps the build working even before the file is added.
-const assetLogos = import.meta.glob('../assets/*.png', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
+let cachedLogoDataUrl: string | null | undefined;
 
-function letterheadLogo(): string {
-  for (const [path, url] of Object.entries(assetLogos)) {
-    if (/cmb_full_logo\.png$/i.test(path)) return url;
+function getLogoPath(): string | null {
+  const candidates = [
+    path.join(process.cwd(), 'resources', 'cmb-letterhead.png'),
+    path.join(__dirname, '../../../resources/cmb-letterhead.png'),
+    path.join(__dirname, '../../resources/cmb-letterhead.png'),
+  ];
+  if (app?.isPackaged) {
+    candidates.unshift(path.join((process as any).resourcesPath, 'resources', 'cmb-letterhead.png'));
   }
-  return eimLogo;
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
 }
 
-// Resolve the bundled logo to an absolute URL so it loads inside the print iframe
-// (whose base URL is about:blank and cannot resolve app-relative asset paths).
-function resolveLogoUrl(): string {
-  const logo = letterheadLogo();
+function logoDataUrl(): string | null {
+  if (cachedLogoDataUrl !== undefined) return cachedLogoDataUrl ?? null;
+  const p = getLogoPath();
+  if (!p) {
+    cachedLogoDataUrl = null;
+    return null;
+  }
   try {
-    return new URL(logo, document.baseURI).href;
+    const b64 = fs.readFileSync(p).toString('base64');
+    cachedLogoDataUrl = `data:image/png;base64,${b64}`;
   } catch {
-    return logo;
+    cachedLogoDataUrl = null;
   }
+  return cachedLogoDataUrl ?? null;
 }
 
-// Renders standalone HTML in a hidden iframe and triggers the browser print dialog.
-// The body is wrapped in a formal company letterhead + footer so loan forms, equipment
-// lists, and maintenance histories print as professional documents rather than raw screens.
-export function printHtml(title: string, bodyHtml: string): void {
-  const iframe = document.createElement('iframe');
-  iframe.style.position = 'fixed';
-  iframe.style.right = '0';
-  iframe.style.bottom = '0';
-  iframe.style.width = '0';
-  iframe.style.height = '0';
-  iframe.style.border = '0';
-  document.body.appendChild(iframe);
-
-  const doc = iframe.contentWindow?.document;
-  if (!doc) {
-    document.body.removeChild(iframe);
-    return;
-  }
-
-  const logoUrl = resolveLogoUrl();
+// Wrap a document body in the full company-letterhead HTML page. Mirrors
+// `printHtml` in src/renderer/lib/print.ts (same CSS, letterhead, footer).
+export function wrapDocument(title: string, bodyHtml: string): string {
+  const logoUrl = logoDataUrl();
   const printedOn = new Date().toLocaleString(undefined, {
     year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
   });
 
+  const brandMark = logoUrl
+    ? `<img src="${logoUrl}" alt="${COMPANY.name}" />`
+    : `<div style="font-family:'Helvetica Neue',Arial,sans-serif; font-size:18px; font-weight:700; color:#1a1f2b;">${COMPANY.name}</div>`;
+
   const letterhead = `
     <header class="letterhead">
       <div class="brand">
-        <img src="${logoUrl}" alt="${COMPANY.name}" />
+        ${brandMark}
         <div class="tagline">${COMPANY.tagline}</div>
       </div>
       <div class="brand-contact">
@@ -71,8 +75,7 @@ export function printHtml(title: string, bodyHtml: string): void {
       <span>Generated ${printedOn} · System-generated document</span>
     </footer>`;
 
-  doc.open();
-  doc.write(`<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8" />
@@ -158,11 +161,6 @@ export function printHtml(title: string, bodyHtml: string): void {
     font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 9px; color: #9099a8;
     letter-spacing: 0.03em;
   }
-
-  @media print {
-    body { margin: 0; }
-    .doc-footer { position: fixed; bottom: 0; left: 0; right: 0; }
-  }
 </style>
 </head>
 <body>
@@ -172,42 +170,5 @@ ${bodyHtml}
 ${footer}
 </div>
 </body>
-</html>`);
-  doc.close();
-
-  const cleanup = () => {
-    setTimeout(() => {
-      if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
-    }, 500);
-  };
-
-  let printed = false;
-  const triggerPrint = () => {
-    if (printed) return;
-    printed = true;
-    iframe.contentWindow?.focus();
-    iframe.contentWindow?.print();
-    cleanup();
-  };
-
-  // Wait for the logo (and any other images) to load before printing so the
-  // letterhead isn't dropped, with a safety timeout as a fallback.
-  const images = Array.from(doc.images || []);
-  const pending = images.filter((img) => !img.complete);
-  if (pending.length === 0) {
-    setTimeout(triggerPrint, 150);
-  } else {
-    let remaining = pending.length;
-    pending.forEach((img) => {
-      const onDone = () => {
-        img.removeEventListener('load', onDone);
-        img.removeEventListener('error', onDone);
-        remaining -= 1;
-        if (remaining <= 0) setTimeout(triggerPrint, 80);
-      };
-      img.addEventListener('load', onDone);
-      img.addEventListener('error', onDone);
-    });
-    setTimeout(triggerPrint, 1500);
-  }
+</html>`;
 }

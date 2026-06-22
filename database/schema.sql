@@ -154,6 +154,10 @@ CREATE TABLE IF NOT EXISTS equipment_loans (
   internal_notes TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'PARTIAL', 'RETURNED')),
   created_by TEXT NOT NULL DEFAULT '',
+  -- Google Drive auto-archive: stamped when the loan's release document is uploaded
+  -- after the loan is fully returned (status = RETURNED).
+  archived_at TEXT,
+  drive_file_id TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -204,6 +208,10 @@ CREATE TABLE IF NOT EXISTS purchase_requests (
   fulfilled_at TEXT,
   fulfilled_by TEXT,
   created_by TEXT NOT NULL DEFAULT '',
+  -- Google Drive auto-archive: stamped when the request document is uploaded
+  -- after the request is marked FULFILLED.
+  archived_at TEXT,
+  drive_file_id TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -258,6 +266,10 @@ CREATE TABLE IF NOT EXISTS maintenance_tickets (
   project_date TEXT,
   verified_by TEXT,
   document_type TEXT NOT NULL DEFAULT 'repair' CHECK (document_type IN ('maintenance', 'repair', 'update', 'loss')),
+  -- Google Drive auto-archive: stamped when the ticket document is uploaded
+  -- after the ticket is closed (repair_status = COMPLETED).
+  archived_at TEXT,
+  drive_file_id TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -394,6 +406,19 @@ CREATE TABLE IF NOT EXISTS offline_queue (
   payload TEXT NOT NULL DEFAULT '{}',
   applied_to_cloud INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Google Drive auto-archive configuration. Holds only the operator-visible fields
+-- (OAuth client id, optional root folder id, connected account email). The OAuth
+-- secrets (client_secret, refresh_token, access_token, token_expiry) live in the
+-- encrypted electron-store (see src/main/sync/secrets-store.ts), NOT here.
+CREATE TABLE IF NOT EXISTS google_drive_config (
+  id TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL DEFAULT '',
+  folder_id TEXT NOT NULL DEFAULT '',
+  account_email TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- Sync metadata

@@ -8,6 +8,16 @@ import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { pushOperationalToCloud } from '../sync/operational-sync';
 import { sessionDepartment, assertEquipmentInDepartment } from './department';
 import { recomputeAvailability, pickAvailableAsset } from './availability';
+import { archiveLoan } from '../sync/archive-eim';
+
+// Auto-archive the loan's release document once the whole loan is returned
+// (fire-and-forget; never blocks or fails the return action).
+function maybeArchiveReturnedLoan(db: any, loanId: string): void {
+  const loan: any = db.prepare('SELECT status, archived_at FROM equipment_loans WHERE id = ?').get(loanId);
+  if (loan && loan.status === 'RETURNED' && !loan.archived_at) {
+    void archiveLoan(loanId);
+  }
+}
 
 function generateLoanNumber(db: any, department: 'camera' | 'lights_grips', direction: 'OUTWARD' | 'INWARD'): string {
   const deptCode = LOAN_DEPT_PREFIX[department] || 'CD';
@@ -216,6 +226,7 @@ export function registerLoanHandlers(): void {
     tx();
 
     for (const a of affected) pushItemAvailabilityToCloud(db, a.equipment_id, a.asset_id);
+    maybeArchiveReturnedLoan(db, loanId);
     return { success: true };
   });
 
@@ -235,6 +246,7 @@ export function registerLoanHandlers(): void {
     tx();
 
     for (const a of affected) pushItemAvailabilityToCloud(db, a.equipment_id, a.asset_id);
+    maybeArchiveReturnedLoan(db, loanId);
     return { success: true };
   });
 

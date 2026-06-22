@@ -565,11 +565,40 @@ const MIGRATIONS: Migration[] = [
             INSERT INTO purchase_request_items
               (id, request_id, requested_asset, request_type, current_quantity, requested_quantity, supplier, amount, photo_data, sort_order, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
-          `).run(
+          `          ).run(
             randomUUID(), r.id, r.requested_asset || '', r.request_type || 'NEW_EQUIPMENT',
             r.current_quantity ?? 0, r.requested_quantity ?? 1, r.supplier || '', r.amount ?? 0,
             r.photo_data ?? null, r.created_at || new Date().toISOString(),
           );
+        }
+      }
+    },
+  },
+  {
+    // Google Drive auto-archive. Adds the config table (operator-visible fields only;
+    // OAuth secrets live in the encrypted electron-store) and the archive bookkeeping
+    // columns stamped when each workflow's completion document is uploaded to Drive.
+    id: '020_drive_archive',
+    up: (db: any) => {
+      if (!tableExists(db, 'google_drive_config')) {
+        db.exec(`
+          CREATE TABLE google_drive_config (
+            id TEXT PRIMARY KEY,
+            client_id TEXT NOT NULL DEFAULT '',
+            folder_id TEXT NOT NULL DEFAULT '',
+            account_email TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+        `);
+      }
+      for (const table of ['maintenance_tickets', 'equipment_loans', 'purchase_requests']) {
+        if (!tableExists(db, table)) continue;
+        if (!columnExists(db, table, 'archived_at')) {
+          db.exec(`ALTER TABLE ${table} ADD COLUMN archived_at TEXT`);
+        }
+        if (!columnExists(db, table, 'drive_file_id')) {
+          db.exec(`ALTER TABLE ${table} ADD COLUMN drive_file_id TEXT`);
         }
       }
     },

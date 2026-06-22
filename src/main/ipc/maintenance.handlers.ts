@@ -7,6 +7,7 @@ import { pushOperationalToCloud } from '../sync/operational-sync';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { sessionDepartment, categoriesForDepartment, departmentForCategory, assertEquipmentInDepartment } from './department';
 import { recomputeAvailability, pickAvailableAsset } from './availability';
+import { archiveMaintenanceTicket } from '../sync/archive-eim';
 
 const DEPT_PREFIX: Record<string, string> = {
   'Camera': 'CD',
@@ -247,6 +248,11 @@ export function registerMaintenanceHandlers(): void {
     if (ticket.asset_id && (newStatus === 'COMPLETED' || newStatus === 'IN_PROGRESS')) {
       const asset: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(ticket.asset_id);
       if (asset) void pushOperationalToCloud('equipment_assets', 'UPDATE', asset);
+    }
+    // Auto-archive the closed ticket's document to Google Drive (fire-and-forget;
+    // never blocks or fails the status change).
+    if (newStatus === 'COMPLETED') {
+      void archiveMaintenanceTicket(id);
     }
     return { success: true };
   });

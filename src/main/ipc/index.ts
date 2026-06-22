@@ -8,6 +8,7 @@ import { registerLoanHandlers } from './loans.handlers';
 import { registerPurchaseRequestHandlers } from './purchase-requests.handlers';
 import { registerReportsHandlers } from './reports.handlers';
 import { registerSyncHandlers } from './sync.handlers';
+import { registerGoogleDriveHandlers } from './gdrive.handlers';
 import { registerAppHandlers } from './app.handlers';
 
 export function registerAllHandlers(): void {
@@ -21,5 +22,6 @@ export function registerAllHandlers(): void {
   registerPurchaseRequestHandlers();
   registerReportsHandlers();
   registerSyncHandlers();
+  registerGoogleDriveHandlers();
   registerAppHandlers();
 }
