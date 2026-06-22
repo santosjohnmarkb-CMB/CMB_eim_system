@@ -5,8 +5,8 @@ import { useEquipmentStore } from '../stores/equipment.store';
 import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
 import { useToast, useDepartmentFilter } from '../hooks';
-import { Search, X, Plus, Trash2, FileText, Wrench, RefreshCw, SearchX } from 'lucide-react';
-import type { EquipmentWithAsset } from '../../shared/types';
+import { Search, X, Plus, Trash2 } from 'lucide-react';
+import type { EquipmentWithAsset, DocumentType, MaintenanceType } from '../../shared/types';
 
 interface ActionRow {
   key: number;
@@ -21,9 +21,28 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 let rowKeySeq = 0;
 
 const inputClass =
-  'w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-amber-500 focus:border-amber-500';
+  'w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500';
 
-const labelClass = 'block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1';
+const labelClass = 'block text-xs font-semibold text-surface-400 uppercase tracking-wide mb-1';
+
+const rowInputClass =
+  'w-full px-2 py-1.5 text-xs bg-surface-900 border border-surface-700 rounded text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/40 focus:border-primary-500';
+
+// The report type drives downstream behaviour (loss handling, headings). The stored
+// maintenance_type is derived from it so there is a single selection for the user.
+const DOC_TYPE_OPTIONS: { value: DocumentType; label: string }[] = [
+  { value: 'repair', label: 'Repair' },
+  { value: 'maintenance', label: 'Maintenance' },
+  { value: 'update', label: 'Update' },
+  { value: 'loss', label: 'Equipment Loss' },
+];
+
+const DOC_TO_MAINTENANCE_TYPE: Record<DocumentType, MaintenanceType> = {
+  repair: 'repair',
+  maintenance: 'routine_maintenance',
+  update: 'update',
+  loss: 'repair',
+};
 
 export function MaintenanceNewPage() {
   const { create, addAction } = useMaintenanceStore();
@@ -34,7 +53,7 @@ export function MaintenanceNewPage() {
   const navigate = useNavigate();
   const toast = useToast();
 
-  const [documentType, setDocumentType] = useState<'maintenance' | 'repair' | 'update' | 'loss'>('repair');
+  const [documentType, setDocumentType] = useState<DocumentType>('repair');
   const [projectName, setProjectName] = useState('');
   const [productionName, setProductionName] = useState('');
   const [projectDate, setProjectDate] = useState('');
@@ -42,7 +61,6 @@ export function MaintenanceNewPage() {
   const [verifiedBy, setVerifiedBy] = useState('');
   const [equipmentId, setEquipmentId] = useState('');
   const [assetId, setAssetId] = useState('');
-  const [maintenanceType, setMaintenanceType] = useState('repair');
   const [issueDescription, setIssueDescription] = useState('');
   const [actionRows, setActionRows] = useState<ActionRow[]>([]);
   const [saving, setSaving] = useState(false);
@@ -135,7 +153,7 @@ export function MaintenanceNewPage() {
         equipment_id: equipmentId,
         asset_id: assetId || null,
         issue_description: issueDescription,
-        maintenance_type: maintenanceType,
+        maintenance_type: DOC_TO_MAINTENANCE_TYPE[documentType],
         reported_by: reportedBy,
         project_name: projectName,
         production_name: productionName,
@@ -167,74 +185,22 @@ export function MaintenanceNewPage() {
   return (
     <div className="min-h-full bg-surface-950 flex justify-center py-8 px-4">
       <form onSubmit={handleSubmit} className="max-w-4xl w-full">
-        <div className="bg-[#faf8f0] rounded-lg shadow-2xl text-gray-900 overflow-hidden">
+        <div className="glass-panel rounded-xl shadow-2xl text-surface-100 overflow-hidden">
           {/* Document Header */}
-          <div className="bg-[#f0ead6] border-b border-gray-300 px-8 py-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-xl font-bold text-gray-800 tracking-wide">
-                  INCIDENT / MAINTENANCE REPORT
-                </h1>
-                <p className="text-xs text-gray-500 mt-1">
-                  CMB Equipment Information Management System
-                </p>
-              </div>
-              <div className="flex gap-1 rounded-lg overflow-hidden border border-gray-300">
-                <button
-                  type="button"
-                  onClick={() => setDocumentType('repair')}
-                  className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold transition-colors ${
-                    documentType === 'repair'
-                      ? 'bg-amber-600 text-white'
-                      : 'bg-white text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  <Wrench size={14} />
-                  Repair
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDocumentType('maintenance')}
-                  className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold transition-colors ${
-                    documentType === 'maintenance'
-                      ? 'bg-amber-600 text-white'
-                      : 'bg-white text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  <FileText size={14} />
-                  Maintenance
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDocumentType('update')}
-                  className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold transition-colors ${
-                    documentType === 'update'
-                      ? 'bg-amber-600 text-white'
-                      : 'bg-white text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  <RefreshCw size={14} />
-                  Update
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDocumentType('loss')}
-                  className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold transition-colors ${
-                    documentType === 'loss'
-                      ? 'bg-amber-600 text-white'
-                      : 'bg-white text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  <SearchX size={14} />
-                  Equipment Loss
-                </button>
-              </div>
+          <div className="bg-surface-900/50 border-b border-surface-700/40 px-8 py-6">
+            <div>
+              <h1 className="text-xl font-bold text-danger-500 tracking-wide">
+                INCIDENT / MAINTENANCE REPORT
+              </h1>
+              <p className="text-xs text-surface-500 mt-1">
+                CMB Equipment Information Management System
+              </p>
             </div>
           </div>
 
           {/* Project Details Section */}
-          <div className="px-8 py-5 border-b border-gray-200">
-            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">
+          <div className="px-8 py-5 border-b border-surface-700/40">
+            <h2 className="text-xs font-bold text-surface-500 uppercase tracking-widest mb-4">
               Project Details
             </h2>
             <div className="grid grid-cols-2 gap-x-8 gap-y-4">
@@ -273,15 +239,15 @@ export function MaintenanceNewPage() {
                   type="date"
                   value={todayISO()}
                   readOnly
-                  className={`${inputClass} bg-gray-100 cursor-not-allowed`}
+                  className={`${inputClass} !bg-surface-900 opacity-60 cursor-not-allowed`}
                 />
               </div>
             </div>
           </div>
 
           {/* Personnel Section */}
-          <div className="px-8 py-5 border-b border-gray-200">
-            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">
+          <div className="px-8 py-5 border-b border-surface-700/40">
+            <h2 className="text-xs font-bold text-surface-500 uppercase tracking-widest mb-4">
               Personnel
             </h2>
             <div className="grid grid-cols-2 gap-x-8 gap-y-4">
@@ -309,8 +275,8 @@ export function MaintenanceNewPage() {
           </div>
 
           {/* Equipment & Classification Section */}
-          <div className="px-8 py-5 border-b border-gray-200">
-            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">
+          <div className="px-8 py-5 border-b border-surface-700/40">
+            <h2 className="text-xs font-bold text-surface-500 uppercase tracking-widest mb-4">
               Equipment &amp; Classification
             </h2>
             <div className="grid grid-cols-2 gap-x-8 gap-y-4">
@@ -318,27 +284,27 @@ export function MaintenanceNewPage() {
                 <label className={labelClass}>Equipment *</label>
                 {selectedEquipment ? (
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between px-3 py-2 bg-amber-50 border border-amber-300 rounded text-sm">
-                      <span>
-                        <span className="font-semibold">{selectedEquipment.equipment_code}</span>
+                    <div className="flex items-center justify-between px-3 py-2 bg-primary-500/10 border border-primary-500/30 rounded-lg text-sm">
+                      <span className="text-surface-200">
+                        <span className="font-semibold text-surface-100">{selectedEquipment.equipment_code}</span>
                         {' — '}
                         {selectedEquipment.name}
-                        <span className="text-gray-500 ml-2">({selectedEquipment.brand})</span>
+                        <span className="text-surface-500 ml-2">({selectedEquipment.brand})</span>
                       </span>
                       <button
                         type="button"
                         onClick={clearEquipment}
-                        className="text-gray-400 hover:text-red-500 transition-colors"
+                        className="text-surface-400 hover:text-danger-400 transition-colors"
                       >
                         <X size={16} />
                       </button>
                     </div>
                     {noAvailableUnits ? (
-                      <p className="text-xs font-semibold text-red-600">
+                      <p className="text-xs font-semibold text-danger-400">
                         No available units — a ticket cannot be opened until a unit is available.
                       </p>
                     ) : (
-                      <p className="text-xs text-gray-500">
+                      <p className="text-xs text-surface-500">
                         {availableUnits.length} of {selectedEquipment.quantity ?? unitsForSelected.length} unit(s) available
                       </p>
                     )}
@@ -348,7 +314,7 @@ export function MaintenanceNewPage() {
                     <div className="relative">
                       <Search
                         size={16}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500"
                       />
                       <input
                         type="text"
@@ -363,25 +329,25 @@ export function MaintenanceNewPage() {
                       />
                     </div>
                     {equipmentOpen && filteredEquipment.length > 0 && (
-                      <div className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                      <div className="absolute z-10 mt-1 w-full bg-surface-800 border border-surface-700 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                         {filteredEquipment.map((eq) => (
                           <button
                             key={eq.id}
                             type="button"
                             onClick={() => selectEquipment(eq)}
-                            className="w-full text-left px-4 py-2.5 text-sm hover:bg-amber-50 transition-colors border-b border-gray-100 last:border-0"
+                            className="w-full text-left px-4 py-2.5 text-sm hover:bg-surface-700/60 transition-colors border-b border-surface-700/50 last:border-0"
                           >
-                            <span className="font-medium text-gray-800">
+                            <span className="font-medium text-surface-100">
                               {eq.equipment_code}
                             </span>
-                            <span className="text-gray-600"> — {eq.name}</span>
-                            <span className="text-gray-400 text-xs ml-2">{eq.brand}</span>
+                            <span className="text-surface-300"> — {eq.name}</span>
+                            <span className="text-surface-500 text-xs ml-2">{eq.brand}</span>
                           </button>
                         ))}
                       </div>
                     )}
                     {equipmentOpen && equipmentSearch.trim() && filteredEquipment.length === 0 && (
-                      <div className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg px-4 py-3 text-sm text-gray-500">
+                      <div className="absolute z-10 mt-1 w-full bg-surface-800 border border-surface-700 rounded-lg shadow-lg px-4 py-3 text-sm text-surface-500">
                         No equipment found
                       </div>
                     )}
@@ -406,23 +372,25 @@ export function MaintenanceNewPage() {
                 </div>
               )}
               <div>
-                <label className={labelClass}>Maintenance Type</label>
+                <label className={labelClass}>Report Type</label>
                 <select
-                  value={maintenanceType}
-                  onChange={(e) => setMaintenanceType(e.target.value)}
+                  value={documentType}
+                  onChange={(e) => setDocumentType(e.target.value as DocumentType)}
                   className={inputClass}
                 >
-                  <option value="routine_maintenance">Routine Maintenance</option>
-                  <option value="update">Update</option>
-                  <option value="repair">Repair</option>
+                  {DOC_TYPE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
           </div>
 
           {/* Issue Description Section */}
-          <div className="px-8 py-5 border-b border-gray-200">
-            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">
+          <div className="px-8 py-5 border-b border-surface-700/40">
+            <h2 className="text-xs font-bold text-surface-500 uppercase tracking-widest mb-4">
               {documentType === 'loss' ? 'Loss Circumstances *' : 'Issue / Description *'}
             </h2>
             <textarea
@@ -437,24 +405,24 @@ export function MaintenanceNewPage() {
           </div>
 
           {/* Action Log Section */}
-          <div className="px-8 py-5 border-b border-gray-200">
+          <div className="px-8 py-5 border-b border-surface-700/40">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xs font-bold text-gray-500 uppercase tracking-widest">
+              <h2 className="text-xs font-bold text-surface-500 uppercase tracking-widest">
                 Action Log
               </h2>
               <button
                 type="button"
                 onClick={addRow}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-300 rounded hover:bg-amber-100 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-primary-400 hover:text-primary-300 bg-primary-500/10 hover:bg-primary-500/20 border border-primary-500/20 rounded-lg transition-colors"
               >
                 <Plus size={14} />
                 Add Row
               </button>
             </div>
-            <div className="border border-gray-300 rounded overflow-hidden">
+            <div className="border border-surface-800 rounded-lg overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-[#f0ead6] text-gray-600">
+                  <tr className="bg-surface-900/60 text-surface-400">
                     <th className="text-left px-3 py-2.5 font-semibold text-xs uppercase tracking-wide w-[130px]">
                       Date
                     </th>
@@ -473,19 +441,19 @@ export function MaintenanceNewPage() {
                 <tbody>
                   {actionRows.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="px-4 py-6 text-center text-gray-400 text-sm">
+                      <td colSpan={5} className="px-4 py-6 text-center text-surface-500 text-sm">
                         No action entries yet — click "Add Row" to begin.
                       </td>
                     </tr>
                   )}
                   {actionRows.map((row) => (
-                    <tr key={row.key} className="border-t border-gray-200 bg-white">
+                    <tr key={row.key} className="border-t border-surface-800 bg-transparent">
                       <td className="px-2 py-1.5">
                         <input
                           type="date"
                           value={row.action_date}
                           onChange={(e) => updateRow(row.key, 'action_date', e.target.value)}
-                          className="w-full px-2 py-1.5 text-xs bg-white border border-gray-200 rounded text-gray-900 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                          className={rowInputClass}
                         />
                       </td>
                       <td className="px-2 py-1.5">
@@ -493,7 +461,7 @@ export function MaintenanceNewPage() {
                           type="text"
                           value={row.action_taken}
                           onChange={(e) => updateRow(row.key, 'action_taken', e.target.value)}
-                          className="w-full px-2 py-1.5 text-xs bg-white border border-gray-200 rounded text-gray-900 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                          className={rowInputClass}
                           placeholder="Describe action..."
                         />
                       </td>
@@ -502,7 +470,7 @@ export function MaintenanceNewPage() {
                           type="text"
                           value={row.remarks}
                           onChange={(e) => updateRow(row.key, 'remarks', e.target.value)}
-                          className="w-full px-2 py-1.5 text-xs bg-white border border-gray-200 rounded text-gray-900 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                          className={rowInputClass}
                           placeholder="Remarks..."
                         />
                       </td>
@@ -511,7 +479,7 @@ export function MaintenanceNewPage() {
                           type="text"
                           value={row.personnel}
                           onChange={(e) => updateRow(row.key, 'personnel', e.target.value)}
-                          className="w-full px-2 py-1.5 text-xs bg-white border border-gray-200 rounded text-gray-900 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                          className={rowInputClass}
                           placeholder="Name..."
                         />
                       </td>
@@ -519,7 +487,7 @@ export function MaintenanceNewPage() {
                         <button
                           type="button"
                           onClick={() => removeRow(row.key)}
-                          className="text-gray-400 hover:text-red-500 transition-colors"
+                          className="text-surface-500 hover:text-danger-400 transition-colors"
                         >
                           <Trash2 size={14} />
                         </button>
@@ -532,8 +500,8 @@ export function MaintenanceNewPage() {
           </div>
 
           {/* Footer / Submit Bar */}
-          <div className="bg-[#f0ead6] border-t border-gray-300 px-8 py-4 flex items-center justify-between">
-            <p className="text-xs text-gray-500">
+          <div className="bg-surface-900/50 border-t border-surface-700/40 px-8 py-4 flex items-center justify-between">
+            <p className="text-xs text-surface-500">
               All fields marked with * are required.
             </p>
             <div className="flex gap-3">
@@ -541,7 +509,6 @@ export function MaintenanceNewPage() {
                 type="button"
                 variant="secondary"
                 onClick={() => navigate('/maintenance')}
-                className="!bg-white !text-gray-700 border border-gray-300 hover:!bg-gray-50"
               >
                 Cancel
               </Button>
@@ -549,7 +516,6 @@ export function MaintenanceNewPage() {
                 type="submit"
                 loading={saving}
                 disabled={noAvailableUnits}
-                className="!bg-amber-600 hover:!bg-amber-700 !text-white"
               >
                 Submit Report
               </Button>

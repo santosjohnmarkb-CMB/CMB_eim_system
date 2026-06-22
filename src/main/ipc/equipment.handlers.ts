@@ -506,6 +506,10 @@ export function registerEquipmentHandlers(): void {
       LEFT JOIN asset_status_log asl
         ON asl.equipment_id = e.id AND asl.new_status = 'DEPLOYED'
       WHERE e.is_active = 1
+        -- Exclude zero-priced "CAM-CAMPKG" package components: they are only billed as part
+        -- of the camera package, so only the priced package main should appear in use counts
+        -- (mirrors the equipment list's isZeroPricedPackageComponent filter).
+        AND NOT (LOWER(e.equipment_code) LIKE '%campkg%' AND e.base_price = 0)
       GROUP BY e.id
       ORDER BY use_count DESC, e.name ASC
     `).all();

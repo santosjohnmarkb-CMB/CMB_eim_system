@@ -1,16 +1,15 @@
-import { useEffect, useState, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useEffect, useState, useMemo, useRef } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useEquipmentStore } from '../stores/equipment.store';
 import { useMaintenanceStore } from '../stores/maintenance.store';
 import { usePartsStore } from '../stores/parts.store';
 import { useVendorsStore } from '../stores/vendors.store';
-import { useLoansStore } from '../stores/loans.store';
-import { usePurchaseRequestsStore } from '../stores/purchaseRequests.store';
 import { useAuthStore } from '../stores/auth.store';
 import { useDepartmentStore } from '../stores/department.store';
-import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT, LOAN_STATUS_CONFIG, REQUEST_TYPE_CONFIG } from '../../shared/constants';
+import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT, USE_COUNT_SUBCATEGORIES } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
-import { REPAIR_STATUS_CONFIG } from '../lib/constants';
+import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG } from '../lib/constants';
+import { ipcInvoke } from '../lib/ipc';
 import { Badge } from '../components/common/Badge';
 import { SearchBox } from '../components/common/SearchBox';
 import { DataTable, type Column } from '../components/common/DataTable';
@@ -18,8 +17,8 @@ import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
 import { Input } from '../components/common/Input';
 import { useToast } from '../hooks';
-import type { MaintenanceTicket, PartsCatalogItem, Vendor, CompletedHistoryEntry, EquipmentLoan, PurchaseRequest } from '../../shared/types';
-import { Camera, Lightbulb, ArrowLeft, Wrench, Box, Truck, BarChart3, Plus, AlertTriangle, History, PackageCheck, ChevronRight, ShoppingCart } from 'lucide-react';
+import type { MaintenanceTicket, PartsCatalogItem, Vendor, CompletedHistoryEntry, EquipmentUseCount } from '../../shared/types';
+import { Camera, Lightbulb, ArrowLeft, Wrench, Box, Truck, BarChart3, Plus, AlertTriangle, History, ChevronRight } from 'lucide-react';
 
 type TabKey = 'parts' | 'vendors' | 'reports';
 
@@ -215,20 +214,14 @@ function fmtDate(d: string | null | undefined): string {
   return d ? new Date(d).toLocaleDateString() : '—';
 }
 
-function ReportsTab({ dept }: { dept: Department }) {
+function ReportsTab({ dept, scrollTarget }: { dept: Department; scrollTarget?: string }) {
   const navigate = useNavigate();
+  const openTicketsRef = useRef<HTMLDivElement>(null);
   const { items, categories } = useEquipmentStore();
   const { tickets, getCompletedHistory } = useMaintenanceStore();
-  const loans = useLoansStore((s) => s.loans);
-  const fetchLoans = useLoansStore((s) => s.fetchAll);
-  const purchaseRequests = usePurchaseRequestsStore((s) => s.requests);
-  const fetchPurchaseRequests = usePurchaseRequestsStore((s) => s.fetchAll);
 
   const [completed, setCompleted] = useState<CompletedHistoryEntry[]>([]);
-
-  useEffect(() => { fetchLoans(); }, [fetchLoans]);
-
-  useEffect(() => { fetchPurchaseRequests(); }, [fetchPurchaseRequests]);
+  const [useCounts, setUseCounts] = useState<EquipmentUseCount[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -237,6 +230,21 @@ function ReportsTab({ dept }: { dept: Department }) {
       .catch(() => { /* ignore */ });
     return () => { cancelled = true; };
   }, [getCompletedHistory]);
+
+  useEffect(() => {
+    let cancelled = false;
+    ipcInvoke<EquipmentUseCount[]>('db:equipment:getUseCounts')
+      .then((d) => { if (!cancelled) setUseCounts(d || []); })
+      .catch(() => { /* ignore */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  // When arriving via a "View All" from the maintenance queue, jump straight to the open tickets list.
+  useEffect(() => {
+    if (scrollTarget !== 'open-tickets') return undefined;
+    const t = setTimeout(() => openTicketsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 200);
+    return () => clearTimeout(t);
+  }, [scrollTarget]);
 
   const deptCategoryNames = DEPARTMENT_CONFIG[dept].categories;
 
@@ -286,7 +294,13 @@ function ReportsTab({ dept }: { dept: Department }) {
   );
 
   const openTickets = useMemo(
-    () => deptTickets.filter((t) => t.repair_status !== 'COMPLETED' && t.repair_status !== 'CANCELLED'),
+    () => deptTickets
+      .filter((t) => t.repair_status !== 'COMPLETED' && t.repair_status !== 'CANCELLED')
+      .sort((a, b) => {
+        const sp = (SEVERITY_CONFIG[a.severity]?.priority ?? 99) - (SEVERITY_CONFIG[b.severity]?.priority ?? 99);
+        if (sp !== 0) return sp;
+        return new Date(b.reported_date).getTime() - new Date(a.reported_date).getTime();
+      }),
     [deptTickets],
   );
 
@@ -298,16 +312,10 @@ function ReportsTab({ dept }: { dept: Department }) {
     [completed, dept],
   );
 
-  // Currently-out loans for this department.
-  const deptLoans = useMemo(
-    () => loans.filter((l) => l.department === dept && l.status !== 'RETURNED').slice(0, 5),
-    [loans, dept],
-  );
-
-  // Active (pending) purchase requests for this department.
-  const deptRequests = useMemo(
-    () => purchaseRequests.filter((r) => r.department === dept && r.status === 'PENDING').slice(0, 5),
-    [purchaseRequests, dept],
+  // Equipment use counts limited to this department (via category → department mapping).
+  const deptUseCounts = useMemo(
+    () => useCounts.filter((c) => CATEGORY_TO_DEPARTMENT[c.category_name] === dept),
+    [useCounts, dept],
   );
 
   const statCards = [
@@ -374,124 +382,184 @@ function ReportsTab({ dept }: { dept: Department }) {
         </div>
       </div>
 
-      {/* Quick-view cards */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Maintenance & Repair History */}
-        <div className="glass-panel rounded-xl overflow-hidden">
-          <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
-            <History size={18} className="text-emerald-400" />
-            <h3 className="text-sm font-semibold text-surface-200">Maintenance &amp; Repair History</h3>
-            <button
-              onClick={() => navigate('/maintenance')}
-              className="ml-auto flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium"
-            >
-              Full List <ChevronRight size={13} />
-            </button>
-          </div>
-          {deptHistory.length === 0 ? (
-            <div className="px-5 py-8 text-center text-sm text-surface-500">No completed maintenance history</div>
-          ) : (
-            <div className="divide-y divide-surface-800/60">
-              {deptHistory.map((entry) => (
-                <button
-                  key={entry.id}
-                  onClick={() => navigate(`/maintenance/${entry.id}`)}
-                  className="w-full flex items-center gap-3 px-5 py-3 hover:bg-surface-800/40 transition-colors text-left"
-                >
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-surface-200 font-medium truncate">{entry.equipment_name}</p>
-                    <p className="text-2xs text-surface-500 font-mono">{entry.ticket_number}</p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <Badge variant={entry.document_type === 'maintenance' ? 'info' : entry.document_type === 'update' ? 'purple' : 'warning'} size="sm">
-                      {entry.document_type}
-                    </Badge>
-                    <p className="text-2xs text-surface-500 mt-1">{fmtDate(entry.completion_date || entry.reported_date)}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
+      {/* Open Tickets — equipment currently with an open ticket */}
+      <div ref={openTicketsRef} className="glass-panel rounded-xl overflow-hidden scroll-mt-4">
+        <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
+          <AlertTriangle size={18} className="text-danger-400" />
+          <h3 className="text-sm font-semibold text-surface-200">Open Tickets</h3>
+          <span className="text-xs text-surface-500">{openTickets.length}</span>
         </div>
-
-        {/* Loaned Equipment */}
-        <div className="glass-panel rounded-xl overflow-hidden">
-          <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
-            <PackageCheck size={18} className="text-primary-400" />
-            <h3 className="text-sm font-semibold text-surface-200">Loaned Equipment</h3>
-            <button
-              onClick={() => navigate('/loans')}
-              className="ml-auto flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium"
-            >
-              Full List <ChevronRight size={13} />
-            </button>
+        {openTickets.length === 0 ? (
+          <div className="px-5 py-10 text-center text-sm text-surface-500">
+            No open tickets — there is no data available on this list.
           </div>
-          {deptLoans.length === 0 ? (
-            <div className="px-5 py-8 text-center text-sm text-surface-500">No active loans</div>
-          ) : (
-            <div className="divide-y divide-surface-800/60">
-              {deptLoans.map((loan: EquipmentLoan) => (
-                <button
-                  key={loan.id}
-                  onClick={() => navigate(`/loans/${loan.id}`)}
-                  className="w-full flex items-center gap-3 px-5 py-3 hover:bg-surface-800/40 transition-colors text-left"
-                >
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-surface-200 font-medium truncate">{loan.person_or_org}</p>
-                    <p className="text-2xs text-surface-500 font-mono">{loan.loan_number}</p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <span className={`text-xs font-medium ${LOAN_STATUS_CONFIG[loan.status]?.color ?? 'text-surface-400'}`}>
-                      {LOAN_STATUS_CONFIG[loan.status]?.label ?? loan.status}
-                    </span>
-                    <p className="text-2xs text-surface-500 mt-1">
-                      {loan.out_count ?? 0}/{loan.item_count ?? 0} out · {fmtDate(loan.tentative_return_date)}
-                    </p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-surface-500 uppercase tracking-wider border-b border-surface-800">
+                  <th className="text-left px-5 py-2 font-medium">Ticket</th>
+                  <th className="text-left px-3 py-2 font-medium">Equipment</th>
+                  <th className="text-left px-3 py-2 font-medium">Status</th>
+                  <th className="text-left px-3 py-2 font-medium">Last Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-surface-800/60">
+                {openTickets.map((ticket) => {
+                  const statusCfg = REPAIR_STATUS_CONFIG[ticket.repair_status];
+                  return (
+                    <tr
+                      key={ticket.id}
+                      onClick={() => navigate(`/maintenance/${ticket.id}`)}
+                      className="hover:bg-surface-800/40 transition-colors cursor-pointer"
+                    >
+                      <td className="px-5 py-3 font-mono text-xs text-primary-400 whitespace-nowrap">
+                        {ticket.ticket_number}
+                      </td>
+                      <td className="px-3 py-3">
+                        <p className="text-surface-200 font-medium truncate max-w-[220px] flex items-center gap-1.5">
+                          {ticket.equipment_name}
+                          {ticket.document_type === 'loss' && (
+                            <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-danger-500/15 text-danger-400">
+                              Loss
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-2xs text-surface-500">{ticket.equipment_code}</p>
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <span className={`text-xs font-medium ${statusCfg?.color ?? 'text-surface-400'}`}>
+                          {statusCfg?.label ?? ticket.repair_status}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-xs max-w-[260px]">
+                        {ticket.last_action_date ? (
+                          <div>
+                            <p className="text-surface-300 truncate">{ticket.last_action_taken}</p>
+                            <p className="text-2xs text-surface-500 mt-0.5">
+                              {new Date(ticket.last_action_date).toLocaleDateString()}
+                              {ticket.last_action_personnel && <> · {ticket.last_action_personnel}</>}
+                            </p>
+                          </div>
+                        ) : (
+                          <span className="text-surface-600">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Maintenance & Repair History */}
+      <div className="glass-panel rounded-xl overflow-hidden">
+        <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
+          <History size={18} className="text-emerald-400" />
+          <h3 className="text-sm font-semibold text-surface-200">Maintenance &amp; Repair History</h3>
+          <button
+            onClick={() => navigate('/maintenance', { state: { scrollTo: 'history' } })}
+            className="ml-auto flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium"
+          >
+            View All <ChevronRight size={13} />
+          </button>
         </div>
-
-        {/* Purchase Requests */}
-        <div className="glass-panel rounded-xl overflow-hidden">
-          <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
-            <ShoppingCart size={18} className="text-primary-400" />
-            <h3 className="text-sm font-semibold text-surface-200">Purchase Requests</h3>
-            <button
-              onClick={() => navigate('/purchase-requests')}
-              className="ml-auto flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium"
-            >
-              Full List <ChevronRight size={13} />
-            </button>
+        {deptHistory.length === 0 ? (
+          <div className="px-5 py-8 text-center text-sm text-surface-500">No completed maintenance history</div>
+        ) : (
+          <div className="divide-y divide-surface-800/60">
+            {deptHistory.map((entry) => (
+              <button
+                key={entry.id}
+                onClick={() => navigate(`/maintenance/${entry.id}`)}
+                className="w-full flex items-center gap-3 px-5 py-3 hover:bg-surface-800/40 transition-colors text-left"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-surface-200 font-medium truncate">{entry.equipment_name}</p>
+                  <p className="text-2xs text-surface-500 font-mono">{entry.ticket_number}</p>
+                </div>
+                <div className="text-right shrink-0">
+                  <Badge variant={entry.document_type === 'maintenance' ? 'info' : entry.document_type === 'update' ? 'purple' : 'warning'} size="sm">
+                    {entry.document_type}
+                  </Badge>
+                  <p className="text-2xs text-surface-500 mt-1">{fmtDate(entry.completion_date || entry.reported_date)}</p>
+                </div>
+              </button>
+            ))}
           </div>
-          {deptRequests.length === 0 ? (
-            <div className="px-5 py-8 text-center text-sm text-surface-500">No active requests</div>
-          ) : (
-            <div className="divide-y divide-surface-800/60">
-              {deptRequests.map((req: PurchaseRequest) => (
-                <button
-                  key={req.id}
-                  onClick={() => navigate(`/purchase-requests/${req.id}`)}
-                  className="w-full flex items-center gap-3 px-5 py-3 hover:bg-surface-800/40 transition-colors text-left"
-                >
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-surface-200 font-medium truncate">{req.requested_asset}</p>
-                    <p className="text-2xs text-surface-500 font-mono">{req.request_number}</p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <span className="text-xs font-medium text-surface-300">
-                      {REQUEST_TYPE_CONFIG[req.request_type]?.shortLabel ?? req.request_type}
-                    </span>
-                    <p className="text-2xs text-surface-500 mt-1">
-                      Qty {req.requested_quantity} · {fmtDate(req.request_date)}
-                    </p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
+        )}
+      </div>
+
+      {/* Equipment Use Count — limited to this department */}
+      <div className="glass-panel rounded-xl overflow-hidden">
+        <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
+          <BarChart3 size={18} className="text-primary-400" />
+          <h3 className="text-sm font-semibold text-surface-200">Equipment Use Count</h3>
+          <button
+            onClick={() => navigate('/equipment/use-count')}
+            className="ml-auto flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium"
+          >
+            View Complete List <ChevronRight size={13} />
+          </button>
+        </div>
+        <div className="p-5 space-y-4">
+          {(() => {
+            // Preferred subcategory order (as defined in constants), then any others alphabetically.
+            const preferredOrder = USE_COUNT_SUBCATEGORIES[dept].flatMap((g) => g.subcategoryNames);
+            const itemsBySubcategory = new Map<string, EquipmentUseCount[]>();
+            for (const c of deptUseCounts) {
+              const key = c.subcategory_name || 'Other';
+              const existing = itemsBySubcategory.get(key);
+              if (existing) existing.push(c);
+              else itemsBySubcategory.set(key, [c]);
+            }
+
+            const rendered = Array.from(itemsBySubcategory.keys())
+              .sort((a, b) => {
+                const ia = preferredOrder.indexOf(a);
+                const ib = preferredOrder.indexOf(b);
+                if (ia !== -1 && ib !== -1) return ia - ib;
+                if (ia !== -1) return -1;
+                if (ib !== -1) return 1;
+                return a.localeCompare(b);
+              })
+              .map((label) => ({
+                label,
+                items: (itemsBySubcategory.get(label) || [])
+                  .slice()
+                  .sort((a, b) => b.use_count - a.use_count)
+                  .slice(0, 5),
+              }));
+
+            if (rendered.length === 0) {
+              return (
+                <p className="text-sm text-surface-500 text-center py-6">
+                  No equipment use data available.
+                </p>
+              );
+            }
+
+            return rendered.map((group) => (
+              <div key={group.label}>
+                <p className="text-xs font-medium text-surface-400 mb-1.5 uppercase tracking-wide">
+                  {group.label}
+                </p>
+                <table className="w-full text-sm">
+                  <tbody>
+                    {group.items.map((item, idx) => (
+                      <tr key={item.equipment_id} className="border-b border-surface-800/40 last:border-0">
+                        <td className="py-1.5 pr-2 text-surface-600 w-5 text-right text-xs">{idx + 1}</td>
+                        <td className="py-1.5 px-2 text-surface-200 truncate max-w-[220px]">{item.name}</td>
+                        <td className="py-1.5 pl-2 text-right font-bold text-surface-100 w-12">{item.use_count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ));
+          })()}
         </div>
       </div>
     </div>
@@ -503,8 +571,10 @@ function ReportsTab({ dept }: { dept: Department }) {
 export function DepartmentSegmentPage() {
   const { dept } = useParams<{ dept: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const role = useAuthStore((s) => s.user?.role);
   const [activeTab, setActiveTab] = useState<TabKey>('reports');
+  const scrollTarget = (location.state as { scrollTo?: string } | null)?.scrollTo;
 
   const validDept = (dept === 'camera' || dept === 'lights_grips') ? dept as Department : null;
 
@@ -567,7 +637,7 @@ export function DepartmentSegmentPage() {
       <div className="flex-1 min-h-0 overflow-y-auto">
         {activeTab === 'parts' && <PartsTab dept={validDept} />}
         {activeTab === 'vendors' && <VendorsTab dept={validDept} />}
-        {activeTab === 'reports' && <ReportsTab dept={validDept} />}
+        {activeTab === 'reports' && <ReportsTab dept={validDept} scrollTarget={scrollTarget} />}
       </div>
     </div>
   );

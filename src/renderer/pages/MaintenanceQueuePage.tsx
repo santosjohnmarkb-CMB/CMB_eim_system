@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Wrench, Camera, Lightbulb, ClipboardList, AlertTriangle, History, X, Plus, Printer } from 'lucide-react';
 import { useMaintenanceStore } from '../stores/maintenance.store';
 import { useAuthStore } from '../stores/auth.store';
+import { useToast } from '../hooks';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG, COMPLETION_OUTCOME_CONFIG } from '../lib/constants';
 import { printHtml, escapeHtml } from '../lib/print';
@@ -39,6 +40,10 @@ function buildTally(tickets: MaintenanceTicket[]) {
 export function MaintenanceQueuePage() {
   const { tickets, loading, fetchAll, getCompletedHistory, getEquipmentHistory } = useMaintenanceStore();
   const navigate = useNavigate();
+  const location = useLocation();
+  const toast = useToast();
+  const historyRef = useRef<HTMLDivElement>(null);
+  const scrollTo = (location.state as { scrollTo?: string } | null)?.scrollTo;
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === 'admin';
   const userDept = user?.department as Department | null;
@@ -50,6 +55,13 @@ export function MaintenanceQueuePage() {
   const [modalLoading, setModalLoading] = useState(false);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // When arriving via a "View All" on the equipment repair history, jump straight to that card.
+  useEffect(() => {
+    if (loading || scrollTo !== 'history') return undefined;
+    const t = setTimeout(() => historyRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+    return () => clearTimeout(t);
+  }, [loading, scrollTo, location.key]);
 
   useEffect(() => {
     let cancelled = false;
@@ -234,7 +246,7 @@ export function MaintenanceQueuePage() {
           <h3 className="text-base font-semibold text-surface-200">Open Tickets</h3>
           <button
             onClick={() => navigate('/maintenance/new')}
-            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-400 hover:text-primary-300 bg-primary-500/10 hover:bg-primary-500/20 border border-primary-500/20 rounded-lg transition-colors"
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-orange-400 hover:text-orange-300 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 rounded-lg transition-colors"
           >
             <Plus size={14} /> Create New Ticket
           </button>
@@ -254,7 +266,13 @@ export function MaintenanceQueuePage() {
                 <span className={`text-sm font-semibold ${accent}`}>{cfg.shortLabel}</span>
                 <span className="text-xs text-surface-500 ml-1">({deptOpen.length})</span>
                 <button
-                  onClick={() => navigate(`/dept/${dept}`)}
+                  onClick={() => {
+                    if (deptOpen.length === 0) {
+                      toast.info(`No open tickets available for ${cfg.shortLabel}.`);
+                      return;
+                    }
+                    navigate(`/dept/${dept}`, { state: { scrollTo: 'open-tickets' } });
+                  }}
                   className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium ml-auto"
                 >
                   View All →
@@ -335,7 +353,7 @@ export function MaintenanceQueuePage() {
       </div>
 
       {/* ── Equipment Repair & Maintenance History ── */}
-      <div className="glass-panel rounded-xl overflow-hidden">
+      <div ref={historyRef} className="glass-panel rounded-xl overflow-hidden scroll-mt-4">
         <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
           <History size={18} className="text-emerald-400" />
           <h3 className="text-base font-semibold text-surface-200">Equipment Repair & Maintenance History</h3>

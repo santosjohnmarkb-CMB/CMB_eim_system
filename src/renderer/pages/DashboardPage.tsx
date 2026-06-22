@@ -649,8 +649,34 @@ export function DashboardPage() {
           {DEPTS.map((dept) => {
             const Icon = DEPT_ICONS[dept];
             const labelColor = DEPT_LABEL_COLOR[dept];
-            const subGroups = USE_COUNT_SUBCATEGORIES[dept];
             const deptCounts = deptUseCounts[dept];
+
+            // Preferred subcategory order (as defined in constants), then any others alphabetically.
+            const preferredOrder = USE_COUNT_SUBCATEGORIES[dept].flatMap((g) => g.subcategoryNames);
+            const itemsBySubcategory = new Map<string, EquipmentUseCount[]>();
+            for (const c of deptCounts) {
+              const key = c.subcategory_name || 'Other';
+              const existing = itemsBySubcategory.get(key);
+              if (existing) existing.push(c);
+              else itemsBySubcategory.set(key, [c]);
+            }
+
+            const subcategoryGroups = Array.from(itemsBySubcategory.keys())
+              .sort((a, b) => {
+                const ia = preferredOrder.indexOf(a);
+                const ib = preferredOrder.indexOf(b);
+                if (ia !== -1 && ib !== -1) return ia - ib;
+                if (ia !== -1) return -1;
+                if (ib !== -1) return 1;
+                return a.localeCompare(b);
+              })
+              .map((label) => ({
+                label,
+                items: (itemsBySubcategory.get(label) || [])
+                  .slice()
+                  .sort((a, b) => b.use_count - a.use_count)
+                  .slice(0, 5),
+              }));
 
             return (
               <div key={dept} className="p-5 space-y-4">
@@ -661,11 +687,8 @@ export function DashboardPage() {
                   </span>
                 </div>
 
-                {subGroups.map((group) => {
-                  const nameSet = new Set(group.subcategoryNames);
-                  const groupItems = deptCounts
-                    .filter((c) => nameSet.has(c.subcategory_name))
-                    .slice(0, 5);
+                {subcategoryGroups.map((group) => {
+                  const groupItems = group.items;
 
                   if (groupItems.length === 0) return null;
 

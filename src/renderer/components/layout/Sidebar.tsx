@@ -193,8 +193,8 @@ export function Sidebar() {
         <NavButton
           icon={<Package size={20} />}
           label="Equipment"
-          active={location.pathname === `/equipment/${dept}`}
-          onClick={() => navigate(`/equipment/${dept}`)}
+          active={location.pathname.startsWith('/equipment')}
+          onClick={() => navigate('/equipment')}
         />
         <NavButton
           icon={<Wrench size={20} />}

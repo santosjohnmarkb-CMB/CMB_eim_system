@@ -8,6 +8,7 @@ import { DEPARTMENT_CONFIG, USE_COUNT_SUBCATEGORIES, CATEGORY_TO_DEPARTMENT } fr
 import type { Department } from '../../shared/constants';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { ipcInvoke } from '../lib/ipc';
+import { useAuthStore } from '../stores/auth.store';
 import type { DashboardStats, EquipmentUseCount } from '../../shared/types';
 
 const DEPT_ICONS: Record<Department, typeof Camera> = {
@@ -32,6 +33,9 @@ const DEPT_ACCENT: Record<Department, { iconBg: string; iconColor: string; borde
 
 export function EquipmentDashboardPage() {
   const navigate = useNavigate();
+  const user = useAuthStore((s) => s.user);
+  const isAdmin = user?.role === 'admin';
+  const userDept = user?.department as Department | null;
   const [deptStats, setDeptStats] = useState<Record<Department, DashboardStats | null>>({
     camera: null, lights_grips: null,
   });
@@ -72,7 +76,10 @@ export function EquipmentDashboardPage() {
 
   if (loading) return <LoadingSpinner size="lg" className="py-24" />;
 
-  const departments = Object.keys(DEPARTMENT_CONFIG) as Department[];
+  const allDepartments = Object.keys(DEPARTMENT_CONFIG) as Department[];
+  const departments = isAdmin
+    ? allDepartments
+    : (userDept ? [userDept] : allDepartments);
   const totalAll = departments.reduce((sum, d) => sum + (deptStats[d]?.totalEquipment || 0), 0);
   const availAll = departments.reduce((sum, d) => sum + (deptStats[d]?.availableCount || 0), 0);
   const repairAll = departments.reduce((sum, d) => sum + (deptStats[d]?.inRepairCount || 0), 0);
@@ -90,7 +97,7 @@ export function EquipmentDashboardPage() {
       </div>
 
       {/* Department cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      <div className={`grid grid-cols-1 ${departments.length > 1 ? 'md:grid-cols-2' : ''} gap-5`}>
         {departments.map((key) => {
           const cfg = DEPARTMENT_CONFIG[key];
           const stats = deptStats[key];
@@ -131,12 +138,38 @@ export function EquipmentDashboardPage() {
           <h3 className="text-sm font-semibold text-surface-200">Equipment Use Count</h3>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-surface-800">
+        <div className={`grid grid-cols-1 ${departments.length > 1 ? 'lg:grid-cols-2 lg:divide-y-0 lg:divide-x' : ''} divide-y divide-surface-800`}>
           {departments.map((dept) => {
             const Icon = DEPT_ICONS[dept];
             const accent = DEPT_ACCENT[dept];
-            const subGroups = USE_COUNT_SUBCATEGORIES[dept];
             const deptCounts = deptUseCounts[dept];
+
+            // Preferred subcategory order (as defined in constants), then any others alphabetically.
+            const preferredOrder = USE_COUNT_SUBCATEGORIES[dept].flatMap((g) => g.subcategoryNames);
+            const itemsBySubcategory = new Map<string, EquipmentUseCount[]>();
+            for (const c of deptCounts) {
+              const key = c.subcategory_name || 'Other';
+              const existing = itemsBySubcategory.get(key);
+              if (existing) existing.push(c);
+              else itemsBySubcategory.set(key, [c]);
+            }
+
+            const subcategoryGroups = Array.from(itemsBySubcategory.keys())
+              .sort((a, b) => {
+                const ia = preferredOrder.indexOf(a);
+                const ib = preferredOrder.indexOf(b);
+                if (ia !== -1 && ib !== -1) return ia - ib;
+                if (ia !== -1) return -1;
+                if (ib !== -1) return 1;
+                return a.localeCompare(b);
+              })
+              .map((label) => ({
+                label,
+                items: (itemsBySubcategory.get(label) || [])
+                  .slice()
+                  .sort((a, b) => b.use_count - a.use_count)
+                  .slice(0, 5),
+              }));
 
             return (
               <div key={dept} className="p-5 space-y-4">
@@ -147,11 +180,8 @@ export function EquipmentDashboardPage() {
                   </span>
                 </div>
 
-                {subGroups.map((group) => {
-                  const nameSet = new Set(group.subcategoryNames);
-                  const groupItems = deptCounts
-                    .filter((c) => nameSet.has(c.subcategory_name))
-                    .slice(0, 5);
+                {subcategoryGroups.map((group) => {
+                  const groupItems = group.items;
 
                   if (groupItems.length === 0) return null;
 

@@ -141,9 +141,11 @@ export const CATEGORY_TO_DEPARTMENT: Record<string, Department> = {
 
 export const USE_COUNT_SUBCATEGORIES: Record<Department, { label: string; subcategoryNames: string[] }[]> = {
   camera: [
-    { label: 'Camera Package', subcategoryNames: ['Camera Body', 'Camera Package Components', 'Camera Support'] },
+    { label: 'Camera Body', subcategoryNames: ['Camera Body'] },
     { label: 'Lens', subcategoryNames: ['Lens'] },
+    { label: 'Filters', subcategoryNames: ['Filters'] },
     { label: 'Special Rig', subcategoryNames: ['Special Rig'] },
+    { label: 'Camera Support', subcategoryNames: ['Camera Support'] },
   ],
   lights_grips: [
     { label: 'Lighting', subcategoryNames: ['Lighting'] },
