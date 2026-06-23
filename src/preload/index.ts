@@ -91,6 +91,7 @@ const ALLOWED_CHANNELS = new Set([
   'gdrive:config:set',
   'gdrive:connect',
   'gdrive:disconnect',
+  'gdrive:test',
   'app:getVersion',
 ]);
 

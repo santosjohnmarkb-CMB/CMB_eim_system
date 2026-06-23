@@ -45,6 +45,7 @@ export function SettingsPage() {
   const [gdriveFolderId, setGdriveFolderId] = useState('');
   const [savingGdrive, setSavingGdrive] = useState(false);
   const [connectingGdrive, setConnectingGdrive] = useState(false);
+  const [testingGdrive, setTestingGdrive] = useState(false);
 
   const [users, setUsers] = useState<User[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -116,6 +117,31 @@ export function SettingsPage() {
       toast.error(err.message || 'Failed to connect Google Drive');
     }
     setConnectingGdrive(false);
+  };
+
+  const handleTestGdrive = async () => {
+    setTestingGdrive(true);
+    try {
+      const res = await ipcInvoke<{
+        ok: boolean;
+        email: string;
+        folderId: string;
+        folderName: string;
+        usedFallback: boolean;
+      }>('gdrive:test');
+      if (res?.usedFallback) {
+        toast.error(
+          `Drive works, but the configured folder is not writable — archives will go to "My Drive" (${res.folderName}). Check the Folder ID and that ${res.email || 'the account'} has edit access.`,
+        );
+      } else {
+        toast.success(
+          `Success! Test file written to "${res.folderName}"${res.email ? ` as ${res.email}` : ''}. Archiving is ready.`,
+        );
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Google Drive test failed');
+    }
+    setTestingGdrive(false);
   };
 
   const handleDisconnectGdrive = async () => {
@@ -298,10 +324,10 @@ export function SettingsPage() {
             placeholder={gdrive?.has_client_secret ? '••••••••••••••••' : 'GOCSPX-...'}
           />
           <Input
-            label="Root Folder ID (optional — leave blank to use My Drive)"
+            label="Root Folder ID or URL (optional — leave blank to use My Drive)"
             value={gdriveFolderId}
             onChange={(e) => setGdriveFolderId(e.target.value)}
-            placeholder="Drive folder ID to nest the archive under"
+            placeholder="Paste the Drive folder link or its ID"
           />
           <div className="flex flex-wrap gap-3">
             <Button onClick={handleSaveGdrive} loading={savingGdrive}>Save Credentials</Button>
@@ -313,6 +339,15 @@ export function SettingsPage() {
             >
               {gdrive?.has_refresh_token ? 'Reconnect' : 'Connect Google Drive'}
             </Button>
+            {gdrive?.has_refresh_token && (
+              <Button
+                variant="secondary"
+                onClick={handleTestGdrive}
+                loading={testingGdrive}
+              >
+                Test Connection
+              </Button>
+            )}
             {gdrive?.has_refresh_token && (
               <Button variant="ghost" onClick={handleDisconnectGdrive}>Disconnect</Button>
             )}

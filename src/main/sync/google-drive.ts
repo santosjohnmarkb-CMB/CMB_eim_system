@@ -12,8 +12,15 @@ import { loadGoogleSecrets } from './secrets-store';
 // 127.0.0.1 with an OS-assigned port. This requires the OAuth client in
 // Google Cloud Console to be of type "Desktop app".
 // See: https://developers.google.com/identity/protocols/oauth2/native-app
+//
+// We request the full `drive` scope (not the narrower `drive.file`) so the app
+// can archive into a folder the operator picked/created in the Drive web UI.
+// `drive.file` only grants access to files this app itself created, which makes
+// it impossible to write into a user-chosen folder (Google returns HTTP 403
+// "Insufficient Permission"). Changing this scope requires the operator to
+// Disconnect and reconnect so consent is re-granted with the new scope.
 const SCOPES = [
-  'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/drive',
   'https://www.googleapis.com/auth/userinfo.email',
 ];
 const AUTH_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -220,7 +227,7 @@ class GoogleDriveService {
     cacheKey: string,
   ): Promise<string> {
     const { drive, config } = await this.getDriveClient();
-    const configuredRoot = config.folder_id || 'root';
+    const configuredRoot = extractFolderId(config.folder_id) || 'root';
     // Determine the effective parent: caller-supplied parentId wins, otherwise
     // we use the configured root (or its self-heal override once we've
     // discovered it's inaccessible).
@@ -234,23 +241,25 @@ class GoogleDriveService {
       // created ourselves comes back 404 there's nothing safe to fall back to.
       // Self-heal applies when the caller didn't pin a parentId AND the
       // configured root is something other than 'root'.
-      const is404 = isDriveNotFound(err);
+      const recoverable = isDriveNotFound(err) || isDrivePermissionDenied(err);
       const canSelfHeal =
-        is404 &&
+        recoverable &&
         parentId === null &&
         configuredRoot !== 'root' &&
         this.rootOverride !== 'root';
 
       if (!canSelfHeal) throw decorateDriveError(err, `lookup folder "${name}" under ${effectiveParent}`);
 
-      // Configured folder_id is unreachable for this OAuth token (most commonly:
-      // scope is drive.file but the folder wasn't created by this app). Switch
-      // to My Drive root for the rest of this process and retry. Operators can
-      // clear or fix the folder_id in Settings.
+      // Configured folder_id is unreachable for this OAuth token — either it
+      // doesn't exist for this account (404) or the account lacks write access
+      // to it (403). Switch to My Drive root for the rest of this process and
+      // retry so the document still gets archived. Operators can clear or fix
+      // the folder_id in Settings.
       console.warn(
         `[GoogleDrive] Configured folder_id "${configuredRoot}" is not accessible — ` +
-        `falling back to "My Drive" root. Clear the Folder ID in Settings → Google Drive ` +
-        `to silence this warning, or pick a folder this app created.`,
+        `falling back to "My Drive" root. Pick a folder owned by the connected ` +
+        `Google account (with edit access) in Settings → Google Drive, or clear ` +
+        `the Folder ID to silence this warning.`,
       );
       this.rootOverride = 'root';
       return await this.listOrCreateFolder(drive, 'root', name, cacheKey);
@@ -274,6 +283,8 @@ class GoogleDriveService {
       q: query,
       fields: 'files(id, name)',
       spaces: 'drive',
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
     });
 
     if (res.data.files && res.data.files.length > 0) {
@@ -289,6 +300,7 @@ class GoogleDriveService {
         parents: [effectiveParent],
       },
       fields: 'id',
+      supportsAllDrives: true,
     });
 
     const id = created.data.id!;
@@ -324,6 +336,8 @@ class GoogleDriveService {
         fields: 'files(id, name)',
         spaces: 'drive',
         pageSize: 1,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       });
 
       if (existing.data.files && existing.data.files.length > 0) {
@@ -333,6 +347,7 @@ class GoogleDriveService {
             fileId,
             media: { mimeType: 'application/pdf', body: body() },
             fields: 'id',
+            supportsAllDrives: true,
           });
           return fileId;
         } catch (updateErr) {
@@ -355,12 +370,109 @@ class GoogleDriveService {
           body: body(),
         },
         fields: 'id',
+        supportsAllDrives: true,
       });
 
       return res.data.id!;
     } catch (err) {
       throw decorateDriveError(err, `upload "${filename}" into folder ${folderId}`);
     }
+  }
+
+  /**
+   * Verifies the app can actually WRITE into the destination Drive folder. It
+   * uploads a tiny throwaway file into the configured folder (or My Drive root
+   * when none is set / it self-heals) and deletes it again. This exercises the
+   * exact permission that the auto-archive upload needs, so a green result here
+   * means real archives will land too.
+   */
+  async testConnection(): Promise<{
+    ok: boolean;
+    email: string;
+    folderId: string;
+    folderName: string;
+    usedFallback: boolean;
+  }> {
+    const { drive, config } = await this.getDriveClient();
+
+    let email = config.account_email || '';
+    if (!email) {
+      try {
+        const about = await drive.about.get({ fields: 'user(emailAddress)' });
+        email = about.data.user?.emailAddress || '';
+      } catch { /* non-fatal */ }
+    }
+
+    const configuredRoot = extractFolderId(config.folder_id) || 'root';
+
+    // Resolve the destination folder, reusing the same self-heal path the real
+    // archive uses so the test reflects production behaviour.
+    let folderId = 'root';
+    let folderName = 'My Drive';
+    let usedFallback = false;
+
+    if (configuredRoot !== 'root') {
+      try {
+        const meta = await drive.files.get({
+          fileId: configuredRoot,
+          fields: 'id, name',
+          supportsAllDrives: true,
+        });
+        folderId = meta.data.id || configuredRoot;
+        folderName = meta.data.name || configuredRoot;
+      } catch (err) {
+        if (!isDriveNotFound(err) && !isDrivePermissionDenied(err)) {
+          throw decorateDriveError(err, `open configured folder ${configuredRoot}`);
+        }
+        usedFallback = true; // configured folder unreachable → write goes to root
+      }
+    }
+
+    // Attempt the actual write into the resolved destination.
+    const filename = `__cmb-eim-connection-test-${Date.now()}.txt`;
+    const stream = new Readable();
+    stream.push(Buffer.from('CMB EIM Google Drive connection test. Safe to delete.', 'utf-8'));
+    stream.push(null);
+
+    let testFileId = '';
+    try {
+      const created = await drive.files.create({
+        requestBody: { name: filename, parents: [folderId] },
+        media: { mimeType: 'text/plain', body: stream },
+        fields: 'id',
+        supportsAllDrives: true,
+      });
+      testFileId = created.data.id || '';
+    } catch (err) {
+      // If the configured folder rejected the write, retry once against root so
+      // the operator learns Drive itself works, just not that folder.
+      if ((isDrivePermissionDenied(err) || isDriveNotFound(err)) && folderId !== 'root') {
+        usedFallback = true;
+        folderId = 'root';
+        folderName = 'My Drive';
+        const retryStream = new Readable();
+        retryStream.push(Buffer.from('CMB EIM Google Drive connection test. Safe to delete.', 'utf-8'));
+        retryStream.push(null);
+        const created = await drive.files.create({
+          requestBody: { name: filename, parents: [folderId] },
+          media: { mimeType: 'text/plain', body: retryStream },
+          fields: 'id',
+          supportsAllDrives: true,
+        });
+        testFileId = created.data.id || '';
+      } else {
+        throw decorateDriveError(err, `write test file into folder ${folderId}`);
+      }
+    }
+
+    // Clean up the throwaway file (best-effort).
+    if (testFileId) {
+      try {
+        await drive.files.delete({ fileId: testFileId, supportsAllDrives: true });
+      } catch { /* leave it; the name makes its purpose obvious */ }
+    }
+
+    return { ok: true, email, folderId, folderName, usedFallback };
   }
 
   clearFolderCache(): void {
@@ -413,6 +525,42 @@ function isDriveNotFound(err: unknown): boolean {
 }
 
 /**
+ * A Drive 403 means the OAuth account can reach the API but isn't allowed to
+ * perform the operation on the target resource — most commonly because the
+ * configured folder belongs to (or was shared read-only by) someone else, or
+ * the granted scope is too narrow. We treat it like a 404 for self-heal so a
+ * misconfigured Folder ID never silently drops the document.
+ */
+function isDrivePermissionDenied(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { code?: number | string; response?: { status?: number }; message?: string };
+  if (e.code === 403 || e.code === '403') return true;
+  if (e.response?.status === 403) return true;
+  return typeof e.message === 'string' && /insufficient permission|permission denied/i.test(e.message);
+}
+
+/**
+ * Accept either a bare Drive folder ID or a full folder URL pasted from the
+ * browser (e.g. https://drive.google.com/drive/folders/<id>?usp=drive_link)
+ * and return the bare ID. Returns '' for empty/unparseable input so callers
+ * fall back to "My Drive" root.
+ */
+export function extractFolderId(raw: string | null | undefined): string {
+  const value = (raw ?? '').trim();
+  if (!value) return '';
+  // Full URL form: .../folders/<id>  or  ...?id=<id>  or  .../d/<id>/...
+  const folderMatch = value.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (folderMatch) return folderMatch[1]!;
+  const dMatch = value.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (dMatch) return dMatch[1]!;
+  const idParam = value.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (idParam) return idParam[1]!;
+  // Bare ID (no slashes / query): use as-is.
+  if (/^[a-zA-Z0-9_-]+$/.test(value)) return value;
+  return '';
+}
+
+/**
  * Wrap an opaque Drive API error with the operation that triggered it so the
  * surfaced toast / log line names the failing step instead of the bare
  * "File not found." string Google returns.
@@ -423,7 +571,13 @@ function decorateDriveError(err: unknown, action: string): Error {
   const statusPart = status ? ` (HTTP ${status})` : '';
 
   let hint = '';
-  if (isDriveNotFound(err)) {
+  if (isDrivePermissionDenied(err)) {
+    hint =
+      ' Tip: the connected Google account lacks edit access to the configured folder, ' +
+      'or consent was granted before the full Drive scope was enabled. Disconnect and ' +
+      'reconnect in Settings → Google Drive, then make sure the Folder ID points to a ' +
+      'folder this account can edit (or clear it to use My Drive root).';
+  } else if (isDriveNotFound(err)) {
     hint =
       ' Tip: this usually means the configured Google Drive Folder ID points to a folder ' +
       'this app cannot access. Clear the Folder ID in Settings → Google Drive (the app will ' +

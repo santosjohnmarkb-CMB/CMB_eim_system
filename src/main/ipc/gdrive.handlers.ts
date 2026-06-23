@@ -21,6 +21,7 @@ import {
   loadGoogleSecrets,
   clearGoogleSecrets,
 } from '../sync/secrets-store';
+import { extractFolderId } from '../sync/google-drive';
 
 export function registerGoogleDriveHandlers(): void {
   const db = getDatabase();
@@ -51,7 +52,9 @@ export function registerGoogleDriveHandlers(): void {
       | undefined;
 
     const clientId = config.client_id || '';
-    const folderId = config.folder_id || '';
+    // Operators commonly paste a full Drive folder URL; store the bare ID so the
+    // archive resolver can use it directly as a parent.
+    const folderId = extractFolderId(config.folder_id);
 
     // Partial-update semantics for the secret: if the renderer didn't include a
     // `client_secret` field we keep whatever is on file. The UI only sends the
@@ -105,6 +108,17 @@ export function registerGoogleDriveHandlers(): void {
       ).run(tokens.email || '', existing.id);
     }
     return buildGdriveConfigPayload();
+  });
+
+  // Uploads (and deletes) a throwaway file to confirm the app can actually write
+  // into the destination folder — the exact permission auto-archive needs.
+  ipcMain.handle('gdrive:test', async (event: any) => {
+    requireAdmin(event);
+    const { googleDriveService } = await import('../sync/google-drive');
+    if (!(await googleDriveService.isConnected())) {
+      throw new Error('Google Drive is not connected. Save credentials and click Connect first.');
+    }
+    return googleDriveService.testConnection();
   });
 
   ipcMain.handle('gdrive:disconnect', async (event: any) => {
