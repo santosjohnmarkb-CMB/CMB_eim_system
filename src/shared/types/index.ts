@@ -410,6 +410,13 @@ export interface SyncStatusInfo {
   status: SyncStatus;
   lastSyncAt: string | null;
   pendingChanges: number;
+  // True when the cloud (Supabase) database is missing columns/tables the app
+  // expects — i.e. database/supabase-migration.sql needs to be (re)run. Pending
+  // changes can never clear while this is true.
+  schemaOutdated?: boolean;
+  // Human-readable descriptions of the detected schema gaps, e.g.
+  // "maintenance_tickets: missing column 'completion_outcome'".
+  schemaIssues?: string[];
 }
 
 export interface SyncConfig {

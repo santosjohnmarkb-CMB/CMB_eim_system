@@ -2,6 +2,7 @@ import { getDatabase } from '../database/index';
 import { getSupabase } from './supabase';
 import { cloudService } from './cloud-service';
 import { offlineQueue, coerceForCloud } from './offline-queue';
+import { recordSchemaError } from './schema-health';
 
 const EIM_TABLES = [
   'equipment_assets', 'asset_status_log',
@@ -83,6 +84,7 @@ export async function syncOperationalWithCloud(): Promise<void> {
         await cloudService.upsertMany(table, toPush.map(r => coerceForCloud(r)));
       }
     } catch (err: any) {
+      recordSchemaError(table, err);
       if (err?.code === 'PGRST205') {
         console.warn(`[OperationalSync] Table '${table}' not found in Supabase — run the migration SQL to create EIM tables.`);
       } else {

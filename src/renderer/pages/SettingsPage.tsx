@@ -4,7 +4,7 @@ import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
 import { Modal } from '../components/common/Modal';
 import { useToast } from '../hooks';
-import { RefreshCw, Database, Cloud, Users, Plus, Edit2, Trash2, HardDrive } from 'lucide-react';
+import { RefreshCw, Database, Cloud, Users, Plus, Edit2, Trash2, HardDrive, AlertTriangle } from 'lucide-react';
 import { ipcInvoke } from '../lib/ipc';
 import type { User } from '../../shared/types';
 import { DEPARTMENT_CONFIG } from '../../shared/constants';
@@ -165,7 +165,11 @@ export function SettingsPage() {
 
   const handleForceSync = async () => {
     await syncStore.forceSync();
-    toast.success('Sync completed');
+    if (useSyncStore.getState().schemaOutdated) {
+      toast.error('Sync blocked: the cloud database needs migration. See the warning below.');
+    } else {
+      toast.success('Sync completed');
+    }
   };
 
   const openAddUser = () => {
@@ -370,8 +374,35 @@ export function SettingsPage() {
         <div className="space-y-2 text-sm">
           <div className="flex justify-between"><span className="text-surface-400">Status</span><span className="text-surface-200 capitalize">{syncStore.status}</span></div>
           <div className="flex justify-between"><span className="text-surface-400">Last Sync</span><span className="text-surface-200">{syncStore.lastSyncAt ? new Date(syncStore.lastSyncAt).toLocaleString() : 'Never'}</span></div>
-          <div className="flex justify-between"><span className="text-surface-400">Pending Changes</span><span className="text-surface-200">{syncStore.pendingChanges}</span></div>
+          <div className="flex justify-between">
+            <span className="text-surface-400">Pending Changes</span>
+            <span className={syncStore.schemaOutdated && syncStore.pendingChanges > 0 ? 'text-warning-400' : 'text-surface-200'}>
+              {syncStore.pendingChanges}
+            </span>
+          </div>
         </div>
+
+        {syncStore.schemaOutdated && (
+          <div className="mt-4 rounded-lg border border-warning-500/40 bg-warning-500/10 p-3">
+            <div className="flex items-center gap-2 mb-1.5">
+              <AlertTriangle size={16} className="text-warning-400 flex-shrink-0" />
+              <p className="text-sm font-semibold text-warning-400">Cloud database needs migration</p>
+            </div>
+            <p className="text-2xs text-surface-400 mb-2">
+              Your changes can&rsquo;t sync because the Supabase database is missing tables or
+              columns this app expects. Run <code className="text-surface-300">database/supabase-migration.sql</code> in
+              the Supabase SQL Editor, then press Force Sync.
+            </p>
+            {syncStore.schemaIssues.length > 0 && (
+              <ul className="list-disc list-inside space-y-0.5 text-2xs text-surface-400">
+                {syncStore.schemaIssues.map((issue, i) => (
+                  <li key={i}>{issue}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
         <Button variant="secondary" onClick={handleForceSync} className="mt-4"><RefreshCw size={14} /> Force Sync</Button>
       </div>
 

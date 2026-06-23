@@ -265,3 +265,15 @@ ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (
 -- ═══════════════════════════════════════════════════
 
 ALTER TABLE maintenance_tickets ADD COLUMN IF NOT EXISTS completion_outcome TEXT;
+
+-- ═══════════════════════════════════════════════════
+-- Migration: Google Drive auto-archive bookkeeping
+-- ═══════════════════════════════════════════════════
+-- Mirrors local migration 020_drive_archive. Only maintenance_tickets is synced
+-- to the cloud (equipment_loans / purchase_requests are local-only), so just the
+-- ticket needs the archive columns here. Without these, every maintenance_tickets
+-- upsert fails with PGRST204 ("Could not find the 'archived_at' column"), which in
+-- turn fails its maintenance_notes children with a foreign-key violation.
+
+ALTER TABLE maintenance_tickets ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+ALTER TABLE maintenance_tickets ADD COLUMN IF NOT EXISTS drive_file_id TEXT;

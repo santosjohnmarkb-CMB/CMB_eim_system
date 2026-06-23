@@ -2,6 +2,7 @@ import { getDatabase } from '../database/index';
 import { getSupabase } from './supabase';
 import { cloudService } from './cloud-service';
 import { offlineQueue } from './offline-queue';
+import { recordSchemaError } from './schema-health';
 
 const CATALOG_TABLES = ['categories', 'subcategories', 'equipment_items', 'package_definitions', 'package_items'] as const;
 
@@ -59,6 +60,7 @@ export async function syncCatalogWithCloud(): Promise<void> {
         }
       }
     } catch (err) {
+      recordSchemaError(table, err);
       console.error(`[CatalogSync] Failed to sync ${table}:`, err);
     }
   }

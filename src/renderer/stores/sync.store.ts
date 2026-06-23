@@ -6,6 +6,8 @@ interface SyncState {
   status: SyncStatus;
   lastSyncAt: string | null;
   pendingChanges: number;
+  schemaOutdated: boolean;
+  schemaIssues: string[];
   config: SyncConfig | null;
   initialize: () => void;
   cleanup: () => void;
@@ -19,7 +21,13 @@ export const useSyncStore = create<SyncState>((set, get) => {
   const statusHandler = (...args: unknown[]) => {
     const info = args[0] as SyncStatusInfo;
     if (info) {
-      set({ status: info.status, lastSyncAt: info.lastSyncAt, pendingChanges: info.pendingChanges });
+      set({
+        status: info.status,
+        lastSyncAt: info.lastSyncAt,
+        pendingChanges: info.pendingChanges,
+        schemaOutdated: info.schemaOutdated ?? false,
+        schemaIssues: info.schemaIssues ?? [],
+      });
     }
   };
 
@@ -27,6 +35,8 @@ export const useSyncStore = create<SyncState>((set, get) => {
     status: 'offline',
     lastSyncAt: null,
     pendingChanges: 0,
+    schemaOutdated: false,
+    schemaIssues: [],
     config: null,
 
     initialize: () => {
@@ -42,7 +52,13 @@ export const useSyncStore = create<SyncState>((set, get) => {
     fetchStatus: async () => {
       try {
         const info = await ipcInvoke<SyncStatusInfo>('sync:status');
-        set({ status: info.status, lastSyncAt: info.lastSyncAt, pendingChanges: info.pendingChanges });
+        set({
+          status: info.status,
+          lastSyncAt: info.lastSyncAt,
+          pendingChanges: info.pendingChanges,
+          schemaOutdated: info.schemaOutdated ?? false,
+          schemaIssues: info.schemaIssues ?? [],
+        });
       } catch { /* offline */ }
     },
 
