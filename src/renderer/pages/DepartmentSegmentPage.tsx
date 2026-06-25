@@ -41,6 +41,7 @@ const KANBAN_COLUMNS = ['REPORTED', 'ASSESSED', 'IN_PROGRESS', 'COMPLETED'] as c
 function PartsTab({ dept }: { dept: Department }) {
   const { items: allItems, loading, fetchAll, create } = usePartsStore();
   const toast = useToast();
+  const isViewer = useAuthStore((s) => s.user?.role === 'viewer');
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ name: '', description: '', category: 'spare', unit_of_measure: 'unit', unit_cost: 0, initial_stock: 0, reorder_point: 5, reorder_qty: 10, location: 'Main Warehouse' });
@@ -99,7 +100,7 @@ function PartsTab({ dept }: { dept: Department }) {
       <div className="flex items-center gap-3">
         <SearchBox value={search} onChange={setSearch} placeholder="Search parts..." className="w-64" />
         <div className="flex-1" />
-        <Button onClick={() => setShowAdd(true)}><Plus size={16} /> Add Part</Button>
+        {!isViewer && <Button onClick={() => setShowAdd(true)}><Plus size={16} /> Add Part</Button>}
       </div>
       <div className="glass-panel rounded-xl overflow-hidden">
         <DataTable columns={columns} data={filtered} loading={loading} emptyMessage="No parts found" />
@@ -139,6 +140,7 @@ function PartsTab({ dept }: { dept: Department }) {
 function VendorsTab({ dept }: { dept: Department }) {
   const { vendors: allVendors, loading, fetchAll, create } = useVendorsStore();
   const toast = useToast();
+  const isViewer = useAuthStore((s) => s.user?.role === 'viewer');
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ name: '', contact_person: '', phone: '', email: '', address: '', payment_terms: '', notes: '' });
@@ -181,7 +183,7 @@ function VendorsTab({ dept }: { dept: Department }) {
       <div className="flex items-center gap-3">
         <SearchBox value={search} onChange={setSearch} placeholder="Search vendors..." className="w-64" />
         <div className="flex-1" />
-        <Button onClick={() => setShowAdd(true)}><Plus size={16} /> Add Vendor</Button>
+        {!isViewer && <Button onClick={() => setShowAdd(true)}><Plus size={16} /> Add Vendor</Button>}
       </div>
       <div className="glass-panel rounded-xl overflow-hidden">
         <DataTable columns={columns} data={filtered} loading={loading} emptyMessage="No vendors found" />
@@ -216,6 +218,7 @@ function fmtDate(d: string | null | undefined): string {
 
 function ReportsTab({ dept, scrollTarget }: { dept: Department; scrollTarget?: string }) {
   const navigate = useNavigate();
+  const isViewer = useAuthStore((s) => s.user?.role === 'viewer');
   const openTicketsRef = useRef<HTMLDivElement>(null);
   const { items, categories } = useEquipmentStore();
   const { tickets, getCompletedHistory } = useMaintenanceStore();
@@ -343,12 +346,14 @@ function ReportsTab({ dept, scrollTarget }: { dept: Department; scrollTarget?: s
           <Wrench size={16} className="text-surface-400" />
           <h3 className="text-sm font-semibold text-surface-200">Repair Tally</h3>
           <span className="text-xs text-surface-500">{openTickets.length} open</span>
-          <button
-            onClick={() => navigate('/maintenance/new')}
-            className="ml-auto flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium"
-          >
-            <Plus size={13} /> New Ticket
-          </button>
+          {!isViewer && (
+            <button
+              onClick={() => navigate('/maintenance/new')}
+              className="ml-auto flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium"
+            >
+              <Plus size={13} /> New Ticket
+            </button>
+          )}
         </div>
         <div className="flex gap-3 overflow-x-auto pb-2">
           {kanbanData.map(({ status, config, tickets: colTickets }) => (

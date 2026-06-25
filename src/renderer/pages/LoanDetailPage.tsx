@@ -28,7 +28,9 @@ export function LoanDetailPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const { getById, update, returnItems, returnOrder, remove } = useLoansStore();
-  const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
+  const role = useAuthStore((s) => s.user?.role);
+  const isAdmin = role === 'admin';
+  const isViewer = role === 'viewer';
 
   const [loan, setLoan] = useState<EquipmentLoanWithItems | null>(null);
   const [loading, setLoading] = useState(true);
@@ -194,13 +196,13 @@ export function LoanDetailPage() {
           <p className="text-sm text-surface-500">{DEPARTMENT_CONFIG[loan.department].label} · {dirCfg.description}</p>
         </div>
         <div className="flex gap-2">
-          {isOutward && (
+          {isOutward && !isViewer && (
             <Button variant="secondary" onClick={handlePrintReleaseForm}><FileSignature size={16} /> Print Release Form</Button>
           )}
           {isAdmin && (
             <Button variant="secondary" onClick={openEdit}><Pencil size={16} /> Edit</Button>
           )}
-          {outItems.length > 0 && (
+          {outItems.length > 0 && !isViewer && (
             <Button onClick={handleReturnAll} loading={busy}><RotateCcw size={16} /> Return All</Button>
           )}
         </div>
@@ -264,7 +266,7 @@ export function LoanDetailPage() {
                   )}
                 </td>
                 <td className="px-5 py-3 text-right">
-                  {it.status === 'OUT' && (
+                  {it.status === 'OUT' && !isViewer && (
                     <button
                       onClick={() => handleReturnItem(it.id)}
                       disabled={busy}

@@ -35,7 +35,10 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function RoleGuard({ roles, children }: { roles: string[]; children: React.ReactNode }) {
   const role = useAuthStore((s) => s.user?.role);
   if (!role || (!roles.includes(role) && role !== 'admin')) {
-    return <Navigate to="/dashboard" replace />;
+    // Bounce to the role-aware landing instead of a fixed page, so a blocked
+    // user (e.g. a viewer hitting a write-only route) never lands on another
+    // route they cannot access.
+    return <Navigate to="/" replace />;
   }
   return <>{children}</>;
 }
@@ -53,8 +56,11 @@ function DepartmentGuard({ children }: { children: React.ReactNode }) {
 
 function DefaultRedirect() {
   const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.role === 'admin';
-  if (isAdmin) return <Navigate to="/dashboard" replace />;
+  // Admins and read-only viewers both land on the combined, cross-department
+  // dashboard; department users land in their own department workspace.
+  if (user?.role === 'admin' || user?.role === 'viewer') {
+    return <Navigate to="/dashboard" replace />;
+  }
   const dept = user?.department || 'camera';
   return <Navigate to={`/dept/${dept}`} replace />;
 }
@@ -83,7 +89,7 @@ export default function App() {
               <Layout>
                 <Routes>
                   <Route path="/" element={<DefaultRedirect />} />
-                  <Route path="/dashboard" element={<RoleGuard roles={[]}><DashboardPage /></RoleGuard>} />
+                  <Route path="/dashboard" element={<RoleGuard roles={['viewer']}><DashboardPage /></RoleGuard>} />
                   <Route path="/equipment" element={<EquipmentDashboardPage />} />
                   <Route path="/equipment/new" element={<RoleGuard roles={['inventory_manager']}><EquipmentAddPage /></RoleGuard>} />
                   <Route path="/equipment/use-count" element={<EquipmentUseCountPage />} />
@@ -98,7 +104,7 @@ export default function App() {
                   <Route path="/purchase-requests/:id" element={<PurchaseRequestDetailPage />} />
                   <Route path="/maintenance" element={<MaintenanceQueuePage />} />
                   <Route path="/maintenance/new" element={<RoleGuard roles={['equipment_manager', 'inventory_manager', 'maintenance_lead']}><MaintenanceNewPage /></RoleGuard>} />
-                  <Route path="/maintenance/:id" element={<RoleGuard roles={['equipment_manager', 'inventory_manager', 'maintenance_lead', 'technician']}><MaintenanceDetailPage /></RoleGuard>} />
+                  <Route path="/maintenance/:id" element={<RoleGuard roles={['equipment_manager', 'inventory_manager', 'maintenance_lead', 'technician', 'viewer']}><MaintenanceDetailPage /></RoleGuard>} />
                   <Route path="/parts/adjust" element={<RoleGuard roles={['parts_clerk']}><StockAdjustmentPage /></RoleGuard>} />
                   <Route path="/parts/:id" element={<RoleGuard roles={['maintenance_lead', 'parts_clerk']}><PartsDetailPage /></RoleGuard>} />
                   <Route path="/settings" element={<RoleGuard roles={[]}><SettingsPage /></RoleGuard>} />

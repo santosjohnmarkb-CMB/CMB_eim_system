@@ -81,6 +81,7 @@ export function Sidebar() {
 
   const userRole = user?.role || '';
   const isAdmin = userRole === 'admin';
+  const isViewer = userRole === 'viewer';
   const userDept = user?.department as Department | null;
 
   const [equipmentOpen, setEquipmentOpen] = useState(
@@ -96,41 +97,54 @@ export function Sidebar() {
   const isEquipmentDeptActive = (dept: Department) =>
     location.pathname === `/equipment/${dept}`;
 
-  if (isAdmin) {
+  // Admins get the full cross-department nav. Viewers get the same cross-department
+  // layout (so they can see both departments) but read-only: no Equipment
+  // management and no Settings.
+  if (isAdmin || isViewer) {
     return (
       <div className="w-[260px] h-full glass-panel flex flex-col border-r border-surface-800/50">
         <div className="px-5 py-5 border-b border-surface-800/50">
           <img src={eimLogo} alt="CMB EIM" className="w-full object-contain" />
         </div>
 
+        {isViewer && (
+          <div className="px-3 pt-3 pb-1">
+            <div className="flex items-center gap-2 px-3 py-2 bg-surface-900 rounded-lg">
+              <span className="text-xs font-semibold text-surface-300">View-Only Access</span>
+            </div>
+          </div>
+        )}
+
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           <NavButton
             icon={<LayoutDashboard size={20} />}
-            label="Admin Dashboard"
+            label={isViewer ? 'Dashboard' : 'Admin Dashboard'}
             active={location.pathname === '/dashboard'}
             onClick={() => navigate('/dashboard')}
           />
 
-          {/* Equipment — collapsible */}
-          <CollapsibleSection
-            icon={<Package size={20} />}
-            label="Equipment"
-            open={equipmentOpen}
-            onToggle={() => {
-              if (!equipmentOpen) navigate('/equipment');
-              setEquipmentOpen(!equipmentOpen);
-            }}
-            isActive={location.pathname.startsWith('/equipment')}
-          >
-            {(Object.keys(DEPARTMENT_CONFIG) as Department[]).map((dept) => (
-              <DeptSubItem
-                key={dept}
-                dept={dept}
-                active={isEquipmentDeptActive(dept)}
-                onClick={() => navigate(`/equipment/${dept}`)}
-              />
-            ))}
-          </CollapsibleSection>
+          {/* Equipment — collapsible (admins only; viewers are read-only) */}
+          {isAdmin && (
+            <CollapsibleSection
+              icon={<Package size={20} />}
+              label="Equipment"
+              open={equipmentOpen}
+              onToggle={() => {
+                if (!equipmentOpen) navigate('/equipment');
+                setEquipmentOpen(!equipmentOpen);
+              }}
+              isActive={location.pathname.startsWith('/equipment')}
+            >
+              {(Object.keys(DEPARTMENT_CONFIG) as Department[]).map((dept) => (
+                <DeptSubItem
+                  key={dept}
+                  dept={dept}
+                  active={isEquipmentDeptActive(dept)}
+                  onClick={() => navigate(`/equipment/${dept}`)}
+                />
+              ))}
+            </CollapsibleSection>
+          )}
 
           <NavButton
             icon={<Wrench size={20} />}
@@ -153,12 +167,14 @@ export function Sidebar() {
             onClick={() => navigate('/purchase-requests')}
           />
 
-          <NavButton
-            icon={<Settings size={20} />}
-            label="Settings"
-            active={location.pathname === '/settings'}
-            onClick={() => navigate('/settings')}
-          />
+          {isAdmin && (
+            <NavButton
+              icon={<Settings size={20} />}
+              label="Settings"
+              active={location.pathname === '/settings'}
+              onClick={() => navigate('/settings')}
+            />
+          )}
         </nav>
 
         <UserFooter user={user} version={version} onLogout={handleLogout} />

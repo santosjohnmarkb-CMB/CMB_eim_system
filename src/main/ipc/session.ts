@@ -41,6 +41,17 @@ export function requireAdmin(event: IpcMainInvokeEvent): SessionUser {
   return user;
 }
 
+// The viewer role is a cross-department, read-only account: it can see every
+// department but must never mutate data. Use this in place of requireSession on
+// any handler that writes, so viewers are blocked server-side regardless of UI.
+export function requireWriteAccess(event: IpcMainInvokeEvent): SessionUser {
+  const user = requireSession(event);
+  if (user.role === 'viewer') {
+    throw new Error('Your account has view-only access and cannot make changes.');
+  }
+  return user;
+}
+
 export function requireRole(event: IpcMainInvokeEvent, ...roles: string[]): SessionUser {
   const user = requireSession(event);
   if (!roles.includes(user.role)) {

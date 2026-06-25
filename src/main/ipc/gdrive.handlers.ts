@@ -110,6 +110,37 @@ export function registerGoogleDriveHandlers(): void {
     return buildGdriveConfigPayload();
   });
 
+  // Creates (or reuses) an app-owned root folder and stores its ID as the
+  // archive destination. The operator can then move this folder anywhere in
+  // Drive; archiving keeps working because we reference it by stable ID.
+  ipcMain.handle('gdrive:createFolder', async (event: any) => {
+    requireAdmin(event);
+    const { googleDriveService } = await import('../sync/google-drive');
+    if (!(await googleDriveService.isConnected())) {
+      throw new Error('Google Drive is not connected. Save credentials and click Connect first.');
+    }
+    const folder = await googleDriveService.createArchiveFolder();
+
+    const existing = db.prepare('SELECT id FROM google_drive_config LIMIT 1').get() as
+      | { id: string }
+      | undefined;
+    if (existing) {
+      db.prepare(
+        `UPDATE google_drive_config SET folder_id = ?, updated_at = datetime('now') WHERE id = ?`,
+      ).run(folder.id, existing.id);
+    } else {
+      db.prepare(
+        `INSERT INTO google_drive_config (id, client_id, folder_id, account_email)
+         VALUES (?, '', ?, '')`,
+      ).run(uuidv4(), folder.id);
+    }
+
+    // A fresh destination invalidates any cached folder lookups from a prior one.
+    googleDriveService.clearFolderCache();
+
+    return { folder, config: buildGdriveConfigPayload() };
+  });
+
   // Uploads (and deletes) a throwaway file to confirm the app can actually write
   // into the destination folder — the exact permission auto-archive needs.
   ipcMain.handle('gdrive:test', async (event: any) => {

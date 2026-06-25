@@ -46,6 +46,7 @@ export function SettingsPage() {
   const [savingGdrive, setSavingGdrive] = useState(false);
   const [connectingGdrive, setConnectingGdrive] = useState(false);
   const [testingGdrive, setTestingGdrive] = useState(false);
+  const [creatingFolder, setCreatingFolder] = useState(false);
 
   const [users, setUsers] = useState<User[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -117,6 +118,24 @@ export function SettingsPage() {
       toast.error(err.message || 'Failed to connect Google Drive');
     }
     setConnectingGdrive(false);
+  };
+
+  const handleCreateGdriveFolder = async () => {
+    setCreatingFolder(true);
+    try {
+      const res = await ipcInvoke<{
+        folder: { id: string; name: string; link: string };
+        config: GDriveConfig | null;
+      }>('gdrive:createFolder');
+      if (res?.config) setGdrive(res.config);
+      setGdriveFolderId(res?.folder?.id || '');
+      toast.success(
+        `Created "${res?.folder?.name}" and set it as the archive destination. You can move this folder anywhere in Drive.`,
+      );
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create archive folder');
+    }
+    setCreatingFolder(false);
   };
 
   const handleTestGdrive = async () => {
@@ -338,11 +357,17 @@ export function SettingsPage() {
             placeholder={gdrive?.has_client_secret ? '••••••••••••••••' : 'GOCSPX-...'}
           />
           <Input
-            label="Root Folder ID or URL (optional — leave blank to use My Drive)"
+            label="Archive Folder ID (auto-filled by Create Archive Folder)"
             value={gdriveFolderId}
             onChange={(e) => setGdriveFolderId(e.target.value)}
-            placeholder="Paste the Drive folder link or its ID"
+            placeholder="Leave blank to use My Drive, or click Create Archive Folder"
           />
+          <p className="text-2xs text-surface-500 -mt-2">
+            Click <span className="text-surface-300">Create Archive Folder</span> to make an
+            app-owned folder in your Drive and use it as the destination. You can then move that
+            folder anywhere in Google Drive — archiving keeps working because it&rsquo;s tracked
+            by ID.
+          </p>
           <div className="flex flex-wrap gap-3">
             <Button onClick={handleSaveGdrive} loading={savingGdrive}>Save Credentials</Button>
             <Button
@@ -353,6 +378,15 @@ export function SettingsPage() {
             >
               {gdrive?.has_refresh_token ? 'Reconnect' : 'Connect Google Drive'}
             </Button>
+            {gdrive?.has_refresh_token && (
+              <Button
+                variant="secondary"
+                onClick={handleCreateGdriveFolder}
+                loading={creatingFolder}
+              >
+                Create Archive Folder
+              </Button>
+            )}
             {gdrive?.has_refresh_token && (
               <Button
                 variant="secondary"

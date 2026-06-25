@@ -53,14 +53,18 @@ export function buildPurchaseRequestForm(req: PurchaseRequest): string {
     .map((item, idx) => {
       const typeLabel = REQUEST_TYPE_CONFIG[item.request_type]?.label || item.request_type;
       const heading = multiple ? `<h3 style="margin:14px 0 6px;">Equipment ${idx + 1}</h3>` : '';
-      return `${heading}
+      // Single-equipment requests stay on one page; with multiple items every
+      // equipment after the first starts on its own page (Equipment 2 on page 2, etc.).
+      const wrapStyle = `page-break-inside:avoid;${idx > 0 ? ' page-break-before:always;' : ''}`;
+      return `<div style="${wrapStyle}">${heading}
         <div class="grid">
           <div class="field"><label>Requested Asset / Item</label><span>${escapeHtml(item.requested_asset)}</span></div>
           <div class="field"><label>Request Type</label><span>${escapeHtml(typeLabel)}</span></div>
           <div class="field"><label>Current Quantity On Hand</label><span>${escapeHtml(String(item.current_quantity))}</span></div>
           <div class="field"><label>Requested Quantity</label><span>${escapeHtml(String(item.requested_quantity))}</span></div>
           <div class="field"><label>Supplier</label><span>${escapeHtml(item.supplier || '') || '—'}</span></div>
-        </div>`;
+        </div>
+      </div>`;
     })
     .join('');
 

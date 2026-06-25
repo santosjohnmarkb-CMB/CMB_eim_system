@@ -4,10 +4,12 @@ import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT } from '../../shared/constant
 import type { Department } from '../../shared/constants';
 
 // Returns the department the current session is scoped to, or null for admins
-// (and unauthenticated callers), who are allowed to see every department.
+// and viewers (and unauthenticated callers), who are allowed to see every
+// department. Viewers get cross-department visibility but are read-only and are
+// blocked from writes by requireWriteAccess on the mutating handlers.
 export function sessionDepartment(event: IpcMainInvokeEvent): Department | null {
   const user = getSession(event);
-  if (!user || user.role === 'admin') return null;
+  if (!user || user.role === 'admin' || user.role === 'viewer') return null;
   const dept = user.department;
   if (dept === 'camera' || dept === 'lights_grips') return dept;
   return null;

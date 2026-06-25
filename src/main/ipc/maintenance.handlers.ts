@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../database/index';
-import { requireSession } from './session';
+import { requireSession, requireWriteAccess } from './session';
 import { MaintenanceTicketCreateSchema, MaintenanceTicketUpdateSchema, MaintenanceNoteSchema, TicketActionSchema, TicketActionUpdateSchema } from '../../shared/schemas';
 import { pushOperationalToCloud } from '../sync/operational-sync';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
@@ -94,7 +94,7 @@ export function registerMaintenanceHandlers(): void {
   });
 
   ipcMain.handle('db:maintenance:create', (event: any, data: unknown) => {
-    const user = requireSession(event);
+    const user = requireWriteAccess(event);
     const input = MaintenanceTicketCreateSchema.parse(data);
     assertEquipmentInDepartment(db, event, input.equipment_id);
     const id = uuidv4();
@@ -152,7 +152,7 @@ export function registerMaintenanceHandlers(): void {
   });
 
   ipcMain.handle('db:maintenance:update', (event: any, id: string, data: unknown) => {
-    requireSession(event);
+    requireWriteAccess(event);
     const input = MaintenanceTicketUpdateSchema.parse(data);
     const fields: string[] = [];
     const values: any[] = [];
@@ -169,7 +169,7 @@ export function registerMaintenanceHandlers(): void {
   });
 
   ipcMain.handle('db:maintenance:updateStatus', (event: any, id: string, newStatus: string, outcome?: string | null) => {
-    const user = requireSession(event);
+    const user = requireWriteAccess(event);
     const ticket: any = db.prepare('SELECT * FROM maintenance_tickets WHERE id = ?').get(id);
     if (!ticket) throw new Error('Ticket not found');
 
@@ -295,7 +295,7 @@ export function registerMaintenanceHandlers(): void {
   });
 
   ipcMain.handle('db:maintenance:addNote', (event: any, data: unknown) => {
-    requireSession(event);
+    requireWriteAccess(event);
     const input = MaintenanceNoteSchema.parse(data);
     const id = uuidv4();
     db.prepare(`INSERT INTO maintenance_notes (id, ticket_id, author, note_text, note_type) VALUES (?, ?, ?, ?, ?)`)
@@ -310,7 +310,7 @@ export function registerMaintenanceHandlers(): void {
   });
 
   ipcMain.handle('db:maintenance:consumeParts', (event: any, ticketId: string, parts: { part_id: string; qty: number }[]) => {
-    const user = requireSession(event);
+    const user = requireWriteAccess(event);
     const tx = db.transaction(() => {
       let totalCost = 0;
       for (const part of parts) {
@@ -339,7 +339,7 @@ export function registerMaintenanceHandlers(): void {
   });
 
   ipcMain.handle('db:maintenance:createSchedule', (event: any, data: unknown) => {
-    requireSession(event);
+    requireWriteAccess(event);
     const id = uuidv4();
     const input = data as any;
     const now = new Date().toISOString();
@@ -350,7 +350,7 @@ export function registerMaintenanceHandlers(): void {
   });
 
   ipcMain.handle('db:maintenance:updateSchedule', (event: any, id: string, data: any) => {
-    requireSession(event);
+    requireWriteAccess(event);
     const fields: string[] = [];
     const values: any[] = [];
     for (const key of ['schedule_type', 'interval_days', 'interval_rentals', 'description', 'next_due_date', 'is_active']) {
@@ -364,7 +364,7 @@ export function registerMaintenanceHandlers(): void {
   });
 
   ipcMain.handle('db:maintenance:deleteSchedule', (event: any, id: string) => {
-    requireSession(event);
+    requireWriteAccess(event);
     db.prepare("UPDATE preventive_schedules SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(id);
     return { success: true };
   });
@@ -408,7 +408,7 @@ export function registerMaintenanceHandlers(): void {
   });
 
   ipcMain.handle('db:maintenance:addAction', (event: any, data: unknown) => {
-    requireSession(event);
+    requireWriteAccess(event);
     const input = TicketActionSchema.parse(data);
     const id = uuidv4();
     db.prepare(`INSERT INTO ticket_actions (id, ticket_id, action_date, action_taken, remarks, personnel) VALUES (?, ?, ?, ?, ?, ?)`)
@@ -419,7 +419,7 @@ export function registerMaintenanceHandlers(): void {
   });
 
   ipcMain.handle('db:maintenance:updateAction', (event: any, id: string, data: unknown) => {
-    requireSession(event);
+    requireWriteAccess(event);
     const input = TicketActionUpdateSchema.parse(data);
     const fields: string[] = [];
     const values: any[] = [];
@@ -435,7 +435,7 @@ export function registerMaintenanceHandlers(): void {
   });
 
   ipcMain.handle('db:maintenance:deleteAction', (event: any, id: string) => {
-    requireSession(event);
+    requireWriteAccess(event);
     db.prepare('DELETE FROM ticket_actions WHERE id = ?').run(id);
     return { success: true };
   });

@@ -48,7 +48,9 @@ export function LoansPage() {
   const user = useAuthStore((s) => s.user);
 
   const isAdmin = user?.role === 'admin';
-  const lockedDept = !isAdmin ? (user?.department as Department | null) : null;
+  const isViewer = user?.role === 'viewer';
+  // Admins and viewers see both departments; department users are locked to theirs.
+  const lockedDept = (!isAdmin && !isViewer) ? (user?.department as Department | null) : null;
 
   const [direction, setDirection] = useState<LoanDirection>('OUTWARD');
   const isOutward = direction === 'OUTWARD';
@@ -142,7 +144,9 @@ export function LoansPage() {
           </p>
         </div>
         <Button variant="secondary" onClick={printList}><Printer size={16} /> Print List</Button>
-        <Button onClick={() => navigate('/loans/new', { state: { department: activeDept, direction } })}><Plus size={16} /> New Loan</Button>
+        {!isViewer && (
+          <Button onClick={() => navigate('/loans/new', { state: { department: activeDept, direction } })}><Plus size={16} /> New Loan</Button>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-3">

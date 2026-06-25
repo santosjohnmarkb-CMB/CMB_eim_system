@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../database/index';
-import { requireSession } from './session';
+import { requireSession, requireWriteAccess } from './session';
 import { LoanCreateSchema, LoanUpdateSchema, LoanReturnSchema } from '../../shared/schemas';
 import { LOAN_DEPT_PREFIX, LOAN_DIRECTION_CONFIG } from '../../shared/constants';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
@@ -130,7 +130,7 @@ export function registerLoanHandlers(): void {
   });
 
   ipcMain.handle('db:loans:create', (event: any, data: unknown) => {
-    const user = requireSession(event);
+    const user = requireWriteAccess(event);
     const input = LoanCreateSchema.parse(data);
     const sessDept = sessionDepartment(event);
     if (sessDept && input.department !== sessDept) {
@@ -209,7 +209,7 @@ export function registerLoanHandlers(): void {
   });
 
   ipcMain.handle('db:loans:returnItems', (event: any, loanId: string, data: unknown) => {
-    const user = requireSession(event);
+    const user = requireWriteAccess(event);
     getLoanInDept(event, loanId);
     const input = LoanReturnSchema.parse(data);
 
@@ -231,7 +231,7 @@ export function registerLoanHandlers(): void {
   });
 
   ipcMain.handle('db:loans:returnOrder', (event: any, loanId: string) => {
-    const user = requireSession(event);
+    const user = requireWriteAccess(event);
     getLoanInDept(event, loanId);
 
     const affected: { equipment_id: string; asset_id: string | null }[] = [];

@@ -61,12 +61,14 @@ function InlineField({
   field,
   type = 'text',
   onSave,
+  readOnly = false,
 }: {
   label: string;
   value: string | null | undefined;
   field: string;
   type?: 'text' | 'date';
   onSave: (field: string, value: string) => void;
+  readOnly?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -89,6 +91,17 @@ function InlineField({
   };
 
   const display = type === 'date' ? formatDate(value) : (value || '—');
+
+  if (readOnly) {
+    return (
+      <div className="py-1.5">
+        <dt className="text-[10px] uppercase tracking-wider text-amber-800/60 font-semibold mb-0.5">
+          {label}
+        </dt>
+        <dd className="px-2 py-1 -mx-2 text-sm text-gray-800">{display}</dd>
+      </div>
+    );
+  }
 
   return (
     <div className="py-1.5">
@@ -125,10 +138,12 @@ function InlineTextarea({
   value,
   field,
   onSave,
+  readOnly = false,
 }: {
   value: string | null | undefined;
   field: string;
   onSave: (field: string, value: string) => void;
+  readOnly?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -151,6 +166,14 @@ function InlineTextarea({
     setEditing(false);
     if (draft.trim() !== (value || '')) onSave(field, draft.trim());
   };
+
+  if (readOnly) {
+    return (
+      <div className="px-3 py-2 text-sm text-gray-800">
+        <span className="whitespace-pre-wrap">{value || '—'}</span>
+      </div>
+    );
+  }
 
   return editing ? (
     <textarea
@@ -188,6 +211,7 @@ export function MaintenanceDetailPage() {
   const toast = useToast();
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === 'admin';
+  const isViewer = user?.role === 'viewer';
   const {
     getById, updateStatus, update, addNote, getNotes, getActions, addAction, updateAction, deleteAction, deleteTicket,
   } = useMaintenanceStore();
@@ -375,6 +399,13 @@ export function MaintenanceDetailPage() {
   };
 
   const renderActionCell = (rowIdx: number, col: string, value: string | undefined, wide?: boolean) => {
+    if (isViewer) {
+      return (
+        <div className="px-2 py-1.5 text-xs text-gray-700 min-h-[28px] whitespace-pre-wrap">
+          {col === 'action_date' ? formatDate(value) : (value || '\u00A0')}
+        </div>
+      );
+    }
     const isEditing = editingCell?.rowIdx === rowIdx && editingCell?.col === col;
     if (isEditing) {
       return wide ? (
@@ -512,12 +543,12 @@ export function MaintenanceDetailPage() {
             Project & Reporting Information
           </h2>
           <div className="grid grid-cols-3 gap-x-6 gap-y-1">
-            <InlineField label="Project Name" value={ticket.project_name} field="project_name" onSave={handleFieldSave} />
-            <InlineField label="Production Name" value={ticket.production_name} field="production_name" onSave={handleFieldSave} />
-            <InlineField label="Project Date" value={ticket.project_date} field="project_date" type="date" onSave={handleFieldSave} />
-            <InlineField label="Date Reported" value={ticket.reported_date} field="reported_date" type="date" onSave={handleFieldSave} />
-            <InlineField label="Reported By" value={ticket.reported_by} field="reported_by" onSave={handleFieldSave} />
-            <InlineField label="Verified By" value={ticket.verified_by} field="verified_by" onSave={handleFieldSave} />
+            <InlineField label="Project Name" value={ticket.project_name} field="project_name" onSave={handleFieldSave} readOnly={isViewer} />
+            <InlineField label="Production Name" value={ticket.production_name} field="production_name" onSave={handleFieldSave} readOnly={isViewer} />
+            <InlineField label="Project Date" value={ticket.project_date} field="project_date" type="date" onSave={handleFieldSave} readOnly={isViewer} />
+            <InlineField label="Date Reported" value={ticket.reported_date} field="reported_date" type="date" onSave={handleFieldSave} readOnly={isViewer} />
+            <InlineField label="Reported By" value={ticket.reported_by} field="reported_by" onSave={handleFieldSave} readOnly={isViewer} />
+            <InlineField label="Verified By" value={ticket.verified_by} field="verified_by" onSave={handleFieldSave} readOnly={isViewer} />
           </div>
         </div>
 
@@ -553,14 +584,14 @@ export function MaintenanceDetailPage() {
           <h2 className="text-[10px] uppercase tracking-[0.15em] text-amber-800/70 font-bold mb-2">
             Issue Description
           </h2>
-          <InlineTextarea value={ticket.issue_description} field="issue_description" onSave={handleFieldSave} />
+          <InlineTextarea value={ticket.issue_description} field="issue_description" onSave={handleFieldSave} readOnly={isViewer} />
 
           {ticket.diagnosis && (
             <div className="mt-4">
               <h2 className="text-[10px] uppercase tracking-[0.15em] text-amber-800/70 font-bold mb-2">
                 Diagnosis
               </h2>
-              <InlineTextarea value={ticket.diagnosis} field="diagnosis" onSave={handleFieldSave} />
+              <InlineTextarea value={ticket.diagnosis} field="diagnosis" onSave={handleFieldSave} readOnly={isViewer} />
             </div>
           )}
         </div>
@@ -571,13 +602,15 @@ export function MaintenanceDetailPage() {
             <h2 className="text-[10px] uppercase tracking-[0.15em] text-amber-800/70 font-bold">
               Action Log
             </h2>
-            <button
-              type="button"
-              onClick={openAddActionModal}
-              className="print:hidden flex items-center gap-1 text-xs text-amber-700 hover:text-amber-900 font-medium transition-colors"
-            >
-              <Plus size={14} /> Add Entry
-            </button>
+            {!isViewer && (
+              <button
+                type="button"
+                onClick={openAddActionModal}
+                className="print:hidden flex items-center gap-1 text-xs text-amber-700 hover:text-amber-900 font-medium transition-colors"
+              >
+                <Plus size={14} /> Add Entry
+              </button>
+            )}
           </div>
           <div className="border border-amber-200 rounded overflow-hidden">
             <table className="w-full text-sm">
@@ -613,14 +646,16 @@ export function MaintenanceDetailPage() {
                     <td className="px-1 py-0.5 align-top">{renderActionCell(idx, 'remarks', row.remarks, true)}</td>
                     <td className="px-1 py-0.5 align-top">{renderActionCell(idx, 'personnel', row.personnel)}</td>
                     <td className="px-1 py-0.5 align-top print:hidden">
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteAction(idx)}
-                        className="p-1.5 text-gray-400 hover:text-red-600 transition-colors rounded hover:bg-red-50"
-                        title="Delete row"
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                      {!isViewer && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteAction(idx)}
+                          className="p-1.5 text-gray-400 hover:text-red-600 transition-colors rounded hover:bg-red-50"
+                          title="Delete row"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -629,7 +664,7 @@ export function MaintenanceDetailPage() {
           </div>
 
           {/* ── Status Advancement Control ── */}
-          <div className="mt-4 pt-4 border-t border-amber-200 print:hidden">
+          <div className={`mt-4 pt-4 border-t border-amber-200 print:hidden ${isViewer ? 'hidden' : ''}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 {PIPELINE.map((status, i) => {
@@ -715,18 +750,20 @@ export function MaintenanceDetailPage() {
                 ))
               )}
             </div>
-            <div className="border-t border-surface-700 px-4 py-3 flex gap-2">
-              <input
-                value={noteText}
-                onChange={(e) => setNoteText(e.target.value)}
-                placeholder="Add a note..."
-                className="flex-1 px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder:text-surface-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) handleAddNote(); }}
-              />
-              <Button size="sm" onClick={handleAddNote}>
-                <Send size={14} />
-              </Button>
-            </div>
+            {!isViewer && (
+              <div className="border-t border-surface-700 px-4 py-3 flex gap-2">
+                <input
+                  value={noteText}
+                  onChange={(e) => setNoteText(e.target.value)}
+                  placeholder="Add a note..."
+                  className="flex-1 px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder:text-surface-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) handleAddNote(); }}
+                />
+                <Button size="sm" onClick={handleAddNote}>
+                  <Send size={14} />
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </div>

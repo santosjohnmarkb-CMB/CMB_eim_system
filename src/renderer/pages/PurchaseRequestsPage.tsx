@@ -63,7 +63,9 @@ export function PurchaseRequestsPage() {
   const user = useAuthStore((s) => s.user);
 
   const isAdmin = user?.role === 'admin';
-  const lockedDept = !isAdmin ? (user?.department as Department | null) : null;
+  const isViewer = user?.role === 'viewer';
+  // Admins and viewers see both departments; department users are locked to theirs.
+  const lockedDept = (!isAdmin && !isViewer) ? (user?.department as Department | null) : null;
 
   const [view, setView] = useState<PurchaseRequestStatus>('PENDING');
 
@@ -168,7 +170,9 @@ export function PurchaseRequestsPage() {
           </p>
         </div>
         <Button variant="secondary" onClick={printList}><Printer size={16} /> Print List</Button>
-        <Button onClick={() => navigate('/purchase-requests/new', { state: { department: activeDept } })}><Plus size={16} /> New Request</Button>
+        {!isViewer && (
+          <Button onClick={() => navigate('/purchase-requests/new', { state: { department: activeDept } })}><Plus size={16} /> New Request</Button>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-3">

@@ -46,8 +46,10 @@ export function MaintenanceQueuePage() {
   const scrollTo = (location.state as { scrollTo?: string } | null)?.scrollTo;
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === 'admin';
+  const isViewer = user?.role === 'viewer';
   const userDept = user?.department as Department | null;
-  const visibleDepts: Department[] = isAdmin ? DEPTS : (userDept ? [userDept] : DEPTS);
+  // Admins and viewers see every department; department users see only their own.
+  const visibleDepts: Department[] = (isAdmin || isViewer) ? DEPTS : (userDept ? [userDept] : DEPTS);
 
   const [completedHistory, setCompletedHistory] = useState<CompletedHistoryEntry[]>([]);
   const [historyModal, setHistoryModal] = useState<{ equipmentId: string; equipmentName: string; equipmentCode: string } | null>(null);
@@ -244,12 +246,14 @@ export function MaintenanceQueuePage() {
         <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
           <AlertTriangle size={18} className="text-danger-400" />
           <h3 className="text-base font-semibold text-surface-200">Open Tickets</h3>
-          <button
-            onClick={() => navigate('/maintenance/new')}
-            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-orange-400 hover:text-orange-300 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 rounded-lg transition-colors"
-          >
-            <Plus size={14} /> Create New Ticket
-          </button>
+          {!isViewer && (
+            <button
+              onClick={() => navigate('/maintenance/new')}
+              className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-orange-400 hover:text-orange-300 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 rounded-lg transition-colors"
+            >
+              <Plus size={14} /> Create New Ticket
+            </button>
+          )}
         </div>
 
         {visibleDepts.map((dept, deptIdx) => {

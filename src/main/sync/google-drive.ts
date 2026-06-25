@@ -13,16 +13,19 @@ import { loadGoogleSecrets } from './secrets-store';
 // Google Cloud Console to be of type "Desktop app".
 // See: https://developers.google.com/identity/protocols/oauth2/native-app
 //
-// We request the full `drive` scope (not the narrower `drive.file`) so the app
-// can archive into a folder the operator picked/created in the Drive web UI.
-// `drive.file` only grants access to files this app itself created, which makes
-// it impossible to write into a user-chosen folder (Google returns HTTP 403
-// "Insufficient Permission"). Changing this scope requires the operator to
-// Disconnect and reconnect so consent is re-granted with the new scope.
+// We deliberately use the NARROW `drive.file` scope: the app can only see/write
+// files and folders it created itself. To archive into a location the operator
+// chooses, we have the app CREATE its own root folder (see createArchiveFolder)
+// and store that folder's ID. The operator can then move that app-created folder
+// anywhere in Drive — a folder ID is stable across moves, so archiving keeps
+// working without ever needing access to folders the app didn't create.
 const SCOPES = [
-  'https://www.googleapis.com/auth/drive',
+  'https://www.googleapis.com/auth/drive.file',
   'https://www.googleapis.com/auth/userinfo.email',
 ];
+
+// Name of the root folder the app creates on the operator's behalf.
+const ARCHIVE_FOLDER_NAME = 'CMB EIM Archives';
 const AUTH_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 class GoogleDriveService {
@@ -377,6 +380,56 @@ class GoogleDriveService {
     } catch (err) {
       throw decorateDriveError(err, `upload "${filename}" into folder ${folderId}`);
     }
+  }
+
+  /**
+   * Creates (or reuses) an app-owned root folder in "My Drive" and returns its
+   * ID. Because the app creates it, the narrow `drive.file` scope grants full
+   * access to it and everything nested inside — and that access survives the
+   * operator later moving the folder elsewhere in Drive (IDs are stable). This
+   * is how we let operators choose a destination without the broad `drive`
+   * scope: create here, then drag the folder wherever you want.
+   */
+  async createArchiveFolder(): Promise<{ id: string; name: string; link: string }> {
+    const { drive } = await this.getDriveClient();
+
+    // Reuse an existing app-created folder of the same name (in any location)
+    // instead of spawning duplicates on repeated clicks.
+    const query = [
+      `name = '${ARCHIVE_FOLDER_NAME.replace(/'/g, "\\'")}'`,
+      `mimeType = 'application/vnd.google-apps.folder'`,
+      `trashed = false`,
+    ].join(' and ');
+
+    const existing = await drive.files.list({
+      q: query,
+      fields: 'files(id, name)',
+      spaces: 'drive',
+      pageSize: 1,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+    });
+
+    let id: string;
+    let name: string;
+    if (existing.data.files && existing.data.files.length > 0) {
+      id = existing.data.files[0]!.id!;
+      name = existing.data.files[0]!.name || ARCHIVE_FOLDER_NAME;
+    } else {
+      const created = await drive.files.create({
+        requestBody: {
+          name: ARCHIVE_FOLDER_NAME,
+          mimeType: 'application/vnd.google-apps.folder',
+          parents: ['root'],
+        },
+        fields: 'id, name',
+        supportsAllDrives: true,
+      });
+      id = created.data.id!;
+      name = created.data.name || ARCHIVE_FOLDER_NAME;
+    }
+
+    return { id, name, link: `https://drive.google.com/drive/folders/${id}` };
   }
 
   /**

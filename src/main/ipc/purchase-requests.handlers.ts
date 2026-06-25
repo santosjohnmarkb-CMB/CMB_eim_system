@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../database/index';
-import { requireSession } from './session';
+import { requireSession, requireWriteAccess } from './session';
 import { PurchaseRequestCreateSchema, PurchaseRequestUpdateSchema } from '../../shared/schemas';
 import { PURCHASE_REQUEST_DEPT_PREFIX } from '../../shared/constants';
 import { sessionDepartment } from './department';
@@ -93,7 +93,7 @@ export function registerPurchaseRequestHandlers(): void {
   });
 
   ipcMain.handle('db:purchaseRequests:create', (event: any, data: unknown) => {
-    const user = requireSession(event);
+    const user = requireWriteAccess(event);
     const input = PurchaseRequestCreateSchema.parse(data);
     const sessDept = sessionDepartment(event);
     if (sessDept && input.department !== sessDept) {
