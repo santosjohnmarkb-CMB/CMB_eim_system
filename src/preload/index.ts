@@ -87,6 +87,7 @@ const ALLOWED_CHANNELS = new Set([
   'sync:config:get',
   'sync:config:set',
   'sync:tableStatus',
+  'sync:getMigrationSql',
   'gdrive:config:get',
   'gdrive:config:set',
   'gdrive:connect',

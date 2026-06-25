@@ -4,7 +4,7 @@ import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
 import { Modal } from '../components/common/Modal';
 import { useToast } from '../hooks';
-import { RefreshCw, Database, Cloud, Users, Plus, Edit2, Trash2, HardDrive, AlertTriangle } from 'lucide-react';
+import { RefreshCw, Database, Cloud, Users, Plus, Edit2, Trash2, HardDrive, AlertTriangle, Copy } from 'lucide-react';
 import { ipcInvoke } from '../lib/ipc';
 import type { User } from '../../shared/types';
 import { DEPARTMENT_CONFIG } from '../../shared/constants';
@@ -169,6 +169,16 @@ export function SettingsPage() {
       toast.error('Sync blocked: the cloud database needs migration. See the warning below.');
     } else {
       toast.success('Sync completed');
+    }
+  };
+
+  const handleCopyMigrationSql = async () => {
+    try {
+      const sql = await ipcInvoke<string>('sync:getMigrationSql');
+      await navigator.clipboard.writeText(sql);
+      toast.success('Migration SQL copied — paste it into the Supabase SQL Editor and run it');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to copy migration SQL');
     }
   };
 
@@ -400,6 +410,9 @@ export function SettingsPage() {
                 ))}
               </ul>
             )}
+            <Button variant="secondary" size="sm" onClick={handleCopyMigrationSql} className="mt-3">
+              <Copy size={13} /> Copy migration SQL
+            </Button>
           </div>
         )}
 

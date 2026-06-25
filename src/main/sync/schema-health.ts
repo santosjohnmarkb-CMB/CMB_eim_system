@@ -41,6 +41,10 @@ export function isSchemaMismatchError(err: unknown): boolean {
   // 23505 against a legacy unique constraint the app has since dropped locally
   // (e.g. equipment_assets_equipment_id_key from the old 1:1 asset model).
   if (code === '23505' && /_key"?$/.test(String(e.message ?? ''))) return true;
+  // 23514: a CHECK constraint rejected a value the local schema permits — i.e.
+  // the cloud's constraint is older/narrower than the app's (e.g. the
+  // maintenance_type list expanded since the cloud table was created).
+  if (code === '23514') return true;
   return false;
 }
 
@@ -63,6 +67,12 @@ export function recordSchemaError(table: string, err: unknown): void {
       ? `Table "${table}" is missing column "${col}"`
       : `Table "${table}" has a missing column`;
     key = `column:${table}:${col ?? message}`;
+  } else if (code === '23514') {
+    const constraint = message.match(/constraint "([^"]+)"/)?.[1];
+    description = constraint
+      ? `Table "${table}" has an outdated check constraint "${constraint}" that must be updated`
+      : `Table "${table}" has an outdated check constraint`;
+    key = `check:${table}:${constraint ?? message}`;
   } else {
     const constraint = message.match(/constraint "([^"]+)"/)?.[1];
     description = constraint

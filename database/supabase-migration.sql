@@ -171,45 +171,64 @@ CREATE INDEX IF NOT EXISTS idx_maintenance_tickets_status ON maintenance_tickets
 CREATE INDEX IF NOT EXISTS idx_parts_transactions_part ON parts_transactions(part_id);
 CREATE INDEX IF NOT EXISTS idx_preventive_schedules_due ON preventive_schedules(next_due_date);
 
--- Enable Realtime for EIM tables
-ALTER PUBLICATION supabase_realtime ADD TABLE equipment_assets;
-ALTER PUBLICATION supabase_realtime ADD TABLE asset_status_log;
-ALTER PUBLICATION supabase_realtime ADD TABLE maintenance_tickets;
-ALTER PUBLICATION supabase_realtime ADD TABLE maintenance_notes;
-ALTER PUBLICATION supabase_realtime ADD TABLE parts_catalog;
-ALTER PUBLICATION supabase_realtime ADD TABLE parts_inventory;
-ALTER PUBLICATION supabase_realtime ADD TABLE parts_transactions;
-ALTER PUBLICATION supabase_realtime ADD TABLE vendors;
+-- Enable Realtime for EIM tables. ALTER PUBLICATION throws if the table is
+-- already a member, so each add is guarded to keep the whole script re-runnable.
+DO $$
+DECLARE t text;
+BEGIN
+  FOR t IN SELECT unnest(ARRAY[
+    'equipment_assets', 'asset_status_log', 'maintenance_tickets', 'maintenance_notes',
+    'parts_catalog', 'parts_inventory', 'parts_transactions', 'vendors'
+  ]) LOOP
+    BEGIN
+      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE %I', t);
+    EXCEPTION WHEN duplicate_object THEN
+      NULL; -- already published
+    END;
+  END LOOP;
+END $$;
 
--- RLS policies (permissive for EIM app — tighten per deployment)
+-- RLS policies (permissive for EIM app — tighten per deployment). DROP ... IF
+-- EXISTS before each CREATE keeps this idempotent (CREATE POLICY has no
+-- IF NOT EXISTS form on older Postgres).
 ALTER TABLE equipment_assets ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for equipment_assets" ON equipment_assets;
 CREATE POLICY "Allow all for equipment_assets" ON equipment_assets FOR ALL USING (true) WITH CHECK (true);
 
 ALTER TABLE asset_status_log ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for asset_status_log" ON asset_status_log;
 CREATE POLICY "Allow all for asset_status_log" ON asset_status_log FOR ALL USING (true) WITH CHECK (true);
 
 ALTER TABLE maintenance_tickets ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for maintenance_tickets" ON maintenance_tickets;
 CREATE POLICY "Allow all for maintenance_tickets" ON maintenance_tickets FOR ALL USING (true) WITH CHECK (true);
 
 ALTER TABLE maintenance_notes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for maintenance_notes" ON maintenance_notes;
 CREATE POLICY "Allow all for maintenance_notes" ON maintenance_notes FOR ALL USING (true) WITH CHECK (true);
 
 ALTER TABLE parts_catalog ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for parts_catalog" ON parts_catalog;
 CREATE POLICY "Allow all for parts_catalog" ON parts_catalog FOR ALL USING (true) WITH CHECK (true);
 
 ALTER TABLE parts_inventory ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for parts_inventory" ON parts_inventory;
 CREATE POLICY "Allow all for parts_inventory" ON parts_inventory FOR ALL USING (true) WITH CHECK (true);
 
 ALTER TABLE parts_transactions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for parts_transactions" ON parts_transactions;
 CREATE POLICY "Allow all for parts_transactions" ON parts_transactions FOR ALL USING (true) WITH CHECK (true);
 
 ALTER TABLE parts_compatibility ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for parts_compatibility" ON parts_compatibility;
 CREATE POLICY "Allow all for parts_compatibility" ON parts_compatibility FOR ALL USING (true) WITH CHECK (true);
 
 ALTER TABLE preventive_schedules ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for preventive_schedules" ON preventive_schedules;
 CREATE POLICY "Allow all for preventive_schedules" ON preventive_schedules FOR ALL USING (true) WITH CHECK (true);
 
 ALTER TABLE vendors ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for vendors" ON vendors;
 CREATE POLICY "Allow all for vendors" ON vendors FOR ALL USING (true) WITH CHECK (true);
 
 -- ═══════════════════════════════════════════════════
@@ -239,6 +258,7 @@ CREATE TABLE IF NOT EXISTS ticket_actions (
 );
 
 ALTER TABLE ticket_actions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for ticket_actions" ON ticket_actions;
 CREATE POLICY "Allow all for ticket_actions" ON ticket_actions FOR ALL USING (true) WITH CHECK (true);
 
 -- ═══════════════════════════════════════════════════
@@ -265,6 +285,15 @@ ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (
 -- ═══════════════════════════════════════════════════
 
 ALTER TABLE maintenance_tickets ADD COLUMN IF NOT EXISTS completion_outcome TEXT;
+
+-- Refresh the maintenance_type CHECK to the current allowed values. Databases
+-- created before the list was widened still carry the old/narrower constraint,
+-- which rejects rows the app considers valid (error 23514). Mirrors local
+-- migration 006_expand_maintenance_type_check.
+ALTER TABLE maintenance_tickets DROP CONSTRAINT IF EXISTS maintenance_tickets_maintenance_type_check;
+ALTER TABLE maintenance_tickets ADD CONSTRAINT maintenance_tickets_maintenance_type_check CHECK (
+  maintenance_type IN ('routine_maintenance', 'update', 'repair', 'corrective', 'preventive', 'predictive')
+);
 
 -- ═══════════════════════════════════════════════════
 -- Migration: Google Drive auto-archive bookkeeping

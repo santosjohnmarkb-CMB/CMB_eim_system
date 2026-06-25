@@ -1,6 +1,7 @@
 import { v4 as uuidv4, validate as isUuid } from 'uuid';
 import { getDatabase } from '../database/index';
 import { cloudService } from './cloud-service';
+import { recordSchemaError } from './schema-health';
 
 const REFRESHABLE_TABLES = new Set([
   'equipment_assets', 'asset_status_log',
@@ -148,9 +149,16 @@ export class OfflineQueue {
         const code = err?.code ?? '';
         const isUnrecoverable = code === '22P02' || code === '23503';
 
+        // Surface schema-mismatch failures (missing column/table, stale
+        // constraint) so the Settings banner reflects items stuck in the queue,
+        // not just ones found by the full-table reconcile.
+        recordSchemaError(item.table_name, err);
+
         if (isUnrecoverable) {
-          console.warn(`[OfflineQueue] Permanently removing unrecoverable entry: ${item.table_name} ${item.action} (record=${item.record_id})`);
+          console.warn(`[OfflineQueue] Permanently removing unrecoverable entry: ${item.table_name} ${item.action} (record=${item.record_id}) [${code}]: ${err?.message ?? err}`);
           try { this.remove(item.id); } catch { /* best-effort */ }
+        } else {
+          console.warn(`[OfflineQueue] Replay failed, will retry: ${item.table_name} ${item.action} (record=${item.record_id}) [${code}]: ${err?.message ?? err}`);
         }
         failed++;
       }
