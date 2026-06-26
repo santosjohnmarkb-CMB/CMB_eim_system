@@ -6,25 +6,29 @@ import fs from 'fs';
  * Archive folder structure for every EIM completion document that lands on
  * Google Drive (and the local fallback copy).
  *
- * Each workflow has its OWN top-level folder; inside it documents are filed by
- * the calendar Year then Month of the date the work was completed:
+ * Everything lives under a single top-level `EIM` folder. Inside it each
+ * workflow gets its OWN subfolder, and documents are then filed by the calendar
+ * Year then Month of the date the work was completed:
  *
- *   EIM - Equipment Tickets / <year> / <month> / <ticket>.pdf
- *   EIM - Loan Equipment    / <year> / <month> / <loan>.pdf
- *   EIM - Purchase Requests / <year> / <month> / <request>.pdf
+ *   EIM / Maintenance - Service Tickets / <year> / <month> / <ticket>.pdf
+ *   EIM / Loaned Equipment              / <year> / <month> / <loan>.pdf
+ *   EIM / Purchase Request              / <year> / <month> / <request>.pdf
  *
- * The three roots are created on first use by the app itself, which is required
- * because the OAuth `drive.file` scope can only see and manage files this app
- * created.
+ * The EIM parent and its section subfolders are created on first use by the app
+ * itself, which is required because the OAuth `drive.file` scope can only see
+ * and manage files this app created.
  */
 
 export type ArchiveKind = 'ticket' | 'loan' | 'purchase';
 
-// Top-level Drive folder name per workflow.
-export const ARCHIVE_ROOTS: Record<ArchiveKind, string> = {
-  ticket: 'EIM - Equipment Tickets',
-  loan: 'EIM - Loan Equipment',
-  purchase: 'EIM - Purchase Requests',
+// Single top-level Drive folder that contains every EIM archive.
+export const ARCHIVE_PARENT = 'EIM';
+
+// Per-workflow subfolder created inside the EIM parent folder.
+export const ARCHIVE_SECTIONS: Record<ArchiveKind, string> = {
+  ticket: 'Maintenance - Service Tickets',
+  loan: 'Loaned Equipment',
+  purchase: 'Purchase Request',
 };
 
 // Local mirror lives under the OS Documents folder so operators always have an
@@ -32,16 +36,17 @@ export const ARCHIVE_ROOTS: Record<ArchiveKind, string> = {
 const LOCAL_ARCHIVE_ROOT = 'CMB-EIM-Archives';
 
 export interface ArchivePathParts {
-  rootName: string;
+  parentName: string;
+  sectionName: string;
   year: string;
   month: string;
 }
 
 /**
- * Resolve the { rootName, year, month } target for a document, derived from the
- * date the work was completed (ticket completion_date, loan return time,
- * purchase fulfilled_at). Falls back to "now" if the date is missing/invalid so
- * archiving never hard-fails on a bad timestamp.
+ * Resolve the { parentName, sectionName, year, month } target for a document,
+ * derived from the date the work was completed (ticket completion_date, loan
+ * return time, purchase fulfilled_at). Falls back to "now" if the date is
+ * missing/invalid so archiving never hard-fails on a bad timestamp.
  */
 export function resolveEimArchivePath(
   kind: ArchiveKind,
@@ -49,7 +54,8 @@ export function resolveEimArchivePath(
 ): ArchivePathParts {
   const d = parseDate(completedAt);
   return {
-    rootName: ARCHIVE_ROOTS[kind],
+    parentName: ARCHIVE_PARENT,
+    sectionName: ARCHIVE_SECTIONS[kind],
     year: String(d.getFullYear()),
     month: String(d.getMonth() + 1).padStart(2, '0'),
   };
@@ -125,7 +131,8 @@ export async function uploadOrSaveArchive(
   const localDir = path.join(
     app.getPath('documents'),
     LOCAL_ARCHIVE_ROOT,
-    parts.rootName,
+    parts.parentName,
+    parts.sectionName,
     parts.year,
     parts.month,
   );
@@ -135,8 +142,10 @@ export async function uploadOrSaveArchive(
   }
 
   if (driveConnected) {
-    const rootId = await googleDriveService.ensureFolder(null, parts.rootName);
-    const yearId = await googleDriveService.ensureFolder(rootId, parts.year);
+    // Nest each section inside the single EIM parent: EIM / <section> / <year> / <month>.
+    const parentId = await googleDriveService.ensureFolder(null, parts.parentName);
+    const sectionId = await googleDriveService.ensureFolder(parentId, parts.sectionName);
+    const yearId = await googleDriveService.ensureFolder(sectionId, parts.year);
     const monthId = await googleDriveService.ensureFolder(yearId, parts.month);
     let lastFileId: string | null = null;
     for (const f of files) {

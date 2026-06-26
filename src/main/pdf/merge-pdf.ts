@@ -12,7 +12,7 @@ interface DecodedDataUrl {
 
 function decodeDataUrl(dataUrl: string): DecodedDataUrl | null {
   const match = /^data:([^;]+);base64,(.*)$/s.exec(dataUrl);
-  if (!match) return null;
+  if (!match || match[1] == null || match[2] == null) return null;
   const mime = match[1];
   const bytes = new Uint8Array(Buffer.from(match[2], 'base64'));
   return { mime, bytes };

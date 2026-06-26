@@ -54,6 +54,26 @@ function generateTicketNumber(db: any, equipmentId: string, maintenanceType: str
 export function registerMaintenanceHandlers(): void {
   const db = getDatabase();
 
+  // Loads a ticket and asserts it belongs to the session's department, scoped via
+  // the equipment's category (mirrors getLoanInDept / getRequestInDept). Throws if
+  // the ticket is missing or owned by another department. Admins/viewers (null
+  // department) are unrestricted.
+  const getTicketInDept = (event: any, id: string): any => {
+    const ticket: any = db.prepare(`
+      SELECT mt.*, c.name as category_name
+      FROM maintenance_tickets mt
+      JOIN equipment_items e ON e.id = mt.equipment_id
+      LEFT JOIN categories c ON c.id = e.category_id
+      WHERE mt.id = ?
+    `).get(id);
+    if (!ticket) throw new Error('Ticket not found');
+    const dept = sessionDepartment(event);
+    if (dept && departmentForCategory(ticket.category_name) !== dept) {
+      throw new Error('This ticket belongs to another department.');
+    }
+    return ticket;
+  };
+
   ipcMain.handle('db:maintenance:getAll', (event: any) => {
     const cats = categoriesForDepartment(sessionDepartment(event));
     const catWhere = cats ? `WHERE c.name IN (${cats.map(() => '?').join(', ')})` : '';
@@ -172,8 +192,7 @@ export function registerMaintenanceHandlers(): void {
   // before a non-loss ticket can be completed.
   ipcMain.handle('db:maintenance:uploadServiceDoc', (event: any, id: string, dataUrl: unknown) => {
     requireWriteAccess(event);
-    const ticket: any = db.prepare('SELECT id FROM maintenance_tickets WHERE id = ?').get(id);
-    if (!ticket) throw new Error('Ticket not found');
+    getTicketInDept(event, id);
     const parsed = AttachmentDataSchema.parse(dataUrl);
     db.prepare("UPDATE maintenance_tickets SET service_doc_data = ?, updated_at = datetime('now') WHERE id = ?").run(parsed, id);
     return { success: true };
@@ -181,8 +200,7 @@ export function registerMaintenanceHandlers(): void {
 
   ipcMain.handle('db:maintenance:clearServiceDoc', (event: any, id: string) => {
     requireWriteAccess(event);
-    const ticket: any = db.prepare('SELECT id FROM maintenance_tickets WHERE id = ?').get(id);
-    if (!ticket) throw new Error('Ticket not found');
+    getTicketInDept(event, id);
     db.prepare("UPDATE maintenance_tickets SET service_doc_data = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
     return { success: true };
   });
