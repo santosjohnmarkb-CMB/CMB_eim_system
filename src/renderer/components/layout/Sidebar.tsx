@@ -166,25 +166,25 @@ export function Sidebar() {
             active={location.pathname.startsWith('/purchase-requests')}
             onClick={() => navigate('/purchase-requests')}
           />
+        </nav>
 
-          {isAdmin && (
+        {/* Admin utilities pinned to the bottom, just above the user footer */}
+        {isAdmin && (
+          <div className="px-3 py-2 border-t border-surface-800/50 space-y-1">
             <NavButton
               icon={<Archive size={20} />}
               label="Archives"
               active={location.pathname.startsWith('/archives')}
               onClick={() => navigate('/archives')}
             />
-          )}
-
-          {isAdmin && (
             <NavButton
               icon={<Settings size={20} />}
               label="Settings"
               active={location.pathname === '/settings'}
               onClick={() => navigate('/settings')}
             />
-          )}
-        </nav>
+          </div>
+        )}
 
         <UserFooter user={user} version={version} onLogout={handleLogout} />
       </div>
