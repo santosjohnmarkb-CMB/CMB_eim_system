@@ -7,6 +7,7 @@ import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { DataTable, type Column } from '../components/common/DataTable';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
+import { ArchiveListButton } from '../components/common/ArchiveListButton';
 import { DEPARTMENT_CONFIG, LOAN_STATUS_CONFIG, LOAN_DIRECTION_CONFIG } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import { printHtml, escapeHtml } from '../lib/print';
@@ -56,6 +57,10 @@ export function LoansPage() {
   const isOutward = direction === 'OUTWARD';
   const partyHeader = isOutward ? 'Borrower' : 'Lender';
 
+  // Status view: All (current behavior) | Active (still out) | Returned (fully returned,
+  // not yet captured in an archived list snapshot).
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'RETURNED'>('ALL');
+
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   const visibleDepts = useMemo<Department[]>(
@@ -84,36 +89,45 @@ export function LoansPage() {
     return result;
   }, [directionLoans]);
 
-  const printList = () => {
-    const activeLoans = directionLoans.filter((l) => l.status !== 'RETURNED');
-    const sections = [activeDept].map((dept) => {
-      const deptLoans = activeLoans.filter((l) => l.department === dept);
-      const rows = deptLoans.map((l) => `
-        <tr>
-          <td>${escapeHtml(l.loan_number)}</td>
-          <td>${escapeHtml(l.person_or_org)}</td>
-          <td>${escapeHtml(l.purpose) || '—'}</td>
-          <td>${escapeHtml(l.equipment_names) || '—'}</td>
-          <td>${escapeHtml(l.location) || '—'}</td>
-          <td>${l.out_count ?? 0} / ${l.item_count ?? 0}</td>
-          <td>${escapeHtml(fmtDate(l.loaned_date))}</td>
-          <td>${escapeHtml(fmtDate(l.tentative_return_date))}</td>
-        </tr>`).join('');
-      return `
-        <h2>${escapeHtml(DEPARTMENT_CONFIG[dept].label)}</h2>
-        <table>
-          <thead><tr><th>Loan #</th><th>${escapeHtml(partyHeader)}</th><th>Purpose</th><th>Equipment</th><th>Location</th><th>Out / Total</th><th>${isOutward ? 'Loaned' : 'Received'}</th><th>${isOutward ? 'Tentative Return' : 'Return By'}</th></tr></thead>
-          <tbody>${rows || '<tr><td colspan="8">No active loans</td></tr>'}</tbody>
-        </table>`;
-    }).join('');
+  const statusLabel = statusFilter === 'ACTIVE' ? 'Active' : statusFilter === 'RETURNED' ? 'Returned' : '';
 
-    const body = `
+  // Loans shown for the active department after the status filter. The Returned view
+  // also hides loans already captured in an archived list snapshot (list_archived_at).
+  const displayLoans = useMemo(() => {
+    const deptLoans = byDept[activeDept];
+    if (statusFilter === 'ACTIVE') return deptLoans.filter((l) => l.status !== 'RETURNED');
+    if (statusFilter === 'RETURNED') return deptLoans.filter((l) => l.status === 'RETURNED' && !l.list_archived_at);
+    return deptLoans;
+  }, [byDept, activeDept, statusFilter]);
+
+  // Build the printable/archivable list body for a set of loans (letterhead added by
+  // the print/PDF wrapper). Shared by the on-screen Print button and Archive List.
+  const buildListBody = (loansList: EquipmentLoan[], statusLabel: string, emptyText: string) => {
+    const rows = loansList.map((l) => `
+      <tr>
+        <td>${escapeHtml(l.loan_number)}</td>
+        <td>${escapeHtml(l.person_or_org)}</td>
+        <td>${escapeHtml(l.purpose) || '—'}</td>
+        <td>${escapeHtml(l.equipment_names) || '—'}</td>
+        <td>${escapeHtml(l.location) || '—'}</td>
+        <td>${l.out_count ?? 0} / ${l.item_count ?? 0}</td>
+        <td>${escapeHtml(fmtDate(l.loaned_date))}</td>
+        <td>${escapeHtml(fmtDate(l.tentative_return_date))}</td>
+      </tr>`).join('');
+    return `
       <div class="header">
-        <h1>${escapeHtml(DEPARTMENT_CONFIG[activeDept].label)} — Loaned Equipment (${escapeHtml(LOAN_DIRECTION_CONFIG[direction].label)})</h1>
+        <h1>${escapeHtml(DEPARTMENT_CONFIG[activeDept].label)} — Loaned Equipment (${escapeHtml(LOAN_DIRECTION_CONFIG[direction].label)}${statusLabel ? ` · ${escapeHtml(statusLabel)}` : ''})</h1>
         <p class="muted">${isOutward ? 'Equipment we have loaned out' : 'Equipment loaned to us'} as of ${escapeHtml(new Date().toLocaleDateString())}</p>
       </div>
-      ${sections}`;
-    printHtml('Loaned Equipment List', body);
+      <h2>${escapeHtml(DEPARTMENT_CONFIG[activeDept].label)}</h2>
+      <table>
+        <thead><tr><th>Loan #</th><th>${escapeHtml(partyHeader)}</th><th>Purpose</th><th>Equipment</th><th>Location</th><th>Out / Total</th><th>${isOutward ? 'Loaned' : 'Received'}</th><th>${isOutward ? 'Tentative Return' : 'Return By'}</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="8">${escapeHtml(emptyText)}</td></tr>`}</tbody>
+      </table>`;
+  };
+
+  const printList = () => {
+    printHtml('Loaned Equipment List', buildListBody(displayLoans, statusLabel, 'No loans'));
   };
 
   const columns: Column<EquipmentLoan>[] = [
@@ -196,29 +210,74 @@ export function LoansPage() {
             );
           })}
         </div>
+
+        {/* Status filter */}
+        <div className="inline-flex rounded-lg border border-surface-700 bg-surface-800/60 p-1">
+          {(['ALL', 'ACTIVE', 'RETURNED'] as const).map((s) => {
+            const active = statusFilter === s;
+            const label = s === 'ALL' ? 'All' : s === 'ACTIVE' ? 'Active' : 'Returned';
+            const deptLoans = byDept[activeDept];
+            const count = s === 'ALL'
+              ? deptLoans.length
+              : s === 'ACTIVE'
+                ? deptLoans.filter((l) => l.status !== 'RETURNED').length
+                : deptLoans.filter((l) => l.status === 'RETURNED' && !l.list_archived_at).length;
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setStatusFilter(s)}
+                className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  active ? 'bg-primary-600/25 text-primary-200' : 'text-surface-400 hover:text-surface-200'
+                }`}
+              >
+                {label}
+                <span className="text-xs text-surface-500">({count})</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {(() => {
         const Icon = DEPT_ICONS[activeDept];
-        const deptLoans = byDept[activeDept];
         return (
           <div className="glass-panel rounded-xl overflow-hidden">
             <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
               <Icon size={18} className={DEPT_LABEL_COLOR[activeDept]} />
               <h2 className={`text-base font-semibold ${DEPT_LABEL_COLOR[activeDept]}`}>{DEPARTMENT_CONFIG[activeDept].label}</h2>
-              <span className="text-xs text-surface-500 ml-1">({deptLoans.length})</span>
+              <span className="text-xs text-surface-500 ml-1">({displayLoans.length})</span>
             </div>
             <DataTable
               columns={columns}
-              data={deptLoans}
+              data={displayLoans}
               onRowClick={(l) => navigate(`/loans/${l.id}`)}
               loading={false}
-              emptyMessage={isOutward ? 'No loans recorded' : 'No inward loans recorded'}
+              emptyMessage={
+                statusFilter === 'RETURNED'
+                  ? 'No returned loans'
+                  : isOutward ? 'No loans recorded' : 'No inward loans recorded'
+              }
               rowClassName={(l) => (isOverdue(l) ? 'bg-danger-500/10 hover:bg-danger-500/20' : undefined)}
             />
           </div>
         );
       })()}
+
+      {/* Archive the active department's returned loans into a PDF snapshot (admin
+          only), then clear them from the Returned list. */}
+      {statusFilter === 'RETURNED' && (
+        <div className="flex justify-end">
+          <ArchiveListButton
+            section="loan"
+            departmentLabel={`${DEPARTMENT_CONFIG[activeDept].label} (${LOAN_DIRECTION_CONFIG[direction].label})`}
+            filenameBase={`${DEPARTMENT_CONFIG[activeDept].label} - Returned Loans (${LOAN_DIRECTION_CONFIG[direction].label})`}
+            recordIds={displayLoans.map((l) => l.id)}
+            buildDoc={() => ({ title: 'Loaned Equipment List', bodyHtml: buildListBody(displayLoans, 'Returned', 'No returned loans') })}
+            onArchived={fetchAll}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -100,6 +100,9 @@ const ALLOWED_CHANNELS = new Set([
   'gdrive:disconnect',
   'gdrive:test',
   'gdrive:createFolder',
+  'archive:list:create',
+  'archive:openLocation',
+  'archive:list:getCleared',
   'app:getVersion',
 ]);
 

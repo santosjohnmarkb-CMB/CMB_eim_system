@@ -5,6 +5,7 @@ import { useMaintenanceStore } from '../stores/maintenance.store';
 import { useAuthStore } from '../stores/auth.store';
 import { useToast } from '../hooks';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
+import { CompletedTicketsTab } from '../components/maintenance/CompletedTicketsTab';
 import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG, COMPLETION_OUTCOME_CONFIG } from '../lib/constants';
 import { printHtml, escapeHtml } from '../lib/print';
 import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT } from '../../shared/constants';
@@ -55,6 +56,7 @@ export function MaintenanceQueuePage() {
   const [historyModal, setHistoryModal] = useState<{ equipmentId: string; equipmentName: string; equipmentCode: string } | null>(null);
   const [modalHistory, setModalHistory] = useState<CompletedHistoryEntry[]>([]);
   const [modalLoading, setModalLoading] = useState(false);
+  const [view, setView] = useState<'overview' | 'completed'>('overview');
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -194,6 +196,29 @@ export function MaintenanceQueuePage() {
         </p>
       </div>
 
+      {/* View toggle: live overview vs the completed-tickets archive list */}
+      <div className="inline-flex rounded-lg border border-surface-700 bg-surface-800/60 p-1">
+        {([['overview', 'Overview'], ['completed', 'Completed Tickets']] as const).map(([key, label]) => {
+          const active = view === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setView(key)}
+              className={`inline-flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                active ? 'bg-primary-600/25 text-primary-200' : 'text-surface-400 hover:text-surface-200'
+              }`}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
+      {view === 'completed' ? (
+        <CompletedTicketsTab />
+      ) : (
+      <>
       {/* ── Maintenance Tally Card ── */}
       <div className="glass-panel rounded-xl px-5 py-4">
         <div className="flex items-center gap-2 mb-4">
@@ -521,6 +546,8 @@ export function MaintenanceQueuePage() {
             </div>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

@@ -419,6 +419,7 @@ export function registerMaintenanceHandlers(): void {
     return db.prepare(`
       SELECT mt.id, mt.ticket_number, mt.equipment_id, mt.reported_date, mt.completion_date,
         mt.issue_description, mt.severity, mt.maintenance_type, mt.document_type, mt.completion_outcome,
+        mt.list_archived_at,
         e.name as equipment_name, e.equipment_code,
         c.name as category_name,
         (SELECT ta.remarks FROM ticket_actions ta WHERE ta.ticket_id = mt.id ORDER BY ta.action_date DESC, ta.created_at DESC LIMIT 1) as last_remarks

@@ -622,6 +622,22 @@ const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    // Soft-clear bookkeeping for the admin "Archive List" feature. When an admin
+    // archives a section's closed list to a PDF snapshot, every included record is
+    // stamped with list_archived_at so it drops out of the on-screen completed list
+    // (the row, its per-document Drive PDF, and equipment history are all preserved).
+    // Local-only (not added to the cloud sync column lists).
+    id: '022_list_archive_columns',
+    up: (db: any) => {
+      for (const table of ['maintenance_tickets', 'equipment_loans', 'purchase_requests']) {
+        if (!tableExists(db, table)) continue;
+        if (!columnExists(db, table, 'list_archived_at')) {
+          db.exec(`ALTER TABLE ${table} ADD COLUMN list_archived_at TEXT`);
+        }
+      }
+    },
+  },
 ];
 
 export function runMigrations(db: any): void {

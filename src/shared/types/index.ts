@@ -334,6 +334,9 @@ export interface EquipmentLoan {
   // Signed release form (image or PDF) as a base64 data URL; required before an
   // OUTWARD loan can be closed. Local-only; merged into the archived release PDF.
   signed_form_data?: string | null;
+  // Stamped when a returned loan is captured in an admin "Archive List" snapshot,
+  // hiding it from the returned list without deleting the record.
+  list_archived_at?: string | null;
   created_at: string;
   updated_at: string;
   item_count?: number;
@@ -392,6 +395,9 @@ export interface PurchaseRequest {
   // Purchase invoice / receipt (image or PDF) as a base64 data URL; required before
   // the request can be marked FULFILLED. Local-only; merged into the archived PDF.
   invoice_data?: string | null;
+  // Stamped when a fulfilled request is captured in an admin "Archive List" snapshot,
+  // hiding it from the completed list without deleting the record.
+  list_archived_at?: string | null;
   created_at: string;
   updated_at: string;
   // Populated by getById; getAll provides aggregates only.
@@ -472,6 +478,8 @@ export interface CompletedHistoryEntry {
   equipment_code: string;
   category_name: string;
   last_remarks: string | null;
+  // Stamped when a completed ticket is captured in an admin "Archive List" snapshot.
+  list_archived_at?: string | null;
 }
 
 export interface ElectronAPI {

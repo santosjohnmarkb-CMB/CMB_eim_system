@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Wrench, Settings, LogOut, Package,
-  ChevronRight, ChevronDown, Camera, Lightbulb, PackageCheck, ShoppingCart,
+  ChevronRight, ChevronDown, Camera, Lightbulb, PackageCheck, ShoppingCart, Archive,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuthStore } from '../../stores/auth.store';
@@ -166,6 +166,15 @@ export function Sidebar() {
             active={location.pathname.startsWith('/purchase-requests')}
             onClick={() => navigate('/purchase-requests')}
           />
+
+          {isAdmin && (
+            <NavButton
+              icon={<Archive size={20} />}
+              label="Archives"
+              active={location.pathname.startsWith('/archives')}
+              onClick={() => navigate('/archives')}
+            />
+          )}
 
           {isAdmin && (
             <NavButton

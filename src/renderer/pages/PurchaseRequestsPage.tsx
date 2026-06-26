@@ -7,6 +7,7 @@ import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { DataTable, type Column } from '../components/common/DataTable';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
+import { ArchiveListButton } from '../components/common/ArchiveListButton';
 import { DEPARTMENT_CONFIG, PURCHASE_REQUEST_STATUS_CONFIG, REQUEST_TYPE_CONFIG } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import { printHtml, escapeHtml } from '../lib/print';
@@ -86,8 +87,10 @@ export function PurchaseRequestsPage() {
     [requests, activeDept],
   );
 
+  // The completed (FULFILLED) view hides requests already captured in an archived
+  // list snapshot (list_archived_at) so closed requests don't pile up.
   const viewRequests = useMemo(
-    () => deptRequests.filter((r) => r.status === view),
+    () => deptRequests.filter((r) => r.status === view && (view !== 'FULFILLED' || !r.list_archived_at)),
     [deptRequests, view],
   );
 
@@ -104,9 +107,10 @@ export function PurchaseRequestsPage() {
     return Array.from(map.entries());
   }, [viewRequests, view]);
 
-  const printList = () => {
-    const cfg = VIEWS.find((v) => v.key === view);
-    const rows = viewRequests.map((r) => {
+  // Build the printable/archivable list body (letterhead is added by the print/PDF
+  // wrapper). Shared by the on-screen Print button and the Archive List snapshot.
+  const buildListBody = (requests: PurchaseRequest[], viewLabel: string) => {
+    const rows = requests.map((r) => {
       const extra = (r.item_count ?? 1) > 1 ? ` (+${(r.item_count as number) - 1} more)` : '';
       return `
       <tr>
@@ -120,16 +124,20 @@ export function PurchaseRequestsPage() {
         <td style="text-align:right;">${fmtAmount(requestTotal(r))}</td>
       </tr>`;
     }).join('');
-    const body = `
+    return `
       <div class="header">
-        <h1>${escapeHtml(DEPARTMENT_CONFIG[activeDept].label)} — ${escapeHtml(cfg?.label || '')} Purchase Requests</h1>
+        <h1>${escapeHtml(DEPARTMENT_CONFIG[activeDept].label)} — ${escapeHtml(viewLabel)} Purchase Requests</h1>
         <p class="muted">As of ${escapeHtml(new Date().toLocaleDateString())}</p>
       </div>
       <table>
         <thead><tr><th>Request #</th><th>Date</th><th>Asset</th><th>Type</th><th>Current</th><th>Requested</th><th>Supplier</th><th>Amount</th></tr></thead>
         <tbody>${rows || '<tr><td colspan="8">No requests</td></tr>'}</tbody>
       </table>`;
-    printHtml('Purchase Requests', body);
+  };
+
+  const printList = () => {
+    const cfg = VIEWS.find((v) => v.key === view);
+    printHtml('Purchase Requests', buildListBody(viewRequests, cfg?.label || ''));
   };
 
   const columns: Column<PurchaseRequest>[] = [
@@ -202,7 +210,7 @@ export function PurchaseRequestsPage() {
         <div className="inline-flex rounded-lg border border-surface-700 bg-surface-800/60 p-1">
           {VIEWS.map((v) => {
             const active = view === v.key;
-            const count = deptRequests.filter((r) => r.status === v.key).length;
+            const count = deptRequests.filter((r) => r.status === v.key && (v.key !== 'FULFILLED' || !r.list_archived_at)).length;
             return (
               <button
                 key={v.key}
@@ -224,21 +232,35 @@ export function PurchaseRequestsPage() {
         completedGroups.length === 0 ? (
           <div className="glass-panel rounded-xl px-5 py-12 text-center text-surface-500 text-sm">No completed requests</div>
         ) : (
-          completedGroups.map(([month, items]) => (
-            <div key={month} className="glass-panel rounded-xl overflow-hidden">
-              <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
-                <h2 className="text-base font-semibold text-surface-200">{month}</h2>
-                <span className="text-xs text-surface-500 ml-1">({items.length})</span>
+          <>
+            {completedGroups.map(([month, items]) => (
+              <div key={month} className="glass-panel rounded-xl overflow-hidden">
+                <div className="flex items-center gap-2 px-5 py-4 border-b border-surface-700/40">
+                  <h2 className="text-base font-semibold text-surface-200">{month}</h2>
+                  <span className="text-xs text-surface-500 ml-1">({items.length})</span>
+                </div>
+                <DataTable
+                  columns={columns}
+                  data={items}
+                  onRowClick={(r) => navigate(`/purchase-requests/${r.id}`)}
+                  loading={false}
+                  emptyMessage="No requests"
+                />
               </div>
-              <DataTable
-                columns={columns}
-                data={items}
-                onRowClick={(r) => navigate(`/purchase-requests/${r.id}`)}
-                loading={false}
-                emptyMessage="No requests"
+            ))}
+            {/* Archive the active department's fulfilled requests into a PDF snapshot
+                (admin only), then clear them from this list. */}
+            <div className="flex justify-end">
+              <ArchiveListButton
+                section="purchase"
+                departmentLabel={DEPARTMENT_CONFIG[activeDept].label}
+                filenameBase={`${DEPARTMENT_CONFIG[activeDept].label} - Fulfilled Purchase Requests`}
+                recordIds={viewRequests.map((r) => r.id)}
+                buildDoc={() => ({ title: 'Purchase Requests', bodyHtml: buildListBody(viewRequests, 'Completed') })}
+                onArchived={fetchAll}
               />
             </div>
-          ))
+          </>
         )
       ) : (
         (() => {

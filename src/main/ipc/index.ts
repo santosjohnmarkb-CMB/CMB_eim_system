@@ -9,6 +9,7 @@ import { registerPurchaseRequestHandlers } from './purchase-requests.handlers';
 import { registerReportsHandlers } from './reports.handlers';
 import { registerSyncHandlers } from './sync.handlers';
 import { registerGoogleDriveHandlers } from './gdrive.handlers';
+import { registerArchiveHandlers } from './archive.handlers';
 import { registerAppHandlers } from './app.handlers';
 
 export function registerAllHandlers(): void {
@@ -23,5 +24,6 @@ export function registerAllHandlers(): void {
   registerReportsHandlers();
   registerSyncHandlers();
   registerGoogleDriveHandlers();
+  registerArchiveHandlers();
   registerAppHandlers();
 }

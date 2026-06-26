@@ -24,6 +24,7 @@ import { PurchaseRequestsPage } from './pages/PurchaseRequestsPage';
 import { PurchaseRequestNewPage } from './pages/PurchaseRequestNewPage';
 import { PurchaseRequestDetailPage } from './pages/PurchaseRequestDetailPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { ArchivesPage } from './pages/ArchivesPage';
 import { ToastContainer } from './components/common/Toast';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -108,6 +109,7 @@ export default function App() {
                   <Route path="/parts/adjust" element={<RoleGuard roles={['parts_clerk']}><StockAdjustmentPage /></RoleGuard>} />
                   <Route path="/parts/:id" element={<RoleGuard roles={['maintenance_lead', 'parts_clerk']}><PartsDetailPage /></RoleGuard>} />
                   <Route path="/settings" element={<RoleGuard roles={[]}><SettingsPage /></RoleGuard>} />
+                  <Route path="/archives" element={<RoleGuard roles={[]}><ArchivesPage /></RoleGuard>} />
                   <Route path="*" element={<DefaultRedirect />} />
                 </Routes>
               </Layout>

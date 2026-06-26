@@ -162,6 +162,9 @@ CREATE TABLE IF NOT EXISTS equipment_loans (
   -- after the loan is fully returned (status = RETURNED).
   archived_at TEXT,
   drive_file_id TEXT,
+  -- Soft-clear: stamped when a returned loan is included in an admin "Archive List"
+  -- snapshot, hiding it from the returned list without deleting the record.
+  list_archived_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -220,6 +223,9 @@ CREATE TABLE IF NOT EXISTS purchase_requests (
   -- after the request is marked FULFILLED.
   archived_at TEXT,
   drive_file_id TEXT,
+  -- Soft-clear: stamped when a fulfilled request is included in an admin "Archive List"
+  -- snapshot, hiding it from the completed list without deleting the record.
+  list_archived_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -283,6 +289,9 @@ CREATE TABLE IF NOT EXISTS maintenance_tickets (
   -- after the ticket is closed (repair_status = COMPLETED).
   archived_at TEXT,
   drive_file_id TEXT,
+  -- Soft-clear: stamped when a completed ticket is included in an admin "Archive List"
+  -- snapshot, hiding it from the completed-tickets list without deleting the record.
+  list_archived_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
