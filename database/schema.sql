@@ -154,6 +154,10 @@ CREATE TABLE IF NOT EXISTS equipment_loans (
   internal_notes TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'PARTIAL', 'RETURNED')),
   created_by TEXT NOT NULL DEFAULT '',
+  -- Signed equipment release form uploaded by the operator (image or PDF, stored as
+  -- a base64 data URL). Required before an OUTWARD loan can be closed; merged into
+  -- the archived release document. Stored locally only (excluded from cloud sync).
+  signed_form_data TEXT,
   -- Google Drive auto-archive: stamped when the loan's release document is uploaded
   -- after the loan is fully returned (status = RETURNED).
   archived_at TEXT,
@@ -208,6 +212,10 @@ CREATE TABLE IF NOT EXISTS purchase_requests (
   fulfilled_at TEXT,
   fulfilled_by TEXT,
   created_by TEXT NOT NULL DEFAULT '',
+  -- Purchase invoice / receipt uploaded by the operator (image or PDF, stored as a
+  -- base64 data URL). Required before the request can be marked FULFILLED; merged
+  -- into the archived request document. Stored locally only (excluded from cloud sync).
+  invoice_data TEXT,
   -- Google Drive auto-archive: stamped when the request document is uploaded
   -- after the request is marked FULFILLED.
   archived_at TEXT,
@@ -266,6 +274,11 @@ CREATE TABLE IF NOT EXISTS maintenance_tickets (
   project_date TEXT,
   verified_by TEXT,
   document_type TEXT NOT NULL DEFAULT 'repair' CHECK (document_type IN ('maintenance', 'repair', 'update', 'loss')),
+  -- Service completion document uploaded by the operator (repair receipt or service
+  -- invoice; image or PDF, stored as a base64 data URL). Required before a non-loss
+  -- ticket can be marked COMPLETED; merged into the archived ticket document. Stored
+  -- locally only (excluded from cloud sync).
+  service_doc_data TEXT,
   -- Google Drive auto-archive: stamped when the ticket document is uploaded
   -- after the ticket is closed (repair_status = COMPLETED).
   archived_at TEXT,

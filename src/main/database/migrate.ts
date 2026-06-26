@@ -603,6 +603,25 @@ const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    // Operator-uploaded supporting document per workflow (image or PDF, stored as a
+    // base64 data URL): the signed release form for loans, the purchase invoice for
+    // purchase requests, and the service completion document for maintenance tickets.
+    // Each is required before the workflow's closing action and is merged into the
+    // archived Drive PDF. Kept local-only (not added to the cloud sync column lists).
+    id: '021_workflow_attachments',
+    up: (db: any) => {
+      if (tableExists(db, 'equipment_loans') && !columnExists(db, 'equipment_loans', 'signed_form_data')) {
+        db.exec('ALTER TABLE equipment_loans ADD COLUMN signed_form_data TEXT');
+      }
+      if (tableExists(db, 'purchase_requests') && !columnExists(db, 'purchase_requests', 'invoice_data')) {
+        db.exec('ALTER TABLE purchase_requests ADD COLUMN invoice_data TEXT');
+      }
+      if (tableExists(db, 'maintenance_tickets') && !columnExists(db, 'maintenance_tickets', 'service_doc_data')) {
+        db.exec('ALTER TABLE maintenance_tickets ADD COLUMN service_doc_data TEXT');
+      }
+    },
+  },
 ];
 
 export function runMigrations(db: any): void {

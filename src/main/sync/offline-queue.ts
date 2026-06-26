@@ -22,9 +22,16 @@ export interface QueuedAction {
   created_at: string;
 }
 
+// Operator-uploaded attachments (signed form / invoice / service doc) are stored as
+// large base64 data URLs and are intentionally local-only — they are merged into the
+// archived Drive PDF rather than synced. Strip them from every cloud payload so they
+// never bloat realtime traffic or break upserts against tables lacking these columns.
+const LOCAL_ONLY_COLUMNS = new Set(['signed_form_data', 'invoice_data', 'service_doc_data']);
+
 export function coerceForCloud(payload: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(payload)) {
+    if (LOCAL_ONLY_COLUMNS.has(key)) continue;
     if (key === 'is_active' || key === 'is_required') {
       result[key] = value === 1 || value === true;
     } else {

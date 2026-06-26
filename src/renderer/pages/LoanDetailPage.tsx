@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, RotateCcw, Trash2, PackageCheck, ArrowUpRight, ArrowDownLeft, Pencil, FileSignature } from 'lucide-react';
+import { ArrowLeft, RotateCcw, Trash2, PackageCheck, ArrowUpRight, ArrowDownLeft, Pencil, FileSignature, Upload, CheckCircle2 } from 'lucide-react';
 import { useLoansStore } from '../stores/loans.store';
 import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { Input } from '../components/common/Input';
 import { Modal } from '../components/common/Modal';
+import { DocumentUpload } from '../components/common/DocumentUpload';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { useToast } from '../hooks';
 import { DEPARTMENT_CONFIG, LOAN_STATUS_CONFIG, LOAN_DIRECTION_CONFIG } from '../../shared/constants';
@@ -27,7 +28,7 @@ export function LoanDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const toast = useToast();
-  const { getById, update, returnItems, returnOrder, remove } = useLoansStore();
+  const { getById, update, returnItems, returnOrder, uploadSignedForm, clearSignedForm, remove } = useLoansStore();
   const role = useAuthStore((s) => s.user?.role);
   const isAdmin = role === 'admin';
   const isViewer = role === 'viewer';
@@ -35,6 +36,11 @@ export function LoanDetailPage() {
   const [loan, setLoan] = useState<EquipmentLoanWithItems | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+
+  const [showUpload, setShowUpload] = useState(false);
+  const [uploadValue, setUploadValue] = useState<string | null>(null);
+  const [savingUpload, setSavingUpload] = useState(false);
+  const [returnAfterUpload, setReturnAfterUpload] = useState(false);
 
   const [showEdit, setShowEdit] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
@@ -69,7 +75,7 @@ export function LoanDetailPage() {
     setBusy(false);
   };
 
-  const handleReturnAll = async () => {
+  const doReturnAll = async () => {
     if (!id) return;
     setBusy(true);
     try {
@@ -80,6 +86,45 @@ export function LoanDetailPage() {
       toast.error(err.message || 'Failed to return items');
     }
     setBusy(false);
+  };
+
+  const handleReturnAll = () => {
+    // OUTWARD loans cannot be closed until the signed release form is uploaded.
+    if ((loan?.direction ?? 'OUTWARD') === 'OUTWARD' && !loan?.signed_form_data) {
+      toast.info('Upload the signed release form to close this loan.');
+      openUpload(true);
+      return;
+    }
+    void doReturnAll();
+  };
+
+  const openUpload = (forReturn = false) => {
+    setUploadValue(loan?.signed_form_data ?? null);
+    setReturnAfterUpload(forReturn);
+    setShowUpload(true);
+  };
+
+  const handleSaveUpload = async () => {
+    if (!id) return;
+    setSavingUpload(true);
+    try {
+      if (uploadValue) {
+        await uploadSignedForm(id, uploadValue);
+        toast.success('Signed form uploaded');
+      } else {
+        await clearSignedForm(id);
+        toast.success('Signed form removed');
+      }
+      setShowUpload(false);
+      await load();
+      if (returnAfterUpload && uploadValue) {
+        setReturnAfterUpload(false);
+        await doReturnAll();
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save signed form');
+    }
+    setSavingUpload(false);
   };
 
   const handleDelete = async () => {
@@ -195,9 +240,15 @@ export function LoanDetailPage() {
           </div>
           <p className="text-sm text-surface-500">{DEPARTMENT_CONFIG[loan.department].label} · {dirCfg.description}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap justify-end">
           {isOutward && !isViewer && (
             <Button variant="secondary" onClick={handlePrintReleaseForm}><FileSignature size={16} /> Print Release Form</Button>
+          )}
+          {isOutward && !isViewer && (
+            <Button variant="secondary" onClick={() => openUpload(false)}>
+              {loan.signed_form_data ? <CheckCircle2 size={16} className="text-success-400" /> : <Upload size={16} />}
+              {loan.signed_form_data ? 'Signed Form Uploaded' : 'Upload Signed Form'}
+            </Button>
           )}
           {isAdmin && (
             <Button variant="secondary" onClick={openEdit}><Pencil size={16} /> Edit</Button>
@@ -287,6 +338,28 @@ export function LoanDetailPage() {
           <Button variant="danger" onClick={handleDelete} loading={busy}><Trash2 size={16} /> Delete Loan</Button>
         </div>
       )}
+
+      <Modal isOpen={showUpload} onClose={() => setShowUpload(false)} title="Signed Release Form">
+        <div className="space-y-4">
+          <p className="text-sm text-surface-400">
+            Upload a scan or photo of the signed equipment release form (image or PDF). This is required
+            before the loan can be closed, and is included in the archived release document.
+          </p>
+          <DocumentUpload
+            label="Signed Release Form"
+            hint="Upload the signed form (image or PDF)"
+            value={uploadValue}
+            onChange={setUploadValue}
+            disabled={savingUpload}
+          />
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="secondary" onClick={() => setShowUpload(false)}>Cancel</Button>
+            <Button onClick={handleSaveUpload} loading={savingUpload}>
+              {returnAfterUpload ? 'Save & Return All' : 'Save'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal isOpen={showEdit} onClose={() => setShowEdit(false)} title="Edit Loan Details" size="lg">
         <div className="space-y-4">

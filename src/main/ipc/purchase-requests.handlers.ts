@@ -2,7 +2,7 @@ import { ipcMain } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../database/index';
 import { requireSession, requireWriteAccess } from './session';
-import { PurchaseRequestCreateSchema, PurchaseRequestUpdateSchema } from '../../shared/schemas';
+import { PurchaseRequestCreateSchema, PurchaseRequestUpdateSchema, AttachmentDataSchema } from '../../shared/schemas';
 import { PURCHASE_REQUEST_DEPT_PREFIX } from '../../shared/constants';
 import { sessionDepartment } from './department';
 import { archivePurchaseRequest } from '../sync/archive-eim';
@@ -156,11 +156,37 @@ export function registerPurchaseRequestHandlers(): void {
     return { ...updated, items };
   });
 
+  // Attach the purchase invoice / receipt (image or PDF) required before fulfillment.
+  // Editors (admin or managers) may upload, mirroring the edit permission.
+  ipcMain.handle('db:purchaseRequests:uploadInvoice', (event: any, id: string, dataUrl: unknown) => {
+    const user = requireSession(event);
+    getRequestInDept(event, id);
+    if (user.role !== 'admin' && !['equipment_manager', 'inventory_manager'].includes(user.role)) {
+      throw new Error('You do not have permission to upload an invoice.');
+    }
+    const parsed = AttachmentDataSchema.parse(dataUrl);
+    db.prepare("UPDATE purchase_requests SET invoice_data = ?, updated_at = datetime('now') WHERE id = ?").run(parsed, id);
+    return { success: true };
+  });
+
+  ipcMain.handle('db:purchaseRequests:clearInvoice', (event: any, id: string) => {
+    const user = requireSession(event);
+    getRequestInDept(event, id);
+    if (user.role !== 'admin' && !['equipment_manager', 'inventory_manager'].includes(user.role)) {
+      throw new Error('You do not have permission to remove an invoice.');
+    }
+    db.prepare("UPDATE purchase_requests SET invoice_data = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
+    return { success: true };
+  });
+
   // Mark a request fulfilled (admin only): moves it to the completed list.
   ipcMain.handle('db:purchaseRequests:fulfill', (event: any, id: string) => {
     const user = requireSession(event);
     if (user.role !== 'admin') throw new Error('Only admins can mark a request as fulfilled.');
-    getRequestInDept(event, id);
+    const request = getRequestInDept(event, id);
+    if (!request.invoice_data) {
+      throw new Error('Upload the purchase invoice before marking this request fulfilled.');
+    }
     db.prepare(`
       UPDATE purchase_requests
       SET status = 'FULFILLED', fulfilled_at = ?, fulfilled_by = ?, updated_at = datetime('now')

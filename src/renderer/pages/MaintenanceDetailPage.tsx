@@ -11,10 +11,13 @@ import {
   ChevronUp,
   Printer,
   Pencil,
+  Upload,
+  CheckCircle2,
 } from 'lucide-react';
 import { useMaintenanceStore } from '../stores/maintenance.store';
 import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
+import { DocumentUpload } from '../components/common/DocumentUpload';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { REPAIR_STATUS_CONFIG, COMPLETION_OUTCOME_CONFIG, DOCUMENT_TYPE_CONFIG } from '../lib/constants';
 import { printHtml } from '../lib/print';
@@ -214,6 +217,7 @@ export function MaintenanceDetailPage() {
   const isViewer = user?.role === 'viewer';
   const {
     getById, updateStatus, update, addNote, getNotes, getActions, addAction, updateAction, deleteAction, deleteTicket,
+    uploadServiceDoc, clearServiceDoc,
   } = useMaintenanceStore();
 
   const [ticket, setTicket] = useState<MaintenanceTicket | null>(null);
@@ -224,6 +228,10 @@ export function MaintenanceDetailPage() {
   const [editingCell, setEditingCell] = useState<{ rowIdx: number; col: string } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showOutcomeModal, setShowOutcomeModal] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
+  const [uploadValue, setUploadValue] = useState<string | null>(null);
+  const [savingUpload, setSavingUpload] = useState(false);
+  const [completeAfterUpload, setCompleteAfterUpload] = useState(false);
   const [showActionModal, setShowActionModal] = useState(false);
   const [actionForm, setActionForm] = useState({ action_date: '', action_taken: '', remarks: '', personnel: '' });
   const [savingAction, setSavingAction] = useState(false);
@@ -257,6 +265,12 @@ export function MaintenanceDetailPage() {
     if (!nextStatus) return;
     // Completing a ticket requires an explicit outcome.
     if (nextStatus === 'COMPLETED') {
+      // Non-loss tickets cannot be completed without the service completion document.
+      if (!isLoss && !ticket.service_doc_data) {
+        toast.info('Upload the service completion document to complete this ticket.');
+        openUpload(true);
+        return;
+      }
       setShowOutcomeModal(true);
       return;
     }
@@ -265,6 +279,34 @@ export function MaintenanceDetailPage() {
       toast.success(`Status → ${REPAIR_STATUS_CONFIG[nextStatus]?.label}`);
       load();
     } catch (err: any) { toast.error(err.message); }
+  };
+
+  const openUpload = (forComplete = false) => {
+    setUploadValue(ticket.service_doc_data ?? null);
+    setCompleteAfterUpload(forComplete);
+    setShowUpload(true);
+  };
+
+  const handleSaveUpload = async () => {
+    setSavingUpload(true);
+    try {
+      if (uploadValue) {
+        await uploadServiceDoc(ticket.id, uploadValue);
+        toast.success('Service document uploaded');
+      } else {
+        await clearServiceDoc(ticket.id);
+        toast.success('Service document removed');
+      }
+      setShowUpload(false);
+      await load();
+      if (completeAfterUpload && uploadValue) {
+        setCompleteAfterUpload(false);
+        setShowOutcomeModal(true);
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save service document');
+    }
+    setSavingUpload(false);
   };
 
   const handleComplete = async (outcome: CompletionOutcome) => {
@@ -453,6 +495,18 @@ export function MaintenanceDetailPage() {
           <ArrowLeft size={16} /> Back to Queue
         </Button>
         <div className="flex-1" />
+        {!isViewer && !isLoss && ticket.repair_status !== 'COMPLETED' && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => openUpload(false)}
+            className="print:hidden"
+          >
+            {ticket.service_doc_data
+              ? <><CheckCircle2 size={14} className="text-success-400" /> Service Document Uploaded</>
+              : <><Upload size={14} /> Service Completion Document</>}
+          </Button>
+        )}
         {isAdmin && (
           <Button
             variant="ghost"
@@ -866,6 +920,32 @@ export function MaintenanceDetailPage() {
             <div className="flex justify-end mt-5">
               <Button variant="ghost" size="sm" onClick={() => setShowOutcomeModal(false)}>
                 Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Service Completion Document Upload Modal ── */}
+      {showUpload && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm print:hidden">
+          <div className="bg-surface-900 border border-surface-700 rounded-xl shadow-2xl w-full max-w-md mx-4 p-6">
+            <h3 className="text-lg font-semibold text-surface-100 mb-1">Service Completion Document</h3>
+            <p className="text-sm text-surface-400 mb-5">
+              Upload the repair receipt or service invoice (image or PDF). This is required before the
+              ticket can be completed, and is included in the archived report.
+            </p>
+            <DocumentUpload
+              label="Repair Receipt / Service Invoice"
+              hint="Upload the receipt or invoice (image or PDF)"
+              value={uploadValue}
+              onChange={setUploadValue}
+              disabled={savingUpload}
+            />
+            <div className="flex justify-end gap-3 mt-5">
+              <Button variant="ghost" size="sm" onClick={() => setShowUpload(false)}>Cancel</Button>
+              <Button size="sm" onClick={handleSaveUpload} loading={savingUpload}>
+                {completeAfterUpload ? 'Save & Continue' : 'Save'}
               </Button>
             </div>
           </div>

@@ -11,6 +11,8 @@ interface LoansState {
   update: (loanId: string, data: any) => Promise<EquipmentLoan>;
   returnItems: (loanId: string, itemIds: string[]) => Promise<void>;
   returnOrder: (loanId: string) => Promise<void>;
+  uploadSignedForm: (loanId: string, dataUrl: string) => Promise<void>;
+  clearSignedForm: (loanId: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
 }
 
@@ -52,6 +54,14 @@ export const useLoansStore = create<LoansState>((set, get) => ({
   returnOrder: async (loanId: string) => {
     await ipcInvoke('db:loans:returnOrder', loanId);
     await get().fetchAll();
+  },
+
+  uploadSignedForm: async (loanId: string, dataUrl: string) => {
+    await ipcInvoke('db:loans:uploadSignedForm', loanId, dataUrl);
+  },
+
+  clearSignedForm: async (loanId: string) => {
+    await ipcInvoke('db:loans:clearSignedForm', loanId);
   },
 
   remove: async (id: string) => {

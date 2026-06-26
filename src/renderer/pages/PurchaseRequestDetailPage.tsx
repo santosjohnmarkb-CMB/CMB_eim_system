@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Trash2, ShoppingCart, Pencil, Printer, CheckCircle2, XCircle } from 'lucide-react';
+import { ArrowLeft, Trash2, ShoppingCart, Pencil, Printer, CheckCircle2, XCircle, Upload } from 'lucide-react';
 import { usePurchaseRequestsStore } from '../stores/purchaseRequests.store';
 import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { Input } from '../components/common/Input';
 import { Modal } from '../components/common/Modal';
+import { DocumentUpload } from '../components/common/DocumentUpload';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { useToast } from '../hooks';
 import {
@@ -59,7 +60,7 @@ export function PurchaseRequestDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const toast = useToast();
-  const { getById, update, fulfill, cancel, remove } = usePurchaseRequestsStore();
+  const { getById, update, fulfill, cancel, uploadInvoice, clearInvoice, remove } = usePurchaseRequestsStore();
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === 'admin';
   const canEdit = isAdmin || MANAGER_ROLES.includes(user?.role || '');
@@ -67,6 +68,11 @@ export function PurchaseRequestDetailPage() {
   const [request, setRequest] = useState<PurchaseRequest | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+
+  const [showUpload, setShowUpload] = useState(false);
+  const [uploadValue, setUploadValue] = useState<string | null>(null);
+  const [savingUpload, setSavingUpload] = useState(false);
+  const [fulfillAfterUpload, setFulfillAfterUpload] = useState(false);
 
   const [showEdit, setShowEdit] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
@@ -122,9 +128,8 @@ export function PurchaseRequestDetailPage() {
     setSavingEdit(false);
   };
 
-  const handleFulfill = async () => {
+  const doFulfill = async () => {
     if (!id) return;
-    if (!window.confirm('Mark this request as fulfilled? It will move to the completed list.')) return;
     setBusy(true);
     try {
       await fulfill(id);
@@ -134,6 +139,49 @@ export function PurchaseRequestDetailPage() {
       toast.error(err.message || 'Failed to fulfill request');
     }
     setBusy(false);
+  };
+
+  const handleFulfill = async () => {
+    if (!id) return;
+    // A purchase invoice must be on file before the request can be fulfilled.
+    if (!request?.invoice_data) {
+      toast.info('Upload the purchase invoice to fulfill this request.');
+      openUpload(true);
+      return;
+    }
+    if (!window.confirm('Mark this request as fulfilled? It will move to the completed list.')) return;
+    await doFulfill();
+  };
+
+  const openUpload = (forFulfill = false) => {
+    setUploadValue(request?.invoice_data ?? null);
+    setFulfillAfterUpload(forFulfill);
+    setShowUpload(true);
+  };
+
+  const handleSaveUpload = async () => {
+    if (!id) return;
+    setSavingUpload(true);
+    try {
+      if (uploadValue) {
+        await uploadInvoice(id, uploadValue);
+        toast.success('Invoice uploaded');
+      } else {
+        await clearInvoice(id);
+        toast.success('Invoice removed');
+      }
+      setShowUpload(false);
+      await load();
+      if (fulfillAfterUpload && uploadValue) {
+        setFulfillAfterUpload(false);
+        if (window.confirm('Mark this request as fulfilled? It will move to the completed list.')) {
+          await doFulfill();
+        }
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save invoice');
+    }
+    setSavingUpload(false);
   };
 
   const handleCancel = async () => {
@@ -202,6 +250,12 @@ export function PurchaseRequestDetailPage() {
           <Button variant="secondary" onClick={() => printPurchaseRequestForm(request)}><Printer size={16} /> Print Request</Button>
           {canEdit && isPending && (
             <Button variant="secondary" onClick={openEdit}><Pencil size={16} /> Edit</Button>
+          )}
+          {canEdit && isPending && (
+            <Button variant="secondary" onClick={() => openUpload(false)}>
+              {request.invoice_data ? <CheckCircle2 size={16} className="text-success-400" /> : <Upload size={16} />}
+              {request.invoice_data ? 'Invoice Uploaded' : 'Upload Purchase Invoice'}
+            </Button>
           )}
           {isAdmin && isPending && (
             <Button onClick={handleFulfill} loading={busy}><CheckCircle2 size={16} /> Mark Fulfilled</Button>
@@ -299,6 +353,28 @@ export function PurchaseRequestDetailPage() {
           )}
         </div>
       )}
+
+      <Modal isOpen={showUpload} onClose={() => setShowUpload(false)} title="Purchase Invoice">
+        <div className="space-y-4">
+          <p className="text-sm text-surface-400">
+            Upload the purchase invoice or receipt (image or PDF). This is required before the request
+            can be marked fulfilled, and is included in the archived request document.
+          </p>
+          <DocumentUpload
+            label="Purchase Invoice / Receipt"
+            hint="Upload the invoice or receipt (image or PDF)"
+            value={uploadValue}
+            onChange={setUploadValue}
+            disabled={savingUpload}
+          />
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="secondary" onClick={() => setShowUpload(false)}>Cancel</Button>
+            <Button onClick={handleSaveUpload} loading={savingUpload}>
+              {fulfillAfterUpload ? 'Save & Continue' : 'Save'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal isOpen={showEdit} onClose={() => setShowEdit(false)} title="Edit Purchase Request" size="lg">
         <div className="space-y-4">

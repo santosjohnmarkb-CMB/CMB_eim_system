@@ -11,6 +11,8 @@ interface PurchaseRequestsState {
   update: (id: string, data: any) => Promise<PurchaseRequest>;
   fulfill: (id: string) => Promise<PurchaseRequest>;
   cancel: (id: string) => Promise<PurchaseRequest>;
+  uploadInvoice: (id: string, dataUrl: string) => Promise<void>;
+  clearInvoice: (id: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
 }
 
@@ -54,6 +56,14 @@ export const usePurchaseRequestsStore = create<PurchaseRequestsState>((set, get)
     const result = await ipcInvoke<PurchaseRequest>('db:purchaseRequests:cancel', id);
     await get().fetchAll();
     return result;
+  },
+
+  uploadInvoice: async (id: string, dataUrl: string) => {
+    await ipcInvoke('db:purchaseRequests:uploadInvoice', id, dataUrl);
+  },
+
+  clearInvoice: async (id: string) => {
+    await ipcInvoke('db:purchaseRequests:clearInvoice', id);
   },
 
   remove: async (id: string) => {

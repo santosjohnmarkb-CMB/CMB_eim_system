@@ -2,7 +2,7 @@ import { ipcMain } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../database/index';
 import { requireSession, requireWriteAccess } from './session';
-import { MaintenanceTicketCreateSchema, MaintenanceTicketUpdateSchema, MaintenanceNoteSchema, TicketActionSchema, TicketActionUpdateSchema } from '../../shared/schemas';
+import { MaintenanceTicketCreateSchema, MaintenanceTicketUpdateSchema, MaintenanceNoteSchema, TicketActionSchema, TicketActionUpdateSchema, AttachmentDataSchema } from '../../shared/schemas';
 import { pushOperationalToCloud } from '../sync/operational-sync';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { sessionDepartment, categoriesForDepartment, departmentForCategory, assertEquipmentInDepartment } from './department';
@@ -168,12 +168,38 @@ export function registerMaintenanceHandlers(): void {
     return ticket;
   });
 
+  // Attach the service completion document (repair receipt / service invoice) required
+  // before a non-loss ticket can be completed.
+  ipcMain.handle('db:maintenance:uploadServiceDoc', (event: any, id: string, dataUrl: unknown) => {
+    requireWriteAccess(event);
+    const ticket: any = db.prepare('SELECT id FROM maintenance_tickets WHERE id = ?').get(id);
+    if (!ticket) throw new Error('Ticket not found');
+    const parsed = AttachmentDataSchema.parse(dataUrl);
+    db.prepare("UPDATE maintenance_tickets SET service_doc_data = ?, updated_at = datetime('now') WHERE id = ?").run(parsed, id);
+    return { success: true };
+  });
+
+  ipcMain.handle('db:maintenance:clearServiceDoc', (event: any, id: string) => {
+    requireWriteAccess(event);
+    const ticket: any = db.prepare('SELECT id FROM maintenance_tickets WHERE id = ?').get(id);
+    if (!ticket) throw new Error('Ticket not found');
+    db.prepare("UPDATE maintenance_tickets SET service_doc_data = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
+    return { success: true };
+  });
+
   ipcMain.handle('db:maintenance:updateStatus', (event: any, id: string, newStatus: string, outcome?: string | null) => {
     const user = requireWriteAccess(event);
     const ticket: any = db.prepare('SELECT * FROM maintenance_tickets WHERE id = ?').get(id);
     if (!ticket) throw new Error('Ticket not found');
 
     const isLoss = ticket.document_type === 'loss';
+
+    // A non-loss ticket can only be completed once its service completion document
+    // (repair receipt / service invoice) is on file. Loss tickets have no such
+    // document, so they are exempt.
+    if (newStatus === 'COMPLETED' && !isLoss && !ticket.service_doc_data) {
+      throw new Error('Upload the service completion document before completing this ticket.');
+    }
 
     // Resolve the completion outcome (only relevant when completing a ticket).
     // Defaults: repair tickets -> 'repaired', loss tickets -> 'found'.

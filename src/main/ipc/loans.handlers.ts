@@ -2,7 +2,7 @@ import { ipcMain } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../database/index';
 import { requireSession, requireWriteAccess } from './session';
-import { LoanCreateSchema, LoanUpdateSchema, LoanReturnSchema } from '../../shared/schemas';
+import { LoanCreateSchema, LoanUpdateSchema, LoanReturnSchema, AttachmentDataSchema } from '../../shared/schemas';
 import { LOAN_DEPT_PREFIX, LOAN_DIRECTION_CONFIG } from '../../shared/constants';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { pushOperationalToCloud } from '../sync/operational-sync';
@@ -101,7 +101,11 @@ export function registerLoanHandlers(): void {
     return db.prepare(`
       SELECT l.*,
         (SELECT COUNT(*) FROM equipment_loan_items li WHERE li.loan_id = l.id) as item_count,
-        (SELECT COUNT(*) FROM equipment_loan_items li WHERE li.loan_id = l.id AND li.status = 'OUT') as out_count
+        (SELECT COUNT(*) FROM equipment_loan_items li WHERE li.loan_id = l.id AND li.status = 'OUT') as out_count,
+        (SELECT GROUP_CONCAT(COALESCE(e.name, li.item_name), ', ')
+           FROM equipment_loan_items li
+           LEFT JOIN equipment_items e ON e.id = li.equipment_id
+           WHERE li.loan_id = l.id) as equipment_names
       FROM equipment_loans l
       ${where}
       ORDER BY
@@ -208,10 +212,48 @@ export function registerLoanHandlers(): void {
     return db.prepare('SELECT * FROM equipment_loans WHERE id = ?').get(id);
   });
 
+  // Whether returning `itemIds` would leave no OUT items, i.e. close the loan.
+  const wouldCloseLoan = (loanId: string, itemIds: string[]): boolean => {
+    const currentOut: any = db.prepare(
+      "SELECT COUNT(*) as c FROM equipment_loan_items WHERE loan_id = ? AND status = 'OUT'",
+    ).get(loanId);
+    if ((currentOut?.c || 0) === 0) return false;
+    if (itemIds.length === 0) return false;
+    const placeholders = itemIds.map(() => '?').join(',');
+    const remaining: any = db.prepare(
+      `SELECT COUNT(*) as c FROM equipment_loan_items WHERE loan_id = ? AND status = 'OUT' AND id NOT IN (${placeholders})`,
+    ).get(loanId, ...itemIds);
+    return (remaining?.c || 0) === 0;
+  };
+
+  // An OUTWARD loan can only be closed once its signed release form is on file.
+  const assertSignedFormBeforeClose = (loan: any): void => {
+    if (loan.direction === 'OUTWARD' && !loan.signed_form_data) {
+      throw new Error('Upload the signed release form before closing this loan.');
+    }
+  };
+
+  ipcMain.handle('db:loans:uploadSignedForm', (event: any, id: string, dataUrl: unknown) => {
+    requireWriteAccess(event);
+    getLoanInDept(event, id);
+    const parsed = AttachmentDataSchema.parse(dataUrl);
+    db.prepare("UPDATE equipment_loans SET signed_form_data = ?, updated_at = datetime('now') WHERE id = ?").run(parsed, id);
+    return { success: true };
+  });
+
+  ipcMain.handle('db:loans:clearSignedForm', (event: any, id: string) => {
+    requireWriteAccess(event);
+    getLoanInDept(event, id);
+    db.prepare("UPDATE equipment_loans SET signed_form_data = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
+    return { success: true };
+  });
+
   ipcMain.handle('db:loans:returnItems', (event: any, loanId: string, data: unknown) => {
     const user = requireWriteAccess(event);
-    getLoanInDept(event, loanId);
+    const loan = getLoanInDept(event, loanId);
     const input = LoanReturnSchema.parse(data);
+
+    if (wouldCloseLoan(loanId, input.item_ids)) assertSignedFormBeforeClose(loan);
 
     const affected: { equipment_id: string; asset_id: string | null }[] = [];
     const tx = db.transaction(() => {
@@ -232,7 +274,13 @@ export function registerLoanHandlers(): void {
 
   ipcMain.handle('db:loans:returnOrder', (event: any, loanId: string) => {
     const user = requireWriteAccess(event);
-    getLoanInDept(event, loanId);
+    const loan = getLoanInDept(event, loanId);
+
+    // Returning all items closes the loan, so the signed form must already be on file.
+    const outCount: any = db.prepare(
+      "SELECT COUNT(*) as c FROM equipment_loan_items WHERE loan_id = ? AND status = 'OUT'",
+    ).get(loanId);
+    if ((outCount?.c || 0) > 0) assertSignedFormBeforeClose(loan);
 
     const affected: { equipment_id: string; asset_id: string | null }[] = [];
     const tx = db.transaction(() => {

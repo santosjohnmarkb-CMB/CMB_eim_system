@@ -12,6 +12,8 @@ interface MaintenanceState {
   create: (data: any) => Promise<MaintenanceTicket>;
   update: (id: string, data: any) => Promise<MaintenanceTicket>;
   updateStatus: (id: string, newStatus: string, outcome?: string | null) => Promise<void>;
+  uploadServiceDoc: (id: string, dataUrl: string) => Promise<void>;
+  clearServiceDoc: (id: string) => Promise<void>;
   addNote: (data: any) => Promise<MaintenanceNote>;
   getNotes: (ticketId: string) => Promise<MaintenanceNote[]>;
   consumeParts: (ticketId: string, parts: any[]) => Promise<void>;
@@ -68,6 +70,14 @@ export const useMaintenanceStore = create<MaintenanceState>((set, get) => ({
   updateStatus: async (id: string, newStatus: string, outcome?: string | null) => {
     await ipcInvoke('db:maintenance:updateStatus', id, newStatus, outcome ?? null);
     await get().fetchAll();
+  },
+
+  uploadServiceDoc: async (id: string, dataUrl: string) => {
+    await ipcInvoke('db:maintenance:uploadServiceDoc', id, dataUrl);
+  },
+
+  clearServiceDoc: async (id: string) => {
+    await ipcInvoke('db:maintenance:clearServiceDoc', id);
   },
 
   addNote: async (data: any) => {

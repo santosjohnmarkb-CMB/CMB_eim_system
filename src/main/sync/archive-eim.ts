@@ -20,6 +20,7 @@ import { buildMaintenanceForm } from '../../shared/forms/maintenanceForm';
 import { buildLoanReleaseForm } from '../../shared/forms/loanForm';
 import { buildPurchaseRequestForm } from '../../shared/forms/purchaseForm';
 import { renderDocumentToPdf } from '../pdf/html-to-pdf';
+import { appendAttachmentToPdf } from '../pdf/merge-pdf';
 import {
   resolveEimArchivePath,
   sanitizeFileName,
@@ -35,9 +36,13 @@ async function archiveAndStamp(
   title: string,
   filenameBase: string,
   bodyHtml: string,
+  attachmentDataUrl?: string | null,
 ): Promise<void> {
   const db = getDatabase();
-  const pdf = await renderDocumentToPdf(title, bodyHtml);
+  const formPdf = await renderDocumentToPdf(title, bodyHtml);
+  // Merge the operator-uploaded supporting document (signed form / invoice / service
+  // doc) into one combined PDF so the archived file is self-contained.
+  const pdf = await appendAttachmentToPdf(formPdf, attachmentDataUrl);
   const parts = resolveEimArchivePath(kind, completedAt);
   const filename = `${sanitizeFileName(filenameBase)}.pdf`;
   const result = await uploadOrSaveArchive(parts, [{ filename, buffer: pdf }]);
@@ -78,6 +83,7 @@ export async function archiveMaintenanceTicket(id: string): Promise<void> {
       `${docTypeLabel} ${ticket.ticket_number}`,
       `${ticket.ticket_number} - ${docTypeLabel}`,
       body,
+      ticket.service_doc_data,
     );
   } catch (err) {
     console.error('[Archive] maintenance ticket failed:', err instanceof Error ? err.message : err);
@@ -130,6 +136,7 @@ export async function archiveLoan(id: string): Promise<void> {
       `Equipment Release Form ${loan.loan_number}`,
       `${loan.loan_number} - Equipment Release Form`,
       body,
+      loan.signed_form_data,
     );
   } catch (err) {
     console.error('[Archive] loan failed:', err instanceof Error ? err.message : err);
@@ -158,6 +165,7 @@ export async function archivePurchaseRequest(id: string): Promise<void> {
       `Purchase Request ${request.request_number}`,
       `${request.request_number} - Purchase Request`,
       body,
+      request.invoice_data,
     );
   } catch (err) {
     console.error('[Archive] purchase request failed:', err instanceof Error ? err.message : err);

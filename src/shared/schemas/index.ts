@@ -276,6 +276,17 @@ const PhotoDataSchema = z
   .nullable()
   .optional();
 
+// Supporting document attachment (signed form / invoice / service doc) as a base64
+// data URL. Accepts images or PDFs. PDFs can be large, so the cap is raised to ~25MB
+// of base64 (≈18MB raw). Used by the loan / purchase / maintenance upload handlers.
+export const AttachmentDataSchema = z
+  .string()
+  .max(25_000_000)
+  .regex(
+    /^data:(image\/(png|jpeg|jpg|webp)|application\/pdf);base64,/,
+    'Attachment must be an image or a PDF',
+  );
+
 // A single equipment line item on a purchase request.
 export const PurchaseRequestItemSchema = z.object({
   requested_asset: z.string().min(1).max(200),

@@ -93,6 +93,7 @@ export function LoansPage() {
           <td>${escapeHtml(l.loan_number)}</td>
           <td>${escapeHtml(l.person_or_org)}</td>
           <td>${escapeHtml(l.purpose) || '—'}</td>
+          <td>${escapeHtml(l.equipment_names) || '—'}</td>
           <td>${escapeHtml(l.location) || '—'}</td>
           <td>${l.out_count ?? 0} / ${l.item_count ?? 0}</td>
           <td>${escapeHtml(fmtDate(l.loaned_date))}</td>
@@ -101,8 +102,8 @@ export function LoansPage() {
       return `
         <h2>${escapeHtml(DEPARTMENT_CONFIG[dept].label)}</h2>
         <table>
-          <thead><tr><th>Loan #</th><th>${escapeHtml(partyHeader)}</th><th>Purpose</th><th>Location</th><th>Out / Total</th><th>${isOutward ? 'Loaned' : 'Received'}</th><th>${isOutward ? 'Tentative Return' : 'Return By'}</th></tr></thead>
-          <tbody>${rows || '<tr><td colspan="7">No active loans</td></tr>'}</tbody>
+          <thead><tr><th>Loan #</th><th>${escapeHtml(partyHeader)}</th><th>Purpose</th><th>Equipment</th><th>Location</th><th>Out / Total</th><th>${isOutward ? 'Loaned' : 'Received'}</th><th>${isOutward ? 'Tentative Return' : 'Return By'}</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="8">No active loans</td></tr>'}</tbody>
         </table>`;
     }).join('');
 
@@ -119,6 +120,7 @@ export function LoansPage() {
     { key: 'loan_number', header: 'Loan #', render: (l) => <span className="font-mono text-xs text-primary-400">{l.loan_number}</span> },
     { key: 'person_or_org', header: partyHeader, render: (l) => <span className="font-medium text-surface-100">{l.person_or_org}</span> },
     { key: 'purpose', header: 'Purpose', render: (l) => <span className="text-surface-400">{l.purpose || '—'}</span> },
+    { key: 'equipment_names', header: 'Equipment', render: (l) => <span className="text-surface-300">{l.equipment_names || '—'}</span> },
     { key: 'items', header: 'Items Out', render: (l) => <span className="text-surface-300">{l.out_count ?? 0} / {l.item_count ?? 0}</span> },
     { key: 'tentative_return_date', header: isOutward ? 'Tentative Return' : 'Return By', render: (l) => <span className="text-surface-400">{fmtDate(l.tentative_return_date)}</span> },
     { key: 'status', header: 'Status', render: (l) => (

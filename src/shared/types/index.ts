@@ -170,6 +170,9 @@ export interface MaintenanceTicket {
   project_date: string | null;
   verified_by: string | null;
   document_type: DocumentType;
+  // Service completion document (image or PDF) as a base64 data URL; required before
+  // a non-loss ticket can be COMPLETED. Local-only; merged into the archived PDF.
+  service_doc_data?: string | null;
   created_at: string;
   updated_at: string;
   equipment_name?: string;
@@ -328,10 +331,15 @@ export interface EquipmentLoan {
   internal_notes: string;
   status: LoanStatus;
   created_by: string;
+  // Signed release form (image or PDF) as a base64 data URL; required before an
+  // OUTWARD loan can be closed. Local-only; merged into the archived release PDF.
+  signed_form_data?: string | null;
   created_at: string;
   updated_at: string;
   item_count?: number;
   out_count?: number;
+  // Comma-separated names of every item on the loan; provided by getAll for list views.
+  equipment_names?: string;
 }
 
 export interface EquipmentLoanWithItems extends EquipmentLoan {
@@ -381,6 +389,9 @@ export interface PurchaseRequest {
   fulfilled_at: string | null;
   fulfilled_by: string | null;
   created_by: string;
+  // Purchase invoice / receipt (image or PDF) as a base64 data URL; required before
+  // the request can be marked FULFILLED. Local-only; merged into the archived PDF.
+  invoice_data?: string | null;
   created_at: string;
   updated_at: string;
   // Populated by getById; getAll provides aggregates only.
