@@ -4,9 +4,14 @@ import { cloudService } from './cloud-service';
 import { offlineQueue, coerceForCloud } from './offline-queue';
 import { recordSchemaError } from './schema-health';
 
+// Parent tables MUST precede their child/item tables so the per-table push loop
+// inserts a parent in the cloud before any row that references it (the item tables
+// carry a foreign key onto their parent).
 const EIM_TABLES = [
   'equipment_assets', 'asset_status_log',
   'maintenance_tickets', 'maintenance_notes', 'ticket_actions',
+  'equipment_loans', 'equipment_loan_items',
+  'purchase_requests', 'purchase_request_items',
   'parts_catalog', 'parts_inventory', 'parts_transactions',
   'parts_compatibility', 'preventive_schedules', 'vendors',
 ] as const;

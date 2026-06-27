@@ -14,6 +14,7 @@
 
 import { getDatabase } from '../database/index';
 import { renderDocumentToPdf } from '../pdf/html-to-pdf';
+import { pushOperationalToCloud } from './operational-sync';
 import {
   sanitizeFileName,
   uploadOrSaveArchiveSegments,
@@ -115,6 +116,18 @@ export async function renderAndArchiveList(input: ArchiveListInput): Promise<Arc
          WHERE id IN (${placeholders}) AND list_archived_at IS NULL`,
       )
       .run(now, ...input.recordIds);
+
+    // Propagate the soft-clear so other users' completed lists hide the same rows.
+    // All three section tables (maintenance_tickets, equipment_loans, purchase_requests)
+    // sync to the cloud, so push each newly-cleared row's updated list_archived_at stamp.
+    if (info.changes > 0) {
+      for (const recordId of input.recordIds) {
+        const row: any = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(recordId);
+        if (row && row.list_archived_at) {
+          void pushOperationalToCloud(table, 'UPDATE', row);
+        }
+      }
+    }
 
     console.log(
       `[ArchiveList] ${input.section} (${input.departmentLabel}): ` +

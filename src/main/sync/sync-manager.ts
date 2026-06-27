@@ -9,7 +9,9 @@ import { resetSchemaIssues, getSchemaIssues } from './schema-health';
 const REALTIME_TABLES = [
   'categories', 'subcategories', 'equipment_items', 'package_definitions', 'package_items', 'users',
   'equipment_assets', 'asset_status_log',
-  'maintenance_tickets', 'maintenance_notes',
+  'maintenance_tickets', 'maintenance_notes', 'ticket_actions',
+  'equipment_loans', 'equipment_loan_items',
+  'purchase_requests', 'purchase_request_items',
   'parts_catalog', 'parts_inventory', 'parts_transactions',
   'vendors', 'preventive_schedules',
 ];

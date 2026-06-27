@@ -482,6 +482,9 @@ export function registerMaintenanceHandlers(): void {
   ipcMain.handle('db:maintenance:deleteAction', (event: any, id: string) => {
     requireWriteAccess(event);
     db.prepare('DELETE FROM ticket_actions WHERE id = ?').run(id);
+    // Propagate the delete so it doesn't get pulled back on the next reconcile and
+    // reappear in the action log on this and other users' machines.
+    void pushOperationalToCloud('ticket_actions', 'DELETE', { id });
     return { success: true };
   });
 }

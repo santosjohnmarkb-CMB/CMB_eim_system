@@ -261,6 +261,16 @@ ALTER TABLE ticket_actions ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all for ticket_actions" ON ticket_actions;
 CREATE POLICY "Allow all for ticket_actions" ON ticket_actions FOR ALL USING (true) WITH CHECK (true);
 
+-- Publish ticket_actions for Realtime so action-log entries reach other users live.
+-- Done here (not in the early publication block) because that block runs before this
+-- table is created.
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE ticket_actions;
+EXCEPTION WHEN duplicate_object THEN
+  NULL; -- already published
+END $$;
+
 -- ═══════════════════════════════════════════════════
 -- Migration: Department separation
 -- ═══════════════════════════════════════════════════
@@ -298,11 +308,156 @@ ALTER TABLE maintenance_tickets ADD CONSTRAINT maintenance_tickets_maintenance_t
 -- ═══════════════════════════════════════════════════
 -- Migration: Google Drive auto-archive bookkeeping
 -- ═══════════════════════════════════════════════════
--- Mirrors local migration 020_drive_archive. Only maintenance_tickets is synced
--- to the cloud (equipment_loans / purchase_requests are local-only), so just the
--- ticket needs the archive columns here. Without these, every maintenance_tickets
+-- Mirrors local migration 020_drive_archive. Without these, every maintenance_tickets
 -- upsert fails with PGRST204 ("Could not find the 'archived_at' column"), which in
--- turn fails its maintenance_notes children with a foreign-key violation.
+-- turn fails its maintenance_notes children with a foreign-key violation. (The loan /
+-- purchase request equivalents are defined on their own cloud tables further below.)
 
 ALTER TABLE maintenance_tickets ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
 ALTER TABLE maintenance_tickets ADD COLUMN IF NOT EXISTS drive_file_id TEXT;
+
+-- ═══════════════════════════════════════════════════
+-- Migration: Admin "Archive List" soft-clear bookkeeping
+-- ═══════════════════════════════════════════════════
+-- Mirrors local migration 022_list_archive_columns. When an admin archives a
+-- section's closed list, every included record is stamped with list_archived_at
+-- so it drops out of the on-screen completed list. Without it, every
+-- maintenance_tickets upsert fails with PGRST204 ("Could not find the
+-- 'list_archived_at' column"). (Loans / purchase requests get the same column on
+-- their own cloud tables further below.)
+
+ALTER TABLE maintenance_tickets ADD COLUMN IF NOT EXISTS list_archived_at TIMESTAMPTZ;
+
+-- ═══════════════════════════════════════════════════
+-- Migration: Loans + Purchase Requests cloud sync
+-- ═══════════════════════════════════════════════════
+-- These four tables were previously local-only. They now sync like the other
+-- operational tables so every privileged user sees loans and purchase requests
+-- regardless of which machine created them.
+--
+-- Deliberately NOT mirrored to the cloud (kept local-only and stripped from every
+-- payload by coerceForCloud → LOCAL_ONLY_COLUMNS): the large base64 compliance-
+-- attachment blobs `signed_form_data` (loans) and `invoice_data` (purchase requests).
+-- Those are merged into the archived Drive PDF instead of synced, so these tables must
+-- NOT declare those columns — otherwise a pull would overwrite the local copy with NULL.
+--
+-- `photo_data` (the requested-equipment photo) DOES sync: it is core request
+-- documentation that every user should see on screen and in the generated PDF.
+
+CREATE TABLE IF NOT EXISTS equipment_loans (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  loan_number TEXT UNIQUE NOT NULL,
+  direction TEXT NOT NULL DEFAULT 'OUTWARD' CHECK (direction IN ('OUTWARD', 'INWARD')),
+  department TEXT NOT NULL CHECK (department IN ('camera', 'lights_grips')),
+  person_or_org TEXT NOT NULL DEFAULT '',
+  purpose TEXT NOT NULL DEFAULT '',
+  location TEXT NOT NULL DEFAULT '',
+  loaned_date TEXT NOT NULL DEFAULT (CURRENT_DATE::TEXT),
+  duration TEXT NOT NULL DEFAULT '',
+  tentative_return_date TEXT,
+  remarks TEXT NOT NULL DEFAULT '',
+  internal_notes TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'PARTIAL', 'RETURNED')),
+  created_by TEXT NOT NULL DEFAULT '',
+  archived_at TEXT,
+  drive_file_id TEXT,
+  list_archived_at TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- equipment_id / asset_id intentionally carry NO foreign key to the catalog/asset
+-- tables: a FK violation (23503) is treated as unrecoverable by the offline queue
+-- and would silently drop the item from sync. Integrity is enforced locally.
+CREATE TABLE IF NOT EXISTS equipment_loan_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  loan_id UUID NOT NULL REFERENCES equipment_loans(id) ON DELETE CASCADE,
+  equipment_id UUID,
+  asset_id UUID,
+  item_name TEXT,
+  status TEXT NOT NULL DEFAULT 'OUT' CHECK (status IN ('OUT', 'RETURNED')),
+  returned_date TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS purchase_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  request_number TEXT UNIQUE NOT NULL,
+  department TEXT NOT NULL CHECK (department IN ('camera', 'lights_grips')),
+  request_date TEXT NOT NULL DEFAULT (CURRENT_DATE::TEXT),
+  requested_asset TEXT NOT NULL DEFAULT '',
+  request_type TEXT NOT NULL DEFAULT 'NEW_EQUIPMENT' CHECK (request_type IN ('NEW_EQUIPMENT', 'ACCESSORY', 'SPARE_PART', 'REPLACEMENT', 'ADDITIONAL_INVENTORY')),
+  current_quantity INTEGER NOT NULL DEFAULT 0,
+  requested_quantity INTEGER NOT NULL DEFAULT 1,
+  reason TEXT NOT NULL DEFAULT '',
+  supplier TEXT NOT NULL DEFAULT '',
+  amount NUMERIC NOT NULL DEFAULT 0,
+  photo_data TEXT,
+  status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'FULFILLED', 'CANCELLED')),
+  fulfilled_at TEXT,
+  fulfilled_by TEXT,
+  created_by TEXT NOT NULL DEFAULT '',
+  archived_at TEXT,
+  drive_file_id TEXT,
+  list_archived_at TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS purchase_request_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  request_id UUID NOT NULL REFERENCES purchase_requests(id) ON DELETE CASCADE,
+  requested_asset TEXT NOT NULL DEFAULT '',
+  request_type TEXT NOT NULL DEFAULT 'NEW_EQUIPMENT' CHECK (request_type IN ('NEW_EQUIPMENT', 'ACCESSORY', 'SPARE_PART', 'REPLACEMENT', 'ADDITIONAL_INVENTORY')),
+  current_quantity INTEGER NOT NULL DEFAULT 0,
+  requested_quantity INTEGER NOT NULL DEFAULT 1,
+  supplier TEXT NOT NULL DEFAULT '',
+  amount NUMERIC NOT NULL DEFAULT 0,
+  photo_data TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Idempotent backfill so re-running this script after the tables already exist (e.g.
+-- created before photo_data was synced) adds the column without recreating the table.
+ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS photo_data TEXT;
+ALTER TABLE purchase_request_items ADD COLUMN IF NOT EXISTS photo_data TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_equipment_loans_department ON equipment_loans(department);
+CREATE INDEX IF NOT EXISTS idx_equipment_loans_status ON equipment_loans(status);
+CREATE INDEX IF NOT EXISTS idx_equipment_loan_items_loan ON equipment_loan_items(loan_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_requests_department ON purchase_requests(department);
+CREATE INDEX IF NOT EXISTS idx_purchase_requests_status ON purchase_requests(status);
+CREATE INDEX IF NOT EXISTS idx_purchase_request_items_request ON purchase_request_items(request_id);
+
+-- Enable Realtime so edits propagate live to other users.
+DO $$
+DECLARE t text;
+BEGIN
+  FOR t IN SELECT unnest(ARRAY[
+    'equipment_loans', 'equipment_loan_items', 'purchase_requests', 'purchase_request_items'
+  ]) LOOP
+    BEGIN
+      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE %I', t);
+    EXCEPTION WHEN duplicate_object THEN
+      NULL; -- already published
+    END;
+  END LOOP;
+END $$;
+
+ALTER TABLE equipment_loans ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for equipment_loans" ON equipment_loans;
+CREATE POLICY "Allow all for equipment_loans" ON equipment_loans FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE equipment_loan_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for equipment_loan_items" ON equipment_loan_items;
+CREATE POLICY "Allow all for equipment_loan_items" ON equipment_loan_items FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE purchase_requests ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for purchase_requests" ON purchase_requests;
+CREATE POLICY "Allow all for purchase_requests" ON purchase_requests FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE purchase_request_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for purchase_request_items" ON purchase_request_items;
+CREATE POLICY "Allow all for purchase_request_items" ON purchase_request_items FOR ALL USING (true) WITH CHECK (true);

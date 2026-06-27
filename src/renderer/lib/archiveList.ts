@@ -48,3 +48,12 @@ export function openArchiveLocation(localPath: string): Promise<{ success: boole
 export function getClearedArchive(): Promise<ClearedArchiveEntry[]> {
   return ipcInvoke<ClearedArchiveEntry[]>('archive:list:getCleared');
 }
+
+// Permanently delete one archived line entry. Admin-only and guarded server-side so
+// it can only ever remove an already-archived, closed record.
+export function deleteArchivedEntry(
+  section: ListSection,
+  id: string,
+): Promise<{ success: boolean; message?: string }> {
+  return ipcInvoke<{ success: boolean; message?: string }>('archive:list:deleteEntry', section, id);
+}

@@ -27,6 +27,7 @@ import {
   uploadOrSaveArchive,
   type ArchiveKind,
 } from './archive-path';
+import { pushOperationalToCloud } from './operational-sync';
 
 async function archiveAndStamp(
   kind: ArchiveKind,
@@ -49,6 +50,11 @@ async function archiveAndStamp(
   db.prepare(
     `UPDATE ${table} SET archived_at = ?, drive_file_id = ?, updated_at = datetime('now') WHERE id = ?`,
   ).run(new Date().toISOString(), result.driveFileId, id);
+  // Propagate the archive stamp to the cloud. This runs fire-and-forget after the
+  // completion action's own push, so without it the archived_at/drive_file_id stamp
+  // would not reach other users until some later edit pushed the row again.
+  const stamped: any = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
+  if (stamped) void pushOperationalToCloud(table, 'UPDATE', stamped);
   console.log(
     `[Archive] ${kind} ${id}: saved locally=${result.savedLocally}, drive=${result.uploadedToDrive}` +
     `${result.driveFileId ? ` (${result.driveFileId})` : ''}`,

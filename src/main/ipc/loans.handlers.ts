@@ -73,7 +73,7 @@ function returnSingleItem(db: any, item: any, changedBy: string): void {
 }
 
 // Push the post-mutation equipment_items/equipment_assets rows to the cloud so the
-// shared rental catalog reflects the availability change (loan tables stay local).
+// shared rental catalog reflects the availability change.
 function pushItemAvailabilityToCloud(db: any, equipmentId: string, assetId: string | null): void {
   const eq: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(equipmentId);
   if (eq) void pushCatalogToCloud('equipment_items', 'UPDATE', eq);
@@ -81,6 +81,17 @@ function pushItemAvailabilityToCloud(db: any, equipmentId: string, assetId: stri
     const a: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(assetId);
     if (a) void pushOperationalToCloud('equipment_assets', 'UPDATE', a);
   }
+}
+
+// Sync a loan and all its line items to the cloud so other privileged users see it.
+// The signed release form (signed_form_data) is stripped by coerceForCloud and stays
+// local. Call after any insert/update of the loan or its items.
+function pushLoanToCloud(db: any, loanId: string): void {
+  const loan: any = db.prepare('SELECT * FROM equipment_loans WHERE id = ?').get(loanId);
+  if (!loan) return;
+  void pushOperationalToCloud('equipment_loans', 'UPDATE', loan);
+  const items: any[] = db.prepare('SELECT * FROM equipment_loan_items WHERE loan_id = ?').all(loanId);
+  for (const it of items) void pushOperationalToCloud('equipment_loan_items', 'UPDATE', it);
 }
 
 export function registerLoanHandlers(): void {
@@ -191,6 +202,7 @@ export function registerLoanHandlers(): void {
     // Propagate availability/asset changes to the shared catalog after the transaction commits.
     // Inward loans never touch inventory, so there is nothing to sync.
     for (const a of affected) pushItemAvailabilityToCloud(db, a.equipment_id, a.asset_id);
+    pushLoanToCloud(db, id);
 
     return db.prepare('SELECT * FROM equipment_loans WHERE id = ?').get(id);
   });
@@ -209,6 +221,7 @@ export function registerLoanHandlers(): void {
       input.person_or_org, input.purpose || '', input.location || '', input.loaned_date,
       input.duration || '', input.tentative_return_date || null, input.remarks || '', input.internal_notes || '', id,
     );
+    pushLoanToCloud(db, id);
     return db.prepare('SELECT * FROM equipment_loans WHERE id = ?').get(id);
   });
 
@@ -238,6 +251,9 @@ export function registerLoanHandlers(): void {
     getLoanInDept(event, id);
     const parsed = AttachmentDataSchema.parse(dataUrl);
     db.prepare("UPDATE equipment_loans SET signed_form_data = ?, updated_at = datetime('now') WHERE id = ?").run(parsed, id);
+    // The form blob itself stays local (stripped on push), but sync the bumped
+    // updated_at so this machine's clock stays ahead of other edits in the cloud.
+    pushLoanToCloud(db, id);
     return { success: true };
   });
 
@@ -245,6 +261,7 @@ export function registerLoanHandlers(): void {
     requireWriteAccess(event);
     getLoanInDept(event, id);
     db.prepare("UPDATE equipment_loans SET signed_form_data = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
+    pushLoanToCloud(db, id);
     return { success: true };
   });
 
@@ -268,6 +285,7 @@ export function registerLoanHandlers(): void {
     tx();
 
     for (const a of affected) pushItemAvailabilityToCloud(db, a.equipment_id, a.asset_id);
+    pushLoanToCloud(db, loanId);
     maybeArchiveReturnedLoan(db, loanId);
     return { success: true };
   });
@@ -294,6 +312,7 @@ export function registerLoanHandlers(): void {
     tx();
 
     for (const a of affected) pushItemAvailabilityToCloud(db, a.equipment_id, a.asset_id);
+    pushLoanToCloud(db, loanId);
     maybeArchiveReturnedLoan(db, loanId);
     return { success: true };
   });
@@ -317,6 +336,8 @@ export function registerLoanHandlers(): void {
     tx();
 
     for (const a of affected) pushItemAvailabilityToCloud(db, a.equipment_id, a.asset_id);
+    // Propagate the delete; item rows cascade-delete via the Supabase foreign key.
+    void pushOperationalToCloud('equipment_loans', 'DELETE', { id });
     return { success: true };
   });
 }

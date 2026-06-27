@@ -103,6 +103,7 @@ const ALLOWED_CHANNELS = new Set([
   'archive:list:create',
   'archive:openLocation',
   'archive:list:getCleared',
+  'archive:list:deleteEntry',
   'app:getVersion',
 ]);
 

@@ -3,6 +3,8 @@ import { useEquipmentStore } from './equipment.store';
 import { useMaintenanceStore } from './maintenance.store';
 import { usePartsStore } from './parts.store';
 import { useVendorsStore } from './vendors.store';
+import { useLoansStore } from './loans.store';
+import { usePurchaseRequestsStore } from './purchaseRequests.store';
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -18,7 +20,7 @@ const dataChangedHandler = (...args: unknown[]) => {
       useEquipmentStore.getState().fetchAll();
       useEquipmentStore.getState().fetchDashboardStats();
     }
-    if (['maintenance_tickets', 'maintenance_notes'].includes(table)) {
+    if (['maintenance_tickets', 'maintenance_notes', 'ticket_actions'].includes(table)) {
       useMaintenanceStore.getState().fetchAll();
     }
     if (['parts_catalog', 'parts_inventory', 'parts_transactions'].includes(table)) {
@@ -27,6 +29,12 @@ const dataChangedHandler = (...args: unknown[]) => {
     }
     if (table === 'vendors') {
       useVendorsStore.getState().fetchAll();
+    }
+    if (['equipment_loans', 'equipment_loan_items'].includes(table)) {
+      useLoansStore.getState().fetchAll();
+    }
+    if (['purchase_requests', 'purchase_request_items'].includes(table)) {
+      usePurchaseRequestsStore.getState().fetchAll();
     }
   }, 100);
 };

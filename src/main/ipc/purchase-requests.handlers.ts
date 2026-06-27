@@ -6,6 +6,19 @@ import { PurchaseRequestCreateSchema, PurchaseRequestUpdateSchema, AttachmentDat
 import { PURCHASE_REQUEST_DEPT_PREFIX } from '../../shared/constants';
 import { sessionDepartment } from './department';
 import { archivePurchaseRequest } from '../sync/archive-eim';
+import { pushOperationalToCloud } from '../sync/operational-sync';
+
+// Sync a request and all its line items to the cloud so other privileged users see it.
+// The requested-equipment photo (photo_data) syncs as part of the row; only the
+// purchase invoice (invoice_data) is stripped by coerceForCloud and stays local.
+// Call after any insert/update of the request or items.
+function pushRequestToCloud(db: any, requestId: string): void {
+  const request: any = db.prepare('SELECT * FROM purchase_requests WHERE id = ?').get(requestId);
+  if (!request) return;
+  void pushOperationalToCloud('purchase_requests', 'UPDATE', request);
+  const items: any[] = db.prepare('SELECT * FROM purchase_request_items WHERE request_id = ?').all(requestId);
+  for (const it of items) void pushOperationalToCloud('purchase_request_items', 'UPDATE', it);
+}
 
 // Build a sequential request number: CMB-PR-{deptCode}-{mmddyy}-{seq}.
 function generateRequestNumber(db: any, department: 'camera' | 'lights_grips'): string {
@@ -121,6 +134,7 @@ export function registerPurchaseRequestHandlers(): void {
 
     const request: any = db.prepare('SELECT * FROM purchase_requests WHERE id = ?').get(id);
     const items = db.prepare('SELECT * FROM purchase_request_items WHERE request_id = ? ORDER BY sort_order ASC').all(id);
+    pushRequestToCloud(db, id);
     return { ...request, items };
   });
 
@@ -135,6 +149,15 @@ export function registerPurchaseRequestHandlers(): void {
     }
     const input = PurchaseRequestUpdateSchema.parse(data);
     const [reqAsset, reqType, curQty, reqQty, supplier, amount, photo] = firstItemMirror(input.items);
+
+    // The edit replaces the whole line-item set with freshly-generated ids. Capture the
+    // old ids so we can tell the cloud to delete the rows that no longer exist locally —
+    // the additive full-reconcile never deletes on its own, so without this the replaced
+    // items would linger in the cloud and resurrect on the next pull.
+    const oldItemIds: string[] = db
+      .prepare('SELECT id FROM purchase_request_items WHERE request_id = ?')
+      .all(id)
+      .map((r: any) => r.id);
 
     const tx = db.transaction(() => {
       db.prepare(`
@@ -153,6 +176,11 @@ export function registerPurchaseRequestHandlers(): void {
 
     const updated: any = db.prepare('SELECT * FROM purchase_requests WHERE id = ?').get(id);
     const items = db.prepare('SELECT * FROM purchase_request_items WHERE request_id = ? ORDER BY sort_order ASC').all(id);
+    const newItemIds = new Set(items.map((r: any) => r.id));
+    for (const oldId of oldItemIds) {
+      if (!newItemIds.has(oldId)) void pushOperationalToCloud('purchase_request_items', 'DELETE', { id: oldId });
+    }
+    pushRequestToCloud(db, id);
     return { ...updated, items };
   });
 
@@ -166,6 +194,8 @@ export function registerPurchaseRequestHandlers(): void {
     }
     const parsed = AttachmentDataSchema.parse(dataUrl);
     db.prepare("UPDATE purchase_requests SET invoice_data = ?, updated_at = datetime('now') WHERE id = ?").run(parsed, id);
+    // The invoice blob itself stays local (stripped on push); sync the bumped updated_at.
+    pushRequestToCloud(db, id);
     return { success: true };
   });
 
@@ -176,6 +206,7 @@ export function registerPurchaseRequestHandlers(): void {
       throw new Error('You do not have permission to remove an invoice.');
     }
     db.prepare("UPDATE purchase_requests SET invoice_data = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
+    pushRequestToCloud(db, id);
     return { success: true };
   });
 
@@ -192,6 +223,7 @@ export function registerPurchaseRequestHandlers(): void {
       SET status = 'FULFILLED', fulfilled_at = ?, fulfilled_by = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(new Date().toISOString(), user.full_name, id);
+    pushRequestToCloud(db, id);
     // Auto-archive the fulfilled request's document to Google Drive (fire-and-forget;
     // never blocks or fails the fulfillment action).
     void archivePurchaseRequest(id);
@@ -207,6 +239,7 @@ export function registerPurchaseRequestHandlers(): void {
     }
     if (request.status === 'FULFILLED') throw new Error('Fulfilled requests cannot be cancelled.');
     db.prepare("UPDATE purchase_requests SET status = 'CANCELLED', updated_at = datetime('now') WHERE id = ?").run(id);
+    pushRequestToCloud(db, id);
     return db.prepare('SELECT * FROM purchase_requests WHERE id = ?').get(id);
   });
 
@@ -219,6 +252,8 @@ export function registerPurchaseRequestHandlers(): void {
       db.prepare('DELETE FROM purchase_requests WHERE id = ?').run(id);
     });
     tx();
+    // Propagate the delete; item rows cascade-delete via the Supabase foreign key.
+    void pushOperationalToCloud('purchase_requests', 'DELETE', { id });
     return { success: true };
   });
 }

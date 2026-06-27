@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Archive, ChevronRight, ChevronDown, Camera, Lightbulb,
-  Wrench, PackageCheck, ShoppingCart,
+  Wrench, PackageCheck, ShoppingCart, Trash2,
 } from 'lucide-react';
-import { getClearedArchive, type ClearedArchiveEntry, type ListSection } from '../lib/archiveList';
+import { getClearedArchive, deleteArchivedEntry, type ClearedArchiveEntry, type ListSection } from '../lib/archiveList';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
+import { useToast } from '../hooks';
 import { DEPARTMENT_CONFIG } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 
@@ -43,7 +44,7 @@ function parsedDate(d: string | null): { year: string; monthIndex: number; month
   if (d) {
     const date = new Date(d);
     if (!isNaN(date.getTime())) {
-      return { year: String(date.getFullYear()), monthIndex: date.getMonth(), monthName: MONTH_NAMES[date.getMonth()] };
+      return { year: String(date.getFullYear()), monthIndex: date.getMonth(), monthName: MONTH_NAMES[date.getMonth()] ?? 'Unknown' };
     }
   }
   return { year: 'Unknown', monthIndex: -1, monthName: 'Unknown' };
@@ -55,24 +56,47 @@ interface DeptGroup { key: string; label: string; years: Map<string, YearGroup>;
 
 export function ArchivesPage() {
   const navigate = useNavigate();
+  const toast = useToast();
   const [entries, setEntries] = useState<ClearedArchiveEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const data = await getClearedArchive();
-        if (!cancelled) setEntries(data);
-      } catch {
-        if (!cancelled) setEntries([]);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
+  const load = useCallback(async () => {
+    try {
+      const data = await getClearedArchive();
+      setEntries(data);
+    } catch {
+      setEntries([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleDelete = useCallback(async (entry: ClearedArchiveEntry) => {
+    const confirmed = window.confirm(
+      `Permanently delete ${entry.number} (${entry.title})?\n\n` +
+      'This removes the record from the system. It cannot be undone. The previously saved ' +
+      'archive PDF is not changed and will still list this entry.',
+    );
+    if (!confirmed) return;
+    setDeletingId(entry.id);
+    try {
+      const res = await deleteArchivedEntry(entry.section, entry.id);
+      if (!res.success) {
+        toast.error(res.message || 'Failed to delete the entry.');
+        return;
+      }
+      toast.success(`Deleted ${entry.number}.`);
+      setEntries((prev) => prev.filter((e) => e.id !== entry.id));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete the entry.');
+    } finally {
+      setDeletingId(null);
+    }
+  }, [toast]);
 
   const toggle = (key: string) => {
     setExpanded((prev) => {
@@ -219,8 +243,19 @@ export function ArchivesPage() {
                                                     <p className="text-surface-200 truncate max-w-[320px]">{r.title}</p>
                                                     {r.subtitle && <p className="text-2xs text-surface-500 truncate max-w-[320px]">{r.subtitle}</p>}
                                                   </td>
-                                                  <td className="py-2 text-xs text-surface-400 whitespace-nowrap align-top text-right">
+                                                  <td className="py-2 pr-3 text-xs text-surface-400 whitespace-nowrap align-top text-right">
                                                     {r.closedDate ? new Date(r.closedDate).toLocaleDateString() : '—'}
+                                                  </td>
+                                                  <td className="py-2 align-top text-right whitespace-nowrap">
+                                                    <button
+                                                      type="button"
+                                                      title="Delete this entry permanently"
+                                                      disabled={deletingId === r.id}
+                                                      onClick={(e) => { e.stopPropagation(); handleDelete(r); }}
+                                                      className="p-1.5 rounded-md text-surface-500 hover:text-danger-400 hover:bg-danger-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                                    >
+                                                      <Trash2 size={14} />
+                                                    </button>
                                                   </td>
                                                 </tr>
                                               ))}

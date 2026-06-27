@@ -6,6 +6,8 @@ import { recordSchemaError } from './schema-health';
 const REFRESHABLE_TABLES = new Set([
   'equipment_assets', 'asset_status_log',
   'maintenance_tickets', 'maintenance_notes',
+  'equipment_loans', 'equipment_loan_items',
+  'purchase_requests', 'purchase_request_items',
   'parts_catalog', 'parts_inventory', 'parts_transactions',
   'vendors', 'preventive_schedules',
 ]);
@@ -22,10 +24,16 @@ export interface QueuedAction {
   created_at: string;
 }
 
-// Operator-uploaded attachments (signed form / invoice / service doc) are stored as
-// large base64 data URLs and are intentionally local-only — they are merged into the
-// archived Drive PDF rather than synced. Strip them from every cloud payload so they
-// never bloat realtime traffic or break upserts against tables lacking these columns.
+// Operator-uploaded compliance attachments (signed release form / purchase invoice /
+// service completion doc) are large base64 data URLs and are intentionally local-only
+// — they are merged into the archived Drive PDF rather than synced. Strip them from
+// every cloud payload so they never bloat realtime traffic or break upserts against
+// tables that deliberately omit these columns (and so a pull can never overwrite the
+// locally-held copy with NULL).
+//
+// NOTE: `photo_data` (the requested-equipment photo on purchase requests/items) is
+// deliberately NOT in this list — it is core request documentation that every user
+// should see on screen and in the generated PDF, so it syncs like any other column.
 const LOCAL_ONLY_COLUMNS = new Set(['signed_form_data', 'invoice_data', 'service_doc_data']);
 
 export function coerceForCloud(payload: Record<string, unknown>): Record<string, unknown> {

@@ -16,6 +16,7 @@ import { getDatabase } from '../database/index';
 import { requireAdmin } from './session';
 import { renderAndArchiveList, type ArchiveListInput } from '../sync/archive-list';
 import { getLocalArchiveRoot } from '../sync/archive-path';
+import { pushOperationalToCloud } from '../sync/operational-sync';
 import { CATEGORY_TO_DEPARTMENT } from '../../shared/constants';
 
 export interface ClearedArchiveEntry {
@@ -53,6 +54,61 @@ export function registerArchiveHandlers(): void {
     }
     shell.showItemInFolder(resolved);
     return { success: true };
+  });
+
+  // Permanently delete a single archived line entry. Guarded so it can ONLY remove a
+  // record that has already been archived to a list (list_archived_at IS NOT NULL) and
+  // is in its closed state — so it can never touch a live/open record. Because the
+  // record is closed, the delete has no inventory/availability side effects; child
+  // rows are removed in the same transaction. The saved PDF snapshot is left intact.
+  ipcMain.handle('archive:list:deleteEntry', (event: any, section: ClearedArchiveEntry['section'], id: string) => {
+    requireAdmin(event);
+    if (!id || typeof id !== 'string') return { success: false, message: 'No record id provided.' };
+
+    if (section === 'maintenance') {
+      const t: any = db.prepare('SELECT id, repair_status, list_archived_at FROM maintenance_tickets WHERE id = ?').get(id);
+      if (!t) return { success: false, message: 'Ticket not found.' };
+      if (!t.list_archived_at) return { success: false, message: 'Only archived tickets can be deleted here.' };
+      if (t.repair_status !== 'COMPLETED') return { success: false, message: 'Only completed tickets can be deleted here.' };
+      db.transaction(() => {
+        db.prepare('DELETE FROM maintenance_notes WHERE ticket_id = ?').run(id);
+        db.prepare('DELETE FROM ticket_actions WHERE ticket_id = ?').run(id);
+        db.prepare('DELETE FROM maintenance_tickets WHERE id = ?').run(id);
+      })();
+      // Propagate the delete to the cloud; otherwise the next full reconcile would pull
+      // the still-present cloud row back (resurrecting it here and leaving it visible to
+      // other users). Notes/actions cascade-delete via the Supabase foreign keys.
+      void pushOperationalToCloud('maintenance_tickets', 'DELETE', { id });
+      return { success: true };
+    }
+
+    if (section === 'loan') {
+      const l: any = db.prepare('SELECT id, status, list_archived_at FROM equipment_loans WHERE id = ?').get(id);
+      if (!l) return { success: false, message: 'Loan not found.' };
+      if (!l.list_archived_at) return { success: false, message: 'Only archived loans can be deleted here.' };
+      if (l.status !== 'RETURNED') return { success: false, message: 'Only fully returned loans can be deleted here.' };
+      db.transaction(() => {
+        db.prepare('DELETE FROM equipment_loan_items WHERE loan_id = ?').run(id);
+        db.prepare('DELETE FROM equipment_loans WHERE id = ?').run(id);
+      })();
+      void pushOperationalToCloud('equipment_loans', 'DELETE', { id });
+      return { success: true };
+    }
+
+    if (section === 'purchase') {
+      const r: any = db.prepare('SELECT id, status, list_archived_at FROM purchase_requests WHERE id = ?').get(id);
+      if (!r) return { success: false, message: 'Purchase request not found.' };
+      if (!r.list_archived_at) return { success: false, message: 'Only archived requests can be deleted here.' };
+      if (r.status !== 'FULFILLED') return { success: false, message: 'Only fulfilled requests can be deleted here.' };
+      db.transaction(() => {
+        db.prepare('DELETE FROM purchase_request_items WHERE request_id = ?').run(id);
+        db.prepare('DELETE FROM purchase_requests WHERE id = ?').run(id);
+      })();
+      void pushOperationalToCloud('purchase_requests', 'DELETE', { id });
+      return { success: true };
+    }
+
+    return { success: false, message: 'Unknown section.' };
   });
 
   ipcMain.handle('archive:list:getCleared', (event: any): ClearedArchiveEntry[] => {
