@@ -91,12 +91,13 @@ export function LoansPage() {
 
   const statusLabel = statusFilter === 'ACTIVE' ? 'Active' : statusFilter === 'RETURNED' ? 'Returned' : '';
 
-  // Loans shown for the active department after the status filter. The Returned view
-  // also hides loans already captured in an archived list snapshot (list_archived_at).
+  // Loans shown for the active department after the status filter. Loans captured in an
+  // archived list snapshot (list_archived_at) are hidden from every view — All, Active,
+  // and Returned — since they now live only in the admin Archives section.
   const displayLoans = useMemo(() => {
-    const deptLoans = byDept[activeDept];
+    const deptLoans = byDept[activeDept].filter((l) => !l.list_archived_at);
     if (statusFilter === 'ACTIVE') return deptLoans.filter((l) => l.status !== 'RETURNED');
-    if (statusFilter === 'RETURNED') return deptLoans.filter((l) => l.status === 'RETURNED' && !l.list_archived_at);
+    if (statusFilter === 'RETURNED') return deptLoans.filter((l) => l.status === 'RETURNED');
     return deptLoans;
   }, [byDept, activeDept, statusFilter]);
 
@@ -216,12 +217,12 @@ export function LoansPage() {
           {(['ALL', 'ACTIVE', 'RETURNED'] as const).map((s) => {
             const active = statusFilter === s;
             const label = s === 'ALL' ? 'All' : s === 'ACTIVE' ? 'Active' : 'Returned';
-            const deptLoans = byDept[activeDept];
+            const deptLoans = byDept[activeDept].filter((l) => !l.list_archived_at);
             const count = s === 'ALL'
               ? deptLoans.length
               : s === 'ACTIVE'
                 ? deptLoans.filter((l) => l.status !== 'RETURNED').length
-                : deptLoans.filter((l) => l.status === 'RETURNED' && !l.list_archived_at).length;
+                : deptLoans.filter((l) => l.status === 'RETURNED').length;
             return (
               <button
                 key={s}
