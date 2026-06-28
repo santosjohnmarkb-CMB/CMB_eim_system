@@ -249,7 +249,7 @@ export function DashboardPage() {
                   <p className="text-2xs text-surface-500">{cfg.categories.join(' · ')}</p>
                 </div>
                 <button
-                  onClick={() => navigate(`/dept/${dept}`)}
+                  onClick={() => navigate(`/equipment/${dept}`)}
                   className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium whitespace-nowrap"
                 >
                   View List →
@@ -341,7 +341,7 @@ export function DashboardPage() {
                 <span className={`text-sm font-semibold ${labelColor}`}>{cfg.shortLabel}</span>
                 <span className="text-xs text-surface-500 ml-1">({deptOpen.length})</span>
                 <button
-                  onClick={() => navigate(`/dept/${dept}`)}
+                  onClick={() => navigate('/maintenance')}
                   className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium ml-auto"
                 >
                   View All →

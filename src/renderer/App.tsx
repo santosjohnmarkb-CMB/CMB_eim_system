@@ -10,7 +10,6 @@ import { EquipmentDashboardPage } from './pages/EquipmentDashboardPage';
 import { EquipmentListPage } from './pages/EquipmentListPage';
 import { EquipmentAddPage } from './pages/EquipmentAddPage';
 import { EquipmentDetailPage } from './pages/EquipmentDetailPage';
-import { DepartmentSegmentPage } from './pages/DepartmentSegmentPage';
 import { MaintenanceQueuePage } from './pages/MaintenanceQueuePage';
 import { MaintenanceNewPage } from './pages/MaintenanceNewPage';
 import { MaintenanceDetailPage } from './pages/MaintenanceDetailPage';
@@ -24,6 +23,7 @@ import { PurchaseRequestsPage } from './pages/PurchaseRequestsPage';
 import { PurchaseRequestNewPage } from './pages/PurchaseRequestNewPage';
 import { PurchaseRequestDetailPage } from './pages/PurchaseRequestDetailPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { VendorsPage } from './pages/VendorsPage';
 import { ArchivesPage } from './pages/ArchivesPage';
 import { ToastContainer } from './components/common/Toast';
 
@@ -50,7 +50,7 @@ function DepartmentGuard({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((s) => s.user);
   const { dept } = useParams<{ dept: string }>();
   if (user && user.role !== 'admin' && user.department && dept && dept !== user.department) {
-    return <Navigate to={`/dept/${user.department}`} replace />;
+    return <Navigate to={`/equipment/${user.department}`} replace />;
   }
   return <>{children}</>;
 }
@@ -62,8 +62,9 @@ function DefaultRedirect() {
   if (user?.role === 'admin' || user?.role === 'viewer') {
     return <Navigate to="/dashboard" replace />;
   }
-  const dept = user?.department || 'camera';
-  return <Navigate to={`/dept/${dept}`} replace />;
+  // Department users no longer have a dedicated department page; the Maintenance
+  // page is their landing/overview.
+  return <Navigate to="/maintenance" replace />;
 }
 
 export default function App() {
@@ -96,7 +97,7 @@ export default function App() {
                   <Route path="/equipment/use-count" element={<EquipmentUseCountPage />} />
                   <Route path="/equipment/:dept" element={<DepartmentGuard><EquipmentListPage /></DepartmentGuard>} />
                   <Route path="/equipment/detail/:id" element={<EquipmentDetailPage />} />
-                  <Route path="/dept/:dept" element={<DepartmentGuard><DepartmentSegmentPage /></DepartmentGuard>} />
+                  <Route path="/vendors" element={<VendorsPage />} />
                   <Route path="/loans" element={<LoansPage />} />
                   <Route path="/loans/new" element={<RoleGuard roles={['equipment_manager', 'inventory_manager']}><LoanNewPage /></RoleGuard>} />
                   <Route path="/loans/:id" element={<LoanDetailPage />} />

@@ -3,7 +3,6 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Wrench, Camera, Lightbulb, ClipboardList, AlertTriangle, History, X, Plus, Printer } from 'lucide-react';
 import { useMaintenanceStore } from '../stores/maintenance.store';
 import { useAuthStore } from '../stores/auth.store';
-import { useToast } from '../hooks';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { CompletedTicketsTab } from '../components/maintenance/CompletedTicketsTab';
 import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG, COMPLETION_OUTCOME_CONFIG } from '../lib/constants';
@@ -42,7 +41,6 @@ export function MaintenanceQueuePage() {
   const { tickets, loading, fetchAll, getCompletedHistory, getEquipmentHistory } = useMaintenanceStore();
   const navigate = useNavigate();
   const location = useLocation();
-  const toast = useToast();
   const historyRef = useRef<HTMLDivElement>(null);
   const scrollTo = (location.state as { scrollTo?: string } | null)?.scrollTo;
   const user = useAuthStore((s) => s.user);
@@ -294,18 +292,6 @@ export function MaintenanceQueuePage() {
                 <Icon size={16} className={accent} />
                 <span className={`text-sm font-semibold ${accent}`}>{cfg.shortLabel}</span>
                 <span className="text-xs text-surface-500 ml-1">({deptOpen.length})</span>
-                <button
-                  onClick={() => {
-                    if (deptOpen.length === 0) {
-                      toast.info(`No open tickets available for ${cfg.shortLabel}.`);
-                      return;
-                    }
-                    navigate(`/dept/${dept}`, { state: { scrollTo: 'open-tickets' } });
-                  }}
-                  className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium ml-auto"
-                >
-                  View All →
-                </button>
               </div>
 
               {deptOpen.length === 0 ? (

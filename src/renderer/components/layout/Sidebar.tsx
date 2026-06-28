@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Wrench, Settings, LogOut, Package,
-  ChevronRight, ChevronDown, Camera, Lightbulb, PackageCheck, ShoppingCart, Archive,
+  ChevronRight, ChevronDown, Camera, Lightbulb, PackageCheck, ShoppingCart, Archive, Truck,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuthStore } from '../../stores/auth.store';
@@ -166,6 +166,13 @@ export function Sidebar() {
             active={location.pathname.startsWith('/purchase-requests')}
             onClick={() => navigate('/purchase-requests')}
           />
+
+          <NavButton
+            icon={<Truck size={20} />}
+            label="Suppliers"
+            active={location.pathname.startsWith('/vendors')}
+            onClick={() => navigate('/vendors')}
+          />
         </nav>
 
         {/* Admin utilities pinned to the bottom, just above the user footer */}
@@ -210,12 +217,6 @@ export function Sidebar() {
 
       <nav className="flex-1 px-3 py-3 space-y-1 overflow-y-auto">
         <NavButton
-          icon={<LayoutDashboard size={20} />}
-          label="Dashboard"
-          active={location.pathname === `/dept/${dept}`}
-          onClick={() => navigate(`/dept/${dept}`)}
-        />
-        <NavButton
           icon={<Package size={20} />}
           label="Equipment"
           active={location.pathname.startsWith('/equipment')}
@@ -238,6 +239,12 @@ export function Sidebar() {
           label="Purchase Requests"
           active={location.pathname.startsWith('/purchase-requests')}
           onClick={() => navigate('/purchase-requests')}
+        />
+        <NavButton
+          icon={<Truck size={20} />}
+          label="Suppliers"
+          active={location.pathname.startsWith('/vendors')}
+          onClick={() => navigate('/vendors')}
         />
       </nav>
 
