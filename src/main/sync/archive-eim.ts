@@ -21,6 +21,7 @@ import { buildLoanReleaseForm } from '../../shared/forms/loanForm';
 import { buildPurchaseRequestForm } from '../../shared/forms/purchaseForm';
 import { renderDocumentToPdf } from '../pdf/html-to-pdf';
 import { appendAttachmentToPdf } from '../pdf/merge-pdf';
+import { resolveBlob } from '../blob-store';
 import {
   resolveEimArchivePath,
   sanitizeFileName,
@@ -42,8 +43,9 @@ async function archiveAndStamp(
   const db = getDatabase();
   const formPdf = await renderDocumentToPdf(title, bodyHtml);
   // Merge the operator-uploaded supporting document (signed form / invoice / service
-  // doc) into one combined PDF so the archived file is self-contained.
-  const pdf = await appendAttachmentToPdf(formPdf, attachmentDataUrl);
+  // doc) into one combined PDF so the archived file is self-contained. The attachment
+  // is stored on disk (pointer) — resolve it back to a data URL for the merge step.
+  const pdf = await appendAttachmentToPdf(formPdf, resolveBlob(attachmentDataUrl));
   const parts = resolveEimArchivePath(kind, completedAt);
   const filename = `${sanitizeFileName(filenameBase)}.pdf`;
   const result = await uploadOrSaveArchive(parts, [{ filename, buffer: pdf }]);

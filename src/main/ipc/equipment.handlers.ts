@@ -1,16 +1,36 @@
 import { ipcMain } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../database/index';
-import { requireSession } from './session';
-import { EquipmentCreateSchema, AssetUpdateSchema, AssetStatusUpdateSchema } from '../../shared/schemas';
+import { requireWriteAccess } from './session';
+import { writeAuditLog } from './audit';
+import { EquipmentCreateSchema, EquipmentUpdateSchema, AssetUpdateSchema, AssetStatusUpdateSchema } from '../../shared/schemas';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { pushOperationalToCloud } from '../sync/operational-sync';
 import { CATEGORY_PREFIXES } from '../../shared/constants';
-import { sessionDepartment, categoriesForDepartment, departmentForCategory } from './department';
+import { sessionDepartment, categoriesForDepartment, departmentForCategory, assertEquipmentInDepartment } from './department';
 import { recomputeAvailability } from './availability';
 
 export function registerEquipmentHandlers(): void {
   const db = getDatabase();
+
+  // Reject creating equipment in a category outside the session's department.
+  const assertCategoryInDepartment = (event: any, categoryId: string): void => {
+    const dept = sessionDepartment(event);
+    if (!dept) return;
+    const cat: any = db.prepare('SELECT name FROM categories WHERE id = ?').get(categoryId);
+    if (!cat || departmentForCategory(cat.name) !== dept) {
+      throw new Error('You can only manage equipment in your own department.');
+    }
+  };
+
+  // Reject touching an asset (by asset_id) that belongs to another department.
+  const assertAssetInDepartment = (event: any, assetId: string): void => {
+    const dept = sessionDepartment(event);
+    if (!dept) return;
+    const asset: any = db.prepare('SELECT equipment_id FROM equipment_assets WHERE id = ?').get(assetId);
+    if (!asset) throw new Error('Asset not found');
+    assertEquipmentInDepartment(db, event, asset.equipment_id);
+  };
 
   ipcMain.handle('db:categories:getAll', () => {
     return db.prepare('SELECT * FROM categories WHERE is_active = 1 ORDER BY display_order').all();
@@ -91,8 +111,9 @@ export function registerEquipmentHandlers(): void {
   });
 
   ipcMain.handle('db:equipment:create', (event: any, data: unknown) => {
-    requireSession(event);
+    requireWriteAccess(event);
     const input = EquipmentCreateSchema.parse(data);
+    assertCategoryInDepartment(event, input.category_id);
     const equipmentId = uuidv4();
     const assetId = uuidv4();
     const now = new Date().toISOString();
@@ -209,15 +230,19 @@ export function registerEquipmentHandlers(): void {
   };
 
   ipcMain.handle('db:equipment:update', (event: any, id: string, data: unknown) => {
-    requireSession(event);
+    requireWriteAccess(event);
+    assertEquipmentInDepartment(db, event, id);
+    const input = EquipmentUpdateSchema.parse(data);
+    // If the item is being moved to a different category, that target must also
+    // belong to the session's department.
+    if (input.category_id !== undefined) assertCategoryInDepartment(event, input.category_id);
     const allowedFields = ['name', 'display_name', 'category_id', 'subcategory_id', 'sub_subcategory',
       'item_type', 'brand', 'model', 'description', 'pricing_type', 'base_price', 'notes'];
     const updates: string[] = [];
     const values: any[] = [];
-    const input = data as Record<string, any>;
 
     for (const field of allowedFields) {
-      if (input[field] !== undefined) { updates.push(`${field} = ?`); values.push(input[field]); }
+      if ((input as Record<string, any>)[field] !== undefined) { updates.push(`${field} = ?`); values.push((input as Record<string, any>)[field]); }
     }
 
     if (updates.length > 0) {
@@ -228,7 +253,7 @@ export function registerEquipmentHandlers(): void {
 
     // Quantity changes add/remove unit rows; availability is then derived from units.
     if (input.quantity !== undefined) {
-      reconcileUnits(id, parseInt(input.quantity, 10) || 0);
+      reconcileUnits(id, input.quantity);
     }
     recomputeAvailability(db, id);
 
@@ -236,8 +261,9 @@ export function registerEquipmentHandlers(): void {
   });
 
   ipcMain.handle('db:equipment:updateAsset', (event: any, data: unknown) => {
-    requireSession(event);
+    requireWriteAccess(event);
     const input = AssetUpdateSchema.parse(data);
+    assertAssetInDepartment(event, input.asset_id);
     const asset: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(input.asset_id);
     if (!asset) throw new Error('Asset not found');
 
@@ -257,8 +283,9 @@ export function registerEquipmentHandlers(): void {
   });
 
   ipcMain.handle('db:equipment:updateAssetStatus', (event: any, data: unknown) => {
-    const user = requireSession(event);
+    const user = requireWriteAccess(event);
     const input = AssetStatusUpdateSchema.parse(data);
+    assertAssetInDepartment(event, input.asset_id);
     const asset: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(input.asset_id);
     if (!asset) throw new Error('Asset not found');
     const previousStatus = asset.current_status;
@@ -285,9 +312,11 @@ export function registerEquipmentHandlers(): void {
   });
 
   ipcMain.handle('db:equipment:delete', (event: any, id: string) => {
-    requireSession(event);
+    requireWriteAccess(event);
+    assertEquipmentInDepartment(db, event, id);
     db.prepare("UPDATE equipment_items SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(id);
     const row: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(id);
+    writeAuditLog(event, { action: 'equipment_deactivate', entityType: 'equipment', entityId: id, newValues: row });
     void pushCatalogToCloud('equipment_items', 'UPDATE', row);
     return { ok: true };
   });
@@ -325,7 +354,8 @@ export function registerEquipmentHandlers(): void {
   };
 
   ipcMain.handle('db:equipment:updateStatus', (event: any, equipmentId: string, newStatus: string, reason: string) => {
-    const user = requireSession(event);
+    const user = requireWriteAccess(event);
+    assertEquipmentInDepartment(db, event, equipmentId);
     let assetIds: string[] = [];
     const tx = db.transaction(() => {
       assetIds = setStatusForAllUnits(equipmentId, newStatus, reason, user.full_name);
@@ -343,7 +373,8 @@ export function registerEquipmentHandlers(): void {
   });
 
   ipcMain.handle('db:equipment:batchUpdateStatus', (event: any, ids: string[], newStatus: string, reason: string) => {
-    const user = requireSession(event);
+    const user = requireWriteAccess(event);
+    for (const equipmentId of ids) assertEquipmentInDepartment(db, event, equipmentId);
     const tx = db.transaction(() => {
       for (const equipmentId of ids) {
         setStatusForAllUnits(equipmentId, newStatus, reason, user.full_name);
@@ -418,7 +449,7 @@ export function registerEquipmentHandlers(): void {
   });
 
   ipcMain.handle('db:equipment:importCsv', (event: any, csvContent: string) => {
-    requireSession(event);
+    requireWriteAccess(event);
     const lines = csvContent.trim().split('\n');
     if (lines.length < 2) throw new Error('CSV must have a header row and at least one data row');
     const headers = lines[0]!.split(',').map(h => h.trim().toLowerCase());

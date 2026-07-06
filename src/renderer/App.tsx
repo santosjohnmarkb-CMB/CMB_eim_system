@@ -14,6 +14,7 @@ import { MaintenanceQueuePage } from './pages/MaintenanceQueuePage';
 import { MaintenanceNewPage } from './pages/MaintenanceNewPage';
 import { MaintenanceDetailPage } from './pages/MaintenanceDetailPage';
 import { PartsDetailPage } from './pages/PartsDetailPage';
+import { PartsInventoryPage } from './pages/PartsInventoryPage';
 import { StockAdjustmentPage } from './pages/StockAdjustmentPage';
 import { EquipmentUseCountPage } from './pages/EquipmentUseCountPage';
 import { LoansPage } from './pages/LoansPage';
@@ -26,6 +27,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { VendorsPage } from './pages/VendorsPage';
 import { ArchivesPage } from './pages/ArchivesPage';
 import { ToastContainer } from './components/common/Toast';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -70,18 +72,31 @@ function DefaultRedirect() {
 export default function App() {
   const initSync = useSyncStore((s) => s.initialize);
   const cleanupSync = useSyncStore((s) => s.cleanup);
+  const hydrate = useAuthStore((s) => s.hydrate);
+  const hydrated = useAuthStore((s) => s.hydrated);
 
   useEffect(() => {
+    hydrate();
     initSync();
     initRealtimeListeners();
     return () => {
       cleanupSync();
       cleanupRealtimeListeners();
     };
-  }, [initSync, cleanupSync]);
+  }, [hydrate, initSync, cleanupSync]);
+
+  // Until the session-restore attempt finishes, render nothing so a reload of an
+  // authenticated app doesn't briefly flash the login screen (H-2).
+  if (!hydrated) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-surface-950 text-surface-500">
+        <span className="text-sm">Loading…</span>
+      </div>
+    );
+  }
 
   return (
-    <>
+    <ErrorBoundary>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route
@@ -107,6 +122,7 @@ export default function App() {
                   <Route path="/maintenance" element={<MaintenanceQueuePage />} />
                   <Route path="/maintenance/new" element={<RoleGuard roles={['equipment_manager', 'inventory_manager', 'maintenance_lead']}><MaintenanceNewPage /></RoleGuard>} />
                   <Route path="/maintenance/:id" element={<RoleGuard roles={['equipment_manager', 'inventory_manager', 'maintenance_lead', 'technician', 'viewer']}><MaintenanceDetailPage /></RoleGuard>} />
+                  <Route path="/parts" element={<RoleGuard roles={['maintenance_lead', 'parts_clerk', 'inventory_manager']}><PartsInventoryPage /></RoleGuard>} />
                   <Route path="/parts/adjust" element={<RoleGuard roles={['parts_clerk']}><StockAdjustmentPage /></RoleGuard>} />
                   <Route path="/parts/:id" element={<RoleGuard roles={['maintenance_lead', 'parts_clerk']}><PartsDetailPage /></RoleGuard>} />
                   <Route path="/settings" element={<RoleGuard roles={[]}><SettingsPage /></RoleGuard>} />
@@ -119,6 +135,6 @@ export default function App() {
         />
       </Routes>
       <ToastContainer />
-    </>
+    </ErrorBoundary>
   );
 }

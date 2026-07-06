@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import { app } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
 import { runMigrations } from './migrate';
+import { migrateInRowBlobsToFiles } from '../blob-store';
 
 let db: any = null;
 
@@ -62,10 +63,35 @@ function initializeDatabase(): void {
   db.exec(schema);
 
   runMigrations(db);
+  // Drain any legacy in-row base64 attachments to on-disk files (idempotent).
+  migrateInRowBlobsToFiles(db);
   seedDataIfEmpty();
   ensureAdminRecoverable();
-  ensureDepartmentManagers();
-  ensureDepartmentCrew();
+  // Pre-seeded department manager/crew accounts use well-known default passwords and
+  // are development conveniences only. They must NEVER be created in a packaged
+  // (production) build, where they would be a standing credential backdoor.
+  if (!app.isPackaged) {
+    ensureDepartmentManagers();
+    ensureDepartmentCrew();
+  }
+  warnIfDefaultAdminPassword();
+}
+
+// Surface a loud warning when a packaged build is still running on the default
+// bootstrap admin password. The account must exist for first login, but leaving
+// it on the shipped default in production is a security risk the operator needs
+// to resolve by changing it in Settings → Users.
+function warnIfDefaultAdminPassword(): void {
+  if (!app.isPackaged) return;
+  try {
+    const admin: any = db.prepare("SELECT password_hash FROM users WHERE username = 'admin' AND is_active = 1").get();
+    if (admin && verifyPassword('admin123', admin.password_hash)) {
+      console.warn(
+        '[SECURITY] The default administrator password is still in use. ' +
+        'Change it immediately in Settings → Users before deploying to users.',
+      );
+    }
+  } catch { /* non-fatal */ }
 }
 
 function seedDataIfEmpty(): void {

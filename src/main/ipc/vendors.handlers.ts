@@ -1,13 +1,25 @@
 import { ipcMain } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../database/index';
-import { requireSession } from './session';
+import { requireWriteAccess } from './session';
+import { writeAuditLog } from './audit';
 import { VendorCreateSchema, VendorUpdateSchema } from '../../shared/schemas';
 import { pushOperationalToCloud } from '../sync/operational-sync';
 import { sessionDepartment } from './department';
 
 export function registerVendorHandlers(): void {
   const db = getDatabase();
+
+  // Department users may only mutate vendors owned by their own department.
+  const assertVendorInDepartment = (event: any, id: string): void => {
+    const dept = sessionDepartment(event);
+    if (!dept) return;
+    const vendor: any = db.prepare('SELECT department FROM vendors WHERE id = ?').get(id);
+    if (!vendor) throw new Error('Vendor not found');
+    if (vendor.department !== dept) {
+      throw new Error('This vendor belongs to another department.');
+    }
+  };
 
   ipcMain.handle('db:vendors:getAll', (event: any) => {
     const dept = sessionDepartment(event);
@@ -22,8 +34,13 @@ export function registerVendorHandlers(): void {
   });
 
   ipcMain.handle('db:vendors:create', (event: any, data: unknown) => {
-    requireSession(event);
+    requireWriteAccess(event);
     const input = VendorCreateSchema.parse(data);
+    const dept = sessionDepartment(event);
+    // A department user can only create vendors within their own department.
+    if (dept && input.department !== dept) {
+      throw new Error('You can only create vendors for your own department.');
+    }
     const id = uuidv4();
     const now = new Date().toISOString();
     db.prepare(`INSERT INTO vendors (id, name, contact_person, phone, email, address, payment_terms, notes, department, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`)
@@ -34,7 +51,8 @@ export function registerVendorHandlers(): void {
   });
 
   ipcMain.handle('db:vendors:update', (event: any, id: string, data: unknown) => {
-    requireSession(event);
+    requireWriteAccess(event);
+    assertVendorInDepartment(event, id);
     const input = VendorUpdateSchema.parse(data);
     const fields: string[] = [];
     const values: any[] = [];
@@ -51,8 +69,11 @@ export function registerVendorHandlers(): void {
   });
 
   ipcMain.handle('db:vendors:delete', (event: any, id: string) => {
-    requireSession(event);
+    requireWriteAccess(event);
+    assertVendorInDepartment(event, id);
+    const before: any = db.prepare('SELECT * FROM vendors WHERE id = ?').get(id);
     db.prepare("UPDATE vendors SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(id);
+    writeAuditLog(event, { action: 'vendor_deactivate', entityType: 'vendor', entityId: id, oldValues: before });
     return { success: true };
   });
 }

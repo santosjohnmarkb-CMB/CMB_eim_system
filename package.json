@@ -27,6 +27,8 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
+    "@fontsource/dm-sans": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
     "@supabase/supabase-js": "^2.105.1",
     "better-sqlite3": "^12.8.0",
     "clsx": "^2.1.0",
@@ -47,6 +49,7 @@
     "zustand": "^4.5.0"
   },
   "devDependencies": {
+    "@electron/notarize": "^3.1.1",
     "@eslint/js": "^10.0.1",
     "@types/better-sqlite3": "^7.6.8",
     "@types/node": "^20.11.0",

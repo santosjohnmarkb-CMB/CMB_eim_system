@@ -654,13 +654,7 @@ export function runMigrations(db: any): void {
 
   for (const migration of MIGRATIONS) {
     if (applied.has(migration.id)) continue;
-    try {
-      migration.up(db);
-      db.prepare('INSERT INTO schema_migrations (id) VALUES (?)').run(migration.id);
-    } catch (err) {
-      console.error(`[Migration] Failed to apply ${migration.id}:`, err);
-      throw err;
-    }
+    applyAtomically(db, migration.id, () => migration.up(db), true);
   }
 
   // Force-fix: if maintenance_type constraint is still the old one, re-run the fix
@@ -669,9 +663,44 @@ export function runMigrations(db: any): void {
     if (tableSql && tableSql.sql && !tableSql.sql.includes("'routine_maintenance'")) {
       console.log('[Migration] Detected stale maintenance_type CHECK constraint, applying fix...');
       const fix = MIGRATIONS.find(m => m.id === '006_expand_maintenance_type_check');
-      if (fix) fix.up(db);
+      if (fix) applyAtomically(db, `${fix.id} (force-fix)`, () => fix.up(db), false);
     }
   } catch (err) {
     console.error('[Migration] Failed to force-fix maintenance_type constraint:', err);
+  }
+}
+
+/**
+ * Runs a migration body as an all-or-nothing unit.
+ *
+ * PRAGMA foreign_keys cannot be changed inside a transaction, and several
+ * migrations rebuild tables (drop-and-recreate) which requires FK enforcement
+ * to be OFF. So we toggle FK OUTSIDE the transaction and wrap the body INSIDE
+ * one — the migrations' own internal `foreign_keys` toggles then become harmless
+ * no-ops. If anything throws, the transaction rolls back and the DB is left in
+ * its pre-migration state instead of a half-applied one.
+ *
+ * When `record` is true the schema_migrations row is written inside the same
+ * transaction, so the "applied" marker and the change it represents commit (or
+ * roll back) together.
+ */
+function applyAtomically(db: any, id: string, body: () => void, record: boolean): void {
+  const fkWasOn = db.pragma('foreign_keys', { simple: true }) === 1;
+  db.pragma('foreign_keys = OFF');
+  try {
+    const run = db.transaction(() => {
+      body();
+      if (record) db.prepare('INSERT INTO schema_migrations (id) VALUES (?)').run(id);
+    });
+    run();
+    const violations = db.pragma('foreign_key_check');
+    if (Array.isArray(violations) && violations.length > 0) {
+      console.warn(`[Migration] ${id} left ${violations.length} foreign-key violation(s):`, violations);
+    }
+  } catch (err) {
+    console.error(`[Migration] Failed to apply ${id} (rolled back):`, err);
+    throw err;
+  } finally {
+    if (fkWasOn) db.pragma('foreign_keys = ON');
   }
 }

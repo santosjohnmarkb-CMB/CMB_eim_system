@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { ipcInvoke } from '../lib/ipc';
+import { reportLoadError } from '../lib/notify';
 import type { EquipmentWithAsset, Category, Subcategory, DashboardStats, AssetStatusLogEntry } from '../../shared/types';
 
 interface EquipmentState {
@@ -36,7 +37,8 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
     try {
       const items = await ipcInvoke<EquipmentWithAsset[]>('db:equipment:getAll');
       set({ items, loading: false });
-    } catch {
+    } catch (err) {
+      reportLoadError('equipment', err);
       set({ loading: false });
     }
   },

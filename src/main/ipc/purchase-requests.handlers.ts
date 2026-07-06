@@ -7,6 +7,7 @@ import { PURCHASE_REQUEST_DEPT_PREFIX } from '../../shared/constants';
 import { sessionDepartment } from './department';
 import { archivePurchaseRequest } from '../sync/archive-eim';
 import { pushOperationalToCloud } from '../sync/operational-sync';
+import { saveBlob, deleteBlob, resolveBlob } from '../blob-store';
 
 // Sync a request and all its line items to the cloud so other privileged users see it.
 // The requested-equipment photo (photo_data) syncs as part of the row; only the
@@ -102,7 +103,8 @@ export function registerPurchaseRequestHandlers(): void {
     const items = db
       .prepare('SELECT * FROM purchase_request_items WHERE request_id = ? ORDER BY sort_order ASC, created_at ASC')
       .all(id);
-    return { ...request, items };
+    // Detail view may display/re-upload the invoice, so return a real data URL.
+    return { ...request, invoice_data: resolveBlob(request.invoice_data), items };
   });
 
   ipcMain.handle('db:purchaseRequests:create', (event: any, data: unknown) => {
@@ -188,12 +190,14 @@ export function registerPurchaseRequestHandlers(): void {
   // Editors (admin or managers) may upload, mirroring the edit permission.
   ipcMain.handle('db:purchaseRequests:uploadInvoice', (event: any, id: string, dataUrl: unknown) => {
     const user = requireSession(event);
-    getRequestInDept(event, id);
+    const existing = getRequestInDept(event, id);
     if (user.role !== 'admin' && !['equipment_manager', 'inventory_manager'].includes(user.role)) {
       throw new Error('You do not have permission to upload an invoice.');
     }
     const parsed = AttachmentDataSchema.parse(dataUrl);
-    db.prepare("UPDATE purchase_requests SET invoice_data = ?, updated_at = datetime('now') WHERE id = ?").run(parsed, id);
+    const pointer = saveBlob(parsed);
+    db.prepare("UPDATE purchase_requests SET invoice_data = ?, updated_at = datetime('now') WHERE id = ?").run(pointer, id);
+    deleteBlob(existing?.invoice_data);
     // The invoice blob itself stays local (stripped on push); sync the bumped updated_at.
     pushRequestToCloud(db, id);
     return { success: true };
@@ -201,11 +205,12 @@ export function registerPurchaseRequestHandlers(): void {
 
   ipcMain.handle('db:purchaseRequests:clearInvoice', (event: any, id: string) => {
     const user = requireSession(event);
-    getRequestInDept(event, id);
+    const existing = getRequestInDept(event, id);
     if (user.role !== 'admin' && !['equipment_manager', 'inventory_manager'].includes(user.role)) {
       throw new Error('You do not have permission to remove an invoice.');
     }
     db.prepare("UPDATE purchase_requests SET invoice_data = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
+    deleteBlob(existing?.invoice_data);
     pushRequestToCloud(db, id);
     return { success: true };
   });
@@ -246,12 +251,13 @@ export function registerPurchaseRequestHandlers(): void {
   ipcMain.handle('db:purchaseRequests:delete', (event: any, id: string) => {
     const user = requireSession(event);
     if (user.role !== 'admin') throw new Error('Only admins can delete purchase requests.');
-    getRequestInDept(event, id);
+    const existing = getRequestInDept(event, id);
     const tx = db.transaction(() => {
       db.prepare('DELETE FROM purchase_request_items WHERE request_id = ?').run(id);
       db.prepare('DELETE FROM purchase_requests WHERE id = ?').run(id);
     });
     tx();
+    deleteBlob(existing?.invoice_data);
     // Propagate the delete; item rows cascade-delete via the Supabase foreign key.
     void pushOperationalToCloud('purchase_requests', 'DELETE', { id });
     return { success: true };

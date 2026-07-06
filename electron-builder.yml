@@ -29,9 +29,17 @@ asarUnpack:
 
 mac:
   category: public.app-category.business
-  icon: build/icon.icns
+  icon: build/icon.png
   hardenedRuntime: true
   gatekeeperAssess: false
+  # Hardened-runtime entitlements required for notarization (JIT + native modules).
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Signing identity is auto-selected from the keychain, or supply CSC_LINK /
+  # CSC_KEY_PASSWORD env vars in CI. Notarization is handled by the afterSign
+  # hook (build/notarize.cjs), so disable electron-builder's built-in notarize
+  # to avoid double submission.
+  notarize: false
   target:
     - target: dmg
       arch:
@@ -55,7 +63,7 @@ dmg:
     height: 380
 
 win:
-  icon: build/icon.ico
+  icon: build/icon.png
   target:
     - target: nsis
       arch:
@@ -74,3 +82,7 @@ linux:
     - AppImage
 
 artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+
+# Runs after code signing on macOS; notarizes only when Apple credentials are
+# present in the environment (see build/notarize.cjs). Harmless on other OSes.
+afterSign: build/notarize.cjs

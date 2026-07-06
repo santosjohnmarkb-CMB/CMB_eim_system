@@ -8,7 +8,9 @@ export default defineConfig({
   build: {
     outDir: 'dist/renderer',
     emptyOutDir: true,
-    sourcemap: true,
+    // No sourcemaps in the shipped build — they expose full original source and
+    // bloat the package. Set VITE_SOURCEMAP=1 for a local debug build.
+    sourcemap: process.env.VITE_SOURCEMAP === '1',
     rollupOptions: {
       output: {
         manualChunks(id) {

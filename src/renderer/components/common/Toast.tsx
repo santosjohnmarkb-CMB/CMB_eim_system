@@ -22,7 +22,12 @@ export function ToastContainer() {
   const removeToast = useUiStore((s) => s.removeToast);
 
   return (
-    <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 max-w-sm">
+    <div
+      className="fixed top-4 right-4 z-[100] flex flex-col gap-2 max-w-sm"
+      role="region"
+      aria-label="Notifications"
+      aria-live="polite"
+    >
       {toasts.map((toast) => {
         const Icon = iconMap[toast.type];
         return (
@@ -50,13 +55,21 @@ function ToastItem({ id, type, message, Icon, colorClass, onDismiss }: {
   }, [id, onDismiss]);
 
   return (
-    <div className={clsx(
-      'glass-panel rounded-lg px-4 py-3 flex items-start gap-3 animate-slide-down shadow-lg',
-    )}>
-      <Icon size={18} className={clsx('mt-0.5 flex-shrink-0', colorClass)} />
+    <div
+      role={type === 'error' ? 'alert' : 'status'}
+      className={clsx(
+        'glass-panel rounded-lg px-4 py-3 flex items-start gap-3 animate-slide-down shadow-lg',
+      )}
+    >
+      <Icon size={18} className={clsx('mt-0.5 flex-shrink-0', colorClass)} aria-hidden="true" />
       <p className="text-sm text-surface-200 flex-1">{message}</p>
-      <button onClick={() => onDismiss(id)} className="text-surface-500 hover:text-surface-300">
-        <X size={14} />
+      <button
+        type="button"
+        onClick={() => onDismiss(id)}
+        aria-label="Dismiss notification"
+        className="text-surface-500 hover:text-surface-300"
+      >
+        <X size={14} aria-hidden="true" />
       </button>
     </div>
   );

@@ -2,12 +2,14 @@ import { ipcMain } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../database/index';
 import { requireSession, requireWriteAccess } from './session';
+import { writeAuditLog } from './audit';
 import { MaintenanceTicketCreateSchema, MaintenanceTicketUpdateSchema, MaintenanceNoteSchema, TicketActionSchema, TicketActionUpdateSchema, AttachmentDataSchema } from '../../shared/schemas';
 import { pushOperationalToCloud } from '../sync/operational-sync';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { sessionDepartment, categoriesForDepartment, departmentForCategory, assertEquipmentInDepartment } from './department';
 import { recomputeAvailability, pickAvailableAsset } from './availability';
 import { archiveMaintenanceTicket } from '../sync/archive-eim';
+import { saveBlob, deleteBlob, resolveBlob } from '../blob-store';
 
 const DEPT_PREFIX: Record<string, string> = {
   'Camera': 'CD',
@@ -110,7 +112,8 @@ export function registerMaintenanceHandlers(): void {
     if (!row) return null;
     const dept = sessionDepartment(event);
     if (dept && departmentForCategory(row.category_name) !== dept) return null;
-    return row;
+    // Detail view may display/re-upload the service doc, so return a real data URL.
+    return { ...row, service_doc_data: resolveBlob(row.service_doc_data) };
   });
 
   ipcMain.handle('db:maintenance:create', (event: any, data: unknown) => {
@@ -173,6 +176,7 @@ export function registerMaintenanceHandlers(): void {
 
   ipcMain.handle('db:maintenance:update', (event: any, id: string, data: unknown) => {
     requireWriteAccess(event);
+    getTicketInDept(event, id);
     const input = MaintenanceTicketUpdateSchema.parse(data);
     const fields: string[] = [];
     const values: any[] = [];
@@ -192,21 +196,25 @@ export function registerMaintenanceHandlers(): void {
   // before a non-loss ticket can be completed.
   ipcMain.handle('db:maintenance:uploadServiceDoc', (event: any, id: string, dataUrl: unknown) => {
     requireWriteAccess(event);
-    getTicketInDept(event, id);
+    const existing = getTicketInDept(event, id);
     const parsed = AttachmentDataSchema.parse(dataUrl);
-    db.prepare("UPDATE maintenance_tickets SET service_doc_data = ?, updated_at = datetime('now') WHERE id = ?").run(parsed, id);
+    const pointer = saveBlob(parsed);
+    db.prepare("UPDATE maintenance_tickets SET service_doc_data = ?, updated_at = datetime('now') WHERE id = ?").run(pointer, id);
+    deleteBlob(existing?.service_doc_data);
     return { success: true };
   });
 
   ipcMain.handle('db:maintenance:clearServiceDoc', (event: any, id: string) => {
     requireWriteAccess(event);
-    getTicketInDept(event, id);
+    const existing = getTicketInDept(event, id);
     db.prepare("UPDATE maintenance_tickets SET service_doc_data = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
+    deleteBlob(existing?.service_doc_data);
     return { success: true };
   });
 
   ipcMain.handle('db:maintenance:updateStatus', (event: any, id: string, newStatus: string, outcome?: string | null) => {
     const user = requireWriteAccess(event);
+    getTicketInDept(event, id);
     const ticket: any = db.prepare('SELECT * FROM maintenance_tickets WHERE id = ?').get(id);
     if (!ticket) throw new Error('Ticket not found');
 
@@ -326,6 +334,8 @@ export function registerMaintenanceHandlers(): void {
     });
     tx();
 
+    deleteBlob(ticket.service_doc_data);
+    writeAuditLog(event, { action: 'maintenance_delete', entityType: 'maintenance_ticket', entityId: id, oldValues: ticket });
     void pushOperationalToCloud('maintenance_tickets', 'DELETE', { id });
     if (wasOpen) {
       const eq: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(ticket.equipment_id);
@@ -360,7 +370,7 @@ export function registerMaintenanceHandlers(): void {
       for (const part of parts) {
         const catalogItem: any = db.prepare('SELECT * FROM parts_catalog WHERE id = ?').get(part.part_id);
         if (!catalogItem) continue;
-        db.prepare("UPDATE parts_inventory SET qty_on_hand = qty_on_hand - ?, updated_at = datetime('now') WHERE part_id = ?").run(part.qty, part.part_id);
+        db.prepare("UPDATE parts_inventory SET qty_on_hand = MAX(0, qty_on_hand - ?), updated_at = datetime('now') WHERE part_id = ?").run(part.qty, part.part_id);
         db.prepare(`INSERT INTO parts_transactions (id, part_id, transaction_type, quantity, reference_type, reference_id, performed_by, notes) VALUES (?, ?, 'consume', ?, 'maintenance_ticket', ?, ?, ?)`)
           .run(uuidv4(), part.part_id, -part.qty, ticketId, user.full_name, `Consumed for ticket`);
         totalCost += catalogItem.unit_cost * part.qty;

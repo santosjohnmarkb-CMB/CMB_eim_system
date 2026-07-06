@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron';
 import { getDatabase, hashPassword, verifyPassword } from '../database/index';
 import { setSession, clearSession, getSession } from './session';
+import { writeAuditLog } from './audit';
 import { LoginSchema } from '../../shared/schemas';
 
 export function registerAuthHandlers(): void {
@@ -14,9 +15,15 @@ export function registerAuthHandlers(): void {
     const user: any = db
       .prepare('SELECT * FROM users WHERE username = ? AND is_active = 1')
       .get(username);
-    if (!user) return null;
+    if (!user) {
+      writeAuditLog(event, { action: 'login_failed', entityType: 'user', entityId: null, userId: null, newValues: { username } });
+      return null;
+    }
 
-    if (!verifyPassword(password, user.password_hash)) return null;
+    if (!verifyPassword(password, user.password_hash)) {
+      writeAuditLog(event, { action: 'login_failed', entityType: 'user', entityId: user.id, userId: null, newValues: { username } });
+      return null;
+    }
 
     if (!user.password_hash.includes(':')) {
       const upgraded = hashPassword(password);
@@ -32,6 +39,7 @@ export function registerAuthHandlers(): void {
       email: safeUser.email,
       department: safeUser.department ?? null,
     });
+    writeAuditLog(event, { action: 'login', entityType: 'user', entityId: safeUser.id });
     return safeUser;
   });
 
@@ -56,7 +64,27 @@ export function registerAuthHandlers(): void {
   });
 
   ipcMain.handle('auth:logout', (event: any) => {
+    writeAuditLog(event, { action: 'logout', entityType: 'user', entityId: getSession(event)?.id ?? null });
     clearSession(event);
     return { success: true };
+  });
+
+  // Re-hydrate the renderer after a reload/relaunch. The main-process session is
+  // keyed by webContents and survives a renderer reload, so we can return the
+  // current user (fetched fresh from the DB so role/department changes apply)
+  // without forcing the operator to log in again. Returns null when there is no
+  // active session.
+  ipcMain.handle('auth:getSession', (event: any) => {
+    const session = getSession(event);
+    if (!session) return null;
+    const user: any = db
+      .prepare('SELECT * FROM users WHERE id = ? AND is_active = 1')
+      .get(session.id);
+    if (!user) {
+      clearSession(event);
+      return null;
+    }
+    const { password_hash: _ph, ...safeUser } = user;
+    return safeUser;
   });
 }

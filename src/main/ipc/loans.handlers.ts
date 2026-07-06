@@ -9,6 +9,7 @@ import { pushOperationalToCloud } from '../sync/operational-sync';
 import { sessionDepartment, assertEquipmentInDepartment } from './department';
 import { recomputeAvailability, pickAvailableAsset } from './availability';
 import { archiveLoan } from '../sync/archive-eim';
+import { saveBlob, deleteBlob, resolveBlob } from '../blob-store';
 
 // Auto-archive the loan's release document once the whole loan is returned
 // (fire-and-forget; never blocks or fails the return action).
@@ -141,7 +142,8 @@ export function registerLoanHandlers(): void {
       WHERE li.loan_id = ?
       ORDER BY li.created_at ASC
     `).all(id);
-    return { ...loan, items };
+    // Detail view may display/re-upload the form, so hand back a real data URL.
+    return { ...loan, signed_form_data: resolveBlob(loan.signed_form_data), items };
   });
 
   ipcMain.handle('db:loans:create', (event: any, data: unknown) => {
@@ -248,9 +250,11 @@ export function registerLoanHandlers(): void {
 
   ipcMain.handle('db:loans:uploadSignedForm', (event: any, id: string, dataUrl: unknown) => {
     requireWriteAccess(event);
-    getLoanInDept(event, id);
+    const existing = getLoanInDept(event, id);
     const parsed = AttachmentDataSchema.parse(dataUrl);
-    db.prepare("UPDATE equipment_loans SET signed_form_data = ?, updated_at = datetime('now') WHERE id = ?").run(parsed, id);
+    const pointer = saveBlob(parsed);
+    db.prepare("UPDATE equipment_loans SET signed_form_data = ?, updated_at = datetime('now') WHERE id = ?").run(pointer, id);
+    deleteBlob(existing?.signed_form_data);
     // The form blob itself stays local (stripped on push), but sync the bumped
     // updated_at so this machine's clock stays ahead of other edits in the cloud.
     pushLoanToCloud(db, id);
@@ -259,8 +263,9 @@ export function registerLoanHandlers(): void {
 
   ipcMain.handle('db:loans:clearSignedForm', (event: any, id: string) => {
     requireWriteAccess(event);
-    getLoanInDept(event, id);
+    const existing = getLoanInDept(event, id);
     db.prepare("UPDATE equipment_loans SET signed_form_data = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
+    deleteBlob(existing?.signed_form_data);
     pushLoanToCloud(db, id);
     return { success: true };
   });
@@ -320,7 +325,7 @@ export function registerLoanHandlers(): void {
   ipcMain.handle('db:loans:delete', (event: any, id: string) => {
     const user = requireSession(event);
     if (user.role !== 'admin') throw new Error('Only admins can delete loans');
-    getLoanInDept(event, id);
+    const existing = getLoanInDept(event, id);
 
     const affected: { equipment_id: string; asset_id: string | null }[] = [];
     const tx = db.transaction(() => {
@@ -335,6 +340,7 @@ export function registerLoanHandlers(): void {
     });
     tx();
 
+    deleteBlob(existing?.signed_form_data);
     for (const a of affected) pushItemAvailabilityToCloud(db, a.equipment_id, a.asset_id);
     // Propagate the delete; item rows cascade-delete via the Supabase foreign key.
     void pushOperationalToCloud('equipment_loans', 'DELETE', { id });

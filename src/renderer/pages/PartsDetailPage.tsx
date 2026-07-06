@@ -13,14 +13,42 @@ export function PartsDetailPage() {
   const { getById, getTransactions } = usePartsStore();
   const [part, setPart] = useState<PartsCatalogItem | null>(null);
   const [transactions, setTransactions] = useState<PartsTransaction[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!id) return;
-    getById(id).then(setPart);
-    getTransactions(id).then(setTransactions);
-  }, [id]);
+    if (!id) { setLoading(false); setError('No part was specified.'); return; }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    (async () => {
+      try {
+        const p = await getById(id);
+        if (cancelled) return;
+        if (!p) { setError('This part could not be found. It may have been deleted.'); return; }
+        setPart(p);
+        const tx = await getTransactions(id).catch(() => [] as PartsTransaction[]);
+        if (!cancelled) setTransactions(tx);
+      } catch (err: any) {
+        if (!cancelled) setError(err?.message || 'Failed to load this part.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [id, getById, getTransactions]);
 
-  if (!part) return <LoadingSpinner size="lg" className="py-24" />;
+  if (loading) return <LoadingSpinner size="lg" className="py-24" />;
+  if (error || !part) {
+    return (
+      <div className="space-y-6">
+        <Button variant="ghost" size="sm" onClick={() => navigate('/parts')}><ArrowLeft size={16} /> Back</Button>
+        <div className="glass-panel rounded-xl p-8 text-center">
+          <p className="text-surface-300">{error || 'Part not found.'}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

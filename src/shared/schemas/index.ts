@@ -67,6 +67,25 @@ export const EquipmentCreateSchema = z.object({
   })).optional(),
 });
 
+// Editable equipment fields. All optional (partial update); `quantity` reconciles
+// the per-unit asset rows. Unknown keys are ignored so the handler's allow-list
+// remains the source of truth for which columns are written.
+export const EquipmentUpdateSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  display_name: z.string().min(1).max(200).optional(),
+  category_id: z.string().uuid().optional(),
+  subcategory_id: z.string().uuid().optional(),
+  sub_subcategory: z.string().max(100).nullable().optional(),
+  item_type: z.enum(['standalone', 'package_main', 'package_component', 'add_on']).optional(),
+  brand: z.string().max(100).optional(),
+  model: z.string().max(100).optional(),
+  description: z.string().max(2000).optional(),
+  pricing_type: z.enum(['per_day', 'per_project', 'package_rate']).optional(),
+  base_price: z.number().min(0).max(9999999).optional(),
+  notes: z.string().max(2000).nullable().optional(),
+  quantity: z.number().int().min(0).optional(),
+});
+
 // Per-unit asset detail edit (serial number, supplier, delivery date).
 export const AssetUpdateSchema = z.object({
   asset_id: z.string().uuid(),
@@ -320,6 +339,7 @@ export type LoginInput = z.infer<typeof LoginSchema>;
 export type UserCreateInput = z.infer<typeof UserCreateSchema>;
 export type UserUpdateInput = z.infer<typeof UserUpdateSchema>;
 export type EquipmentCreateInput = z.infer<typeof EquipmentCreateSchema>;
+export type EquipmentUpdateInput = z.infer<typeof EquipmentUpdateSchema>;
 export type AssetUpdateInput = z.infer<typeof AssetUpdateSchema>;
 export type AssetStatusUpdateInput = z.infer<typeof AssetStatusUpdateSchema>;
 export type MaintenanceTicketCreateInput = z.infer<typeof MaintenanceTicketCreateSchema>;

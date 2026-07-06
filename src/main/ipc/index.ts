@@ -1,5 +1,6 @@
 import { registerAuthHandlers } from './auth.handlers';
 import { registerUserHandlers } from './users.handlers';
+import { registerAuditHandlers } from './audit.handlers';
 import { registerEquipmentHandlers } from './equipment.handlers';
 import { registerMaintenanceHandlers } from './maintenance.handlers';
 import { registerPartsHandlers } from './parts.handlers';
@@ -15,6 +16,7 @@ import { registerAppHandlers } from './app.handlers';
 export function registerAllHandlers(): void {
   registerAuthHandlers();
   registerUserHandlers();
+  registerAuditHandlers();
   registerEquipmentHandlers();
   registerMaintenanceHandlers();
   registerPartsHandlers();

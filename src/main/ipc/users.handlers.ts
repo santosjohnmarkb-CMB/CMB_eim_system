@@ -2,6 +2,7 @@ import { ipcMain } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase, hashPassword } from '../database/index';
 import { requireAdmin } from './session';
+import { writeAuditLog, redactUser } from './audit';
 import { UserCreateSchema, UserUpdateSchema } from '../../shared/schemas';
 
 export function registerUserHandlers(): void {
@@ -30,12 +31,14 @@ export function registerUserHandlers(): void {
     const user: any = db.prepare(
       'SELECT id, username, full_name, email, role, department, is_active, created_at, updated_at FROM users WHERE id = ?'
     ).get(id);
+    writeAuditLog(event, { action: 'user_create', entityType: 'user', entityId: id, newValues: user });
     return user;
   });
 
   ipcMain.handle('db:users:update', (event: any, id: string, data: unknown) => {
     requireAdmin(event);
     const input = UserUpdateSchema.parse(data);
+    const before: any = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
     const updates: string[] = [];
     const values: any[] = [];
 
@@ -60,12 +63,21 @@ export function registerUserHandlers(): void {
     const user: any = db.prepare(
       'SELECT id, username, full_name, email, role, department, is_active, created_at, updated_at FROM users WHERE id = ?'
     ).get(id);
+    writeAuditLog(event, {
+      action: 'user_update', entityType: 'user', entityId: id,
+      oldValues: redactUser(before), newValues: user,
+    });
     return user;
   });
 
   ipcMain.handle('db:users:delete', (event: any, id: string) => {
     requireAdmin(event);
+    const before: any = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
     db.prepare("UPDATE users SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(id);
+    writeAuditLog(event, {
+      action: 'user_deactivate', entityType: 'user', entityId: id,
+      oldValues: redactUser(before),
+    });
     return { success: true };
   });
 }

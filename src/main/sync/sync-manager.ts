@@ -1,5 +1,5 @@
 import { BrowserWindow } from 'electron';
-import { loadSyncConfig, initSupabase, getSupabase, disconnectSupabase, saveSyncConfig } from './supabase';
+import { loadSyncConfig, initSupabase, getSupabase, disconnectSupabase, saveSyncConfig, authenticateClient } from './supabase';
 import { cloudService } from './cloud-service';
 import { offlineQueue } from './offline-queue';
 import { syncCatalogWithCloud, applyCatalogRealtimeChange } from './catalog-sync';
@@ -75,6 +75,10 @@ class SyncManager {
       this.setState({ status: 'offline' });
       return;
     }
+
+    // Opt-in CRIT-2 hardening: if a service-account credential is configured,
+    // sign in so cloud traffic runs as `authenticated`. No-op (anon) otherwise.
+    await authenticateClient();
 
     await this.checkConnectivity();
     this.startBackgroundLoops();
@@ -172,6 +176,8 @@ class SyncManager {
       this.setState({ status: 'error', lastError: 'Failed to create Supabase client' });
       return false;
     }
+
+    await authenticateClient();
 
     const healthy = await this.runHealthCheck();
     if (!healthy) {

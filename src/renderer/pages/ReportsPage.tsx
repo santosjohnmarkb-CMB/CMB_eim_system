@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { BarChart3, Wrench, Box, TrendingUp } from 'lucide-react';
+import { BarChart3, Wrench, Box, TrendingUp, FileSpreadsheet, FileText } from 'lucide-react';
 import { ipcInvoke } from '../lib/ipc';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { useDepartmentStore } from '../stores/department.store';
+import { useUiStore } from '../stores/ui.store';
 import { DEPARTMENT_CONFIG } from '../../shared/constants';
-import type { Department } from '../../shared/constants';
 
 type ReportType = 'fleet' | 'repair' | 'parts' | 'availability';
 
@@ -12,21 +12,39 @@ export function ReportsPage() {
   const [activeReport, setActiveReport] = useState<ReportType>('fleet');
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState<'xlsx' | 'pdf' | null>(null);
   const activeDepartment = useDepartmentStore((s) => s.activeDepartment);
+  const addToast = useUiStore((s) => s.addToast);
 
   const loadReport = async (type: ReportType) => {
     setLoading(true);
     setActiveReport(type);
     try {
       const channelMap: Record<ReportType, string> = { fleet: 'reports:fleetUtilization', repair: 'reports:repairCosts', parts: 'reports:partsSpend', availability: 'reports:availabilityTrends' };
-      const categoryNames = activeDepartment ? DEPARTMENT_CONFIG[activeDepartment].categories : undefined;
-      const result = await ipcInvoke(channelMap[type], categoryNames);
+      const result = await ipcInvoke(channelMap[type], activeDepartment ?? undefined);
       setData(result);
     } catch { setData(null); }
     setLoading(false);
   };
 
   useEffect(() => { loadReport('fleet'); }, [activeDepartment]);
+
+  const handleExport = async (format: 'xlsx' | 'pdf') => {
+    setExporting(format);
+    try {
+      const channel = format === 'xlsx' ? 'reports:exportExcel' : 'reports:exportPdf';
+      const result: any = await ipcInvoke(channel, activeReport, activeDepartment ?? undefined);
+      if (result?.success) {
+        addToast({ type: 'success', message: `Report exported to ${result.path}` });
+      } else if (!result?.canceled) {
+        addToast({ type: 'error', message: result?.message || 'Export failed' });
+      }
+    } catch (err) {
+      addToast({ type: 'error', message: err instanceof Error ? err.message : 'Export failed' });
+    } finally {
+      setExporting(null);
+    }
+  };
 
   const tabs = [
     { key: 'fleet' as ReportType, label: 'Fleet Utilization', icon: BarChart3 },
@@ -42,12 +60,28 @@ export function ReportsPage() {
           Showing reports for <span className="text-surface-300 font-semibold">{DEPARTMENT_CONFIG[activeDepartment].label}</span>
         </p>
       )}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {tabs.map((tab) => (
           <button key={tab.key} onClick={() => loadReport(tab.key)} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeReport === tab.key ? 'bg-primary-600/15 text-primary-400' : 'text-surface-400 hover:text-surface-200 hover:bg-surface-800/50'}`}>
             <tab.icon size={16} />{tab.label}
           </button>
         ))}
+        <div className="ml-auto flex gap-2">
+          <button
+            onClick={() => handleExport('xlsx')}
+            disabled={loading || !!exporting || !data}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-surface-300 bg-surface-800/50 hover:bg-surface-700/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <FileSpreadsheet size={16} />{exporting === 'xlsx' ? 'Exporting…' : 'Excel'}
+          </button>
+          <button
+            onClick={() => handleExport('pdf')}
+            disabled={loading || !!exporting || !data}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-surface-300 bg-surface-800/50 hover:bg-surface-700/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <FileText size={16} />{exporting === 'pdf' ? 'Exporting…' : 'PDF'}
+          </button>
+        </div>
       </div>
 
       <div className="glass-panel rounded-xl p-6">
@@ -58,7 +92,7 @@ export function ReportsPage() {
                 <h3 className="text-sm font-semibold text-surface-300 mb-3">Status Distribution</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {data.statusDistribution.map((s: any) => (
-                    <div key={s.status} className="bg-surface-800/50 rounded-lg p-3"><p className="text-lg font-bold text-surface-100">{s.count}</p><p className="text-xs text-surface-500">{s.status}</p></div>
+                    <div key={s.current_status} className="bg-surface-800/50 rounded-lg p-3"><p className="text-lg font-bold text-surface-100">{s.count}</p><p className="text-xs text-surface-500">{s.current_status}</p></div>
                   ))}
                 </div>
               </div>

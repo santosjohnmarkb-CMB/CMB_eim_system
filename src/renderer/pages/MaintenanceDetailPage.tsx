@@ -235,14 +235,24 @@ export function MaintenanceDetailPage() {
   const [showActionModal, setShowActionModal] = useState(false);
   const [actionForm, setActionForm] = useState({ action_date: '', action_taken: '', remarks: '', personnel: '' });
   const [savingAction, setSavingAction] = useState(false);
+  const [loadingTicket, setLoadingTicket] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const cellRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
 
   const load = useCallback(async () => {
-    if (!id) return;
-    const [t, n, a] = await Promise.all([getById(id), getNotes(id), getActions(id)]);
-    setTicket(t);
-    setNotes(n);
-    setActions(a);
+    if (!id) { setLoadingTicket(false); setLoadError('No ticket was specified.'); return; }
+    try {
+      const [t, n, a] = await Promise.all([getById(id), getNotes(id), getActions(id)]);
+      if (!t) { setLoadError('This maintenance ticket could not be found. It may have been deleted.'); return; }
+      setTicket(t);
+      setNotes(n);
+      setActions(a);
+      setLoadError(null);
+    } catch (err: any) {
+      setLoadError(err?.message || 'Failed to load this ticket.');
+    } finally {
+      setLoadingTicket(false);
+    }
   }, [id, getById, getNotes, getActions]);
 
   useEffect(() => { load(); }, [load]);
@@ -251,7 +261,23 @@ export function MaintenanceDetailPage() {
     if (editingCell && cellRef.current) cellRef.current.focus();
   }, [editingCell]);
 
-  if (!ticket) return <LoadingSpinner size="lg" className="py-24" />;
+  if (loadingTicket) return <LoadingSpinner size="lg" className="py-24" />;
+  if (loadError || !ticket) {
+    return (
+      <div className="space-y-6">
+        <button
+          type="button"
+          onClick={() => navigate('/maintenance')}
+          className="inline-flex items-center gap-1 text-sm text-primary-600 hover:text-primary-700"
+        >
+          <ArrowLeft size={16} /> Back to Queue
+        </button>
+        <div className="glass-panel rounded-xl p-8 text-center">
+          <p className="text-gray-600">{loadError || 'Ticket not found.'}</p>
+        </div>
+      </div>
+    );
+  }
 
   const currentIdx = PIPELINE.indexOf(ticket.repair_status as (typeof PIPELINE)[number]);
   const canAdvance = currentIdx >= 0 && currentIdx < PIPELINE.length - 1;
@@ -434,6 +460,7 @@ export function MaintenanceDetailPage() {
       setActions((prev) => prev.filter((_, i) => i !== rowIdx));
       return;
     }
+    if (!window.confirm('Delete this action-log entry? This cannot be undone.')) return;
     try {
       await deleteAction(row.id!);
       setActions((prev) => prev.filter((_, i) => i !== rowIdx));

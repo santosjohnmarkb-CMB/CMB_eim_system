@@ -44,9 +44,21 @@ export default tseslint.config(
 
   // Build/config files and standalone Node scripts.
   {
-    files: ['*.{js,cjs,mjs,ts}', 'vite.config.ts', 'scripts/**/*.{js,cjs,mjs,ts}'],
+    files: ['*.{js,cjs,mjs,ts}', 'vite.config.ts', 'scripts/**/*.{js,cjs,mjs,ts}', 'build/**/*.{js,cjs,mjs}'],
     languageOptions: {
       globals: { ...globals.node },
+    },
+  },
+
+  // CommonJS Node build scripts (electron-builder hooks) legitimately use require().
+  {
+    files: ['**/*.cjs'],
+    languageOptions: {
+      sourceType: 'commonjs',
+      globals: { ...globals.node },
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
     },
   },
 

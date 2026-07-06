@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { ipcInvoke } from '../lib/ipc';
+import { reportLoadError } from '../lib/notify';
 import type { PartsCatalogItem, PartsTransaction, PartsCompatibility } from '../../shared/types';
 
 interface PartsState {
@@ -28,7 +29,8 @@ export const usePartsStore = create<PartsState>((set, get) => ({
     try {
       const items = await ipcInvoke<PartsCatalogItem[]>('db:parts:getAll');
       set({ items, loading: false });
-    } catch {
+    } catch (err) {
+      reportLoadError('parts', err);
       set({ loading: false });
     }
   },

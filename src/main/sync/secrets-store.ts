@@ -26,6 +26,12 @@ interface SecureSecrets {
   googleRefreshToken?: string;
   googleAccessToken?: string;
   googleTokenExpiry?: string;
+  // Supabase Auth service-account credential. When present, the sync client
+  // signs in with it so cloud traffic runs as the `authenticated` role instead
+  // of the public `anon` key (CRIT-2). Stored here — never in sync-config.json
+  // (plaintext) and never exposed to the renderer.
+  supabaseServiceEmail?: string;
+  supabaseServicePassword?: string;
 }
 
 let _store: Store<SecureSecrets> | null = null;
@@ -90,4 +96,41 @@ export function clearGoogleSecrets(): void {
   store.delete('googleRefreshToken');
   store.delete('googleAccessToken');
   store.delete('googleTokenExpiry');
+}
+
+export interface SupabaseServiceCredentials {
+  email: string;
+  password: string;
+}
+
+/**
+ * Persist the Supabase Auth service-account credential (encrypted at rest).
+ */
+export function saveSupabaseServiceCredentials(creds: SupabaseServiceCredentials): void {
+  const store = getStore();
+  store.set('supabaseServiceEmail', creds.email);
+  store.set('supabaseServicePassword', creds.password);
+}
+
+/**
+ * Load the service-account credential, or null if none is configured (in which
+ * case the sync client stays on the anon key — current backward-compatible
+ * behaviour).
+ */
+export function loadSupabaseServiceCredentials(): SupabaseServiceCredentials | null {
+  const store = getStore();
+  const email = store.get('supabaseServiceEmail', '') ?? '';
+  const password = store.get('supabaseServicePassword', '') ?? '';
+  if (!email || !password) return null;
+  return { email, password };
+}
+
+/**
+ * Remove the service-account credential. The client reverts to anon on the next
+ * (re)connect.
+ */
+export function clearSupabaseServiceCredentials(): void {
+  const store = getStore();
+  store.delete('supabaseServiceEmail');
+  store.delete('supabaseServicePassword');
 }

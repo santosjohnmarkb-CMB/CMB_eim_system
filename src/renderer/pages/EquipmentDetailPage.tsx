@@ -26,7 +26,7 @@ export function EquipmentDetailPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const role = useAuthStore((s) => s.user?.role);
-  const { items, categories, subcategories, getStatusLog, updateEquipment, updateAsset, updateAssetStatus, fetchCategories, fetchSubcategories } = useEquipmentStore();
+  const { items, loading, fetchAll, categories, subcategories, getStatusLog, updateEquipment, updateAsset, updateAssetStatus, fetchCategories, fetchSubcategories } = useEquipmentStore();
   const { isEquipmentInDepartment } = useDepartmentFilter();
   const [statusLog, setStatusLog] = useState<AssetStatusLogEntry[]>([]);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -50,7 +50,23 @@ export function EquipmentDetailPage() {
 
   useEffect(() => { fetchCategories(); fetchSubcategories(); }, [fetchCategories, fetchSubcategories]);
 
-  if (!equipment) return <LoadingSpinner size="lg" className="py-24" />;
+  // Deep-linking straight to this page (or reloading) can arrive before the
+  // equipment list has been fetched; pull it in so we don't hang on the spinner.
+  useEffect(() => { if (items.length === 0) fetchAll(); }, [items.length, fetchAll]);
+
+  // Still loading the list → spinner. Loaded but this id isn't present → the
+  // item genuinely doesn't exist (or isn't in this user's department).
+  if (!equipment) {
+    if (loading || items.length === 0) return <LoadingSpinner size="lg" className="py-24" />;
+    return (
+      <div className="space-y-6">
+        <Button variant="ghost" size="sm" onClick={() => navigate('/equipment')}><ArrowLeft size={16} /> Back</Button>
+        <div className="glass-panel rounded-xl p-8 text-center">
+          <p className="text-surface-300">This equipment could not be found. It may have been deleted or belongs to another department.</p>
+        </div>
+      </div>
+    );
+  }
 
   const units = equipment.assets ?? (equipment.asset ? [equipment.asset] : []);
   const canEdit = role === 'admin' || role === 'inventory_manager';

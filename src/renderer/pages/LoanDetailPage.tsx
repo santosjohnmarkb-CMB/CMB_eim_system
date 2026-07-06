@@ -64,6 +64,7 @@ export function LoanDetailPage() {
 
   const handleReturnItem = async (itemId: string) => {
     if (!id) return;
+    if (!window.confirm('Mark this item as returned? This updates the loan and frees the unit.')) return;
     setBusy(true);
     try {
       await returnItems(id, [itemId]);
@@ -95,6 +96,7 @@ export function LoanDetailPage() {
       openUpload(true);
       return;
     }
+    if (!window.confirm('Return ALL items and close this loan? This cannot be undone.')) return;
     void doReturnAll();
   };
 

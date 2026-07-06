@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { ipcInvoke } from '../lib/ipc';
+import { reportLoadError } from '../lib/notify';
 import type { PurchaseRequest } from '../../shared/types';
 
 interface PurchaseRequestsState {
@@ -25,7 +26,8 @@ export const usePurchaseRequestsStore = create<PurchaseRequestsState>((set, get)
     try {
       const requests = await ipcInvoke<PurchaseRequest[]>('db:purchaseRequests:getAll');
       set({ requests, loading: false });
-    } catch {
+    } catch (err) {
+      reportLoadError('purchase requests', err);
       set({ loading: false });
     }
   },

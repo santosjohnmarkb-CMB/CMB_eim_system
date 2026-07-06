@@ -4,7 +4,7 @@ import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
 import { Modal } from '../components/common/Modal';
 import { useToast } from '../hooks';
-import { RefreshCw, Database, Cloud, Users, Plus, Edit2, Trash2, HardDrive, AlertTriangle, Copy } from 'lucide-react';
+import { RefreshCw, Database, Cloud, Users, Plus, Edit2, Trash2, HardDrive, AlertTriangle, Copy, ScrollText } from 'lucide-react';
 import { ipcInvoke } from '../lib/ipc';
 import type { User } from '../../shared/types';
 import { DEPARTMENT_CONFIG } from '../../shared/constants';
@@ -29,6 +29,13 @@ export function SettingsPage() {
   const [url, setUrl] = useState('');
   const [anonKey, setAnonKey] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // CRIT-2: optional Supabase Auth service account (authenticated-role sync).
+  interface ServiceAccountStatus { configured: boolean; email: string; authenticated: boolean; }
+  const [svcStatus, setSvcStatus] = useState<ServiceAccountStatus | null>(null);
+  const [svcEmail, setSvcEmail] = useState('');
+  const [svcPassword, setSvcPassword] = useState('');
+  const [savingSvc, setSavingSvc] = useState(false);
 
   // Google Drive auto-archive config
   interface GDriveConfig {
@@ -58,6 +65,24 @@ export function SettingsPage() {
   });
   const [savingUser, setSavingUser] = useState(false);
 
+  interface AuditRow {
+    id: string;
+    user_id: string | null;
+    action: string;
+    entity_type: string;
+    entity_id: string | null;
+    old_values: string | null;
+    new_values: string | null;
+    created_at: string;
+    username: string | null;
+    full_name: string | null;
+  }
+  const [auditLogs, setAuditLogs] = useState<AuditRow[]>([]);
+  const [auditActions, setAuditActions] = useState<string[]>([]);
+  const [auditFilter, setAuditFilter] = useState('');
+  const [loadingAudit, setLoadingAudit] = useState(false);
+  const [auditDetail, setAuditDetail] = useState<AuditRow | null>(null);
+
   useEffect(() => {
     if (syncStore.config) {
       setUrl(syncStore.config.supabaseUrl || '');
@@ -86,6 +111,59 @@ export function SettingsPage() {
   };
 
   useEffect(() => { loadGdrive(); }, []);
+
+  const loadServiceStatus = async () => {
+    try {
+      const s = await ipcInvoke<ServiceAccountStatus>('sync:serviceAccount:status');
+      setSvcStatus(s);
+      setSvcEmail(s?.email || '');
+    } catch { /* ignore */ }
+  };
+
+  useEffect(() => { loadServiceStatus(); }, []);
+
+  const loadAudit = async () => {
+    setLoadingAudit(true);
+    try {
+      const [rows, actions] = await Promise.all([
+        ipcInvoke<AuditRow[]>('db:audit:getRecent', { limit: 200, action: auditFilter || undefined }),
+        ipcInvoke<string[]>('db:audit:getActions'),
+      ]);
+      setAuditLogs(rows || []);
+      setAuditActions(actions || []);
+    } catch { /* ignore */ }
+    setLoadingAudit(false);
+  };
+
+  useEffect(() => { loadAudit(); }, [auditFilter]);
+
+  const handleSaveService = async () => {
+    if (!svcEmail.trim() || !svcPassword) { toast.error('Enter the service-account email and password'); return; }
+    setSavingSvc(true);
+    try {
+      const res = await ipcInvoke<{ authenticated: boolean }>('sync:serviceAccount:set', svcEmail.trim(), svcPassword);
+      setSvcPassword('');
+      await loadServiceStatus();
+      if (res?.authenticated) toast.success('Service account saved — sync is now authenticated');
+      else toast.error('Saved, but sign-in failed. Check the credentials and that the Auth user exists.');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to save service account');
+    }
+    setSavingSvc(false);
+  };
+
+  const handleClearService = async () => {
+    setSavingSvc(true);
+    try {
+      await ipcInvoke('sync:serviceAccount:clear');
+      setSvcPassword('');
+      await loadServiceStatus();
+      toast.success('Service account removed — sync reverted to the anon key');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to clear service account');
+    }
+    setSavingSvc(false);
+  };
 
   const handleSaveGdrive = async () => {
     if (!gdriveClientId.trim()) { toast.error('Client ID is required'); return; }
@@ -253,7 +331,8 @@ export function SettingsPage() {
     setSavingUser(false);
   };
 
-  const handleDeleteUser = async (id: string) => {
+  const handleDeleteUser = async (id: string, name: string) => {
+    if (!window.confirm(`Deactivate ${name}? They will immediately lose the ability to sign in. You can reactivate them later by editing the account.`)) return;
     try {
       await ipcInvoke('db:users:delete', id);
       toast.success('User deactivated');
@@ -301,13 +380,63 @@ export function SettingsPage() {
                   <Edit2 size={14} />
                 </button>
                 {u.is_active && (
-                  <button onClick={() => handleDeleteUser(u.id)} className="p-1.5 rounded text-surface-500 hover:text-danger-400 hover:bg-surface-700 transition-colors">
+                  <button onClick={() => handleDeleteUser(u.id, u.full_name || u.username)} className="p-1.5 rounded text-surface-500 hover:text-danger-400 hover:bg-surface-700 transition-colors">
                     <Trash2 size={14} />
                   </button>
                 )}
               </div>
             ))}
             {users.length === 0 && <p className="text-surface-500 text-sm py-4 text-center">No users found</p>}
+          </div>
+        )}
+      </div>
+
+      {/* Audit Log */}
+      <div className="glass-panel rounded-xl p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <ScrollText size={20} className="text-primary-400" />
+          <h3 className="text-base font-semibold text-surface-200">Audit Log</h3>
+          <div className="flex-1" />
+          <select
+            value={auditFilter}
+            onChange={(e) => setAuditFilter(e.target.value)}
+            className="px-2.5 py-1.5 text-xs bg-surface-800 border border-surface-700 rounded-lg text-surface-200"
+          >
+            <option value="">All actions</option>
+            {auditActions.map((a) => <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>)}
+          </select>
+          <button
+            onClick={loadAudit}
+            className="p-1.5 rounded text-surface-500 hover:text-primary-400 hover:bg-surface-700 transition-colors"
+            aria-label="Refresh audit log"
+          >
+            <RefreshCw size={14} />
+          </button>
+        </div>
+        <p className="text-2xs text-surface-500 mb-3">
+          Security-sensitive activity (sign-ins, user changes, deletions). Showing the most recent 200 entries.
+        </p>
+        {loadingAudit ? (
+          <p className="text-surface-500 text-sm py-4">Loading audit log...</p>
+        ) : (
+          <div className="space-y-1 max-h-96 overflow-auto">
+            {auditLogs.map((row) => (
+              <button
+                key={row.id}
+                onClick={() => setAuditDetail(row)}
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-surface-800/40 hover:bg-surface-800/70 transition-colors text-left"
+              >
+                <span className={`text-2xs px-2 py-0.5 rounded-full flex-shrink-0 ${row.action.includes('delete') || row.action.includes('deactivate') || row.action === 'login_failed' ? 'bg-danger-600/15 text-danger-400' : 'bg-primary-600/15 text-primary-400'}`}>
+                  {row.action.replace(/_/g, ' ')}
+                </span>
+                <span className="text-xs text-surface-300 flex-1 min-w-0 truncate">
+                  {row.entity_type}{row.entity_id ? ` · ${row.entity_id.slice(0, 8)}` : ''}
+                </span>
+                <span className="text-2xs text-surface-400 flex-shrink-0">{row.full_name || row.username || 'system'}</span>
+                <span className="text-2xs text-surface-600 flex-shrink-0">{new Date(row.created_at).toLocaleString()}</span>
+              </button>
+            ))}
+            {auditLogs.length === 0 && <p className="text-surface-500 text-sm py-4 text-center">No audit entries</p>}
           </div>
         )}
       </div>
@@ -322,6 +451,52 @@ export function SettingsPage() {
           <Input label="Supabase URL" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://your-project.supabase.co" />
           <Input label="Anon Key" value={anonKey} onChange={(e) => setAnonKey(e.target.value)} placeholder="eyJhbGciOiJIUzI1NiIs..." type="password" />
           <Button onClick={handleSave} loading={saving}>Save & Connect</Button>
+        </div>
+
+        {/* CRIT-2: optional service-account sign-in (authenticated-role sync) */}
+        <div className="mt-6 border-t border-surface-800 pt-5">
+          <div className="flex items-center gap-3 mb-2">
+            <h4 className="text-sm font-semibold text-surface-300">Service Account (optional security hardening)</h4>
+            <div className="flex-1" />
+            {svcStatus?.configured ? (
+              svcStatus.authenticated ? (
+                <span className="text-2xs px-2 py-0.5 rounded-full bg-success-600/15 text-success-400">Signed in</span>
+              ) : (
+                <span className="text-2xs px-2 py-0.5 rounded-full bg-warning-600/15 text-warning-400">Configured — not signed in</span>
+              )
+            ) : (
+              <span className="text-2xs px-2 py-0.5 rounded-full bg-surface-700 text-surface-400">Using anon key</span>
+            )}
+          </div>
+          <p className="text-2xs text-surface-500 mb-4">
+            When set, cloud sync signs in with this dedicated Supabase Auth user so it runs as the
+            <span className="text-surface-300"> authenticated </span> role instead of the public anon key.
+            Enable this only after running <span className="text-surface-300">supabase-rls-hardening.sql</span> and
+            confirming the EIM tables are not shared with other apps. The password is stored encrypted and never displayed.
+          </p>
+          <div className="space-y-4">
+            <Input
+              label="Service Account Email"
+              value={svcEmail}
+              onChange={(e) => setSvcEmail(e.target.value)}
+              placeholder="eim-sync@cmb.internal"
+            />
+            <Input
+              label={svcStatus?.configured ? 'Service Account Password (saved — type to replace)' : 'Service Account Password'}
+              type="password"
+              value={svcPassword}
+              onChange={(e) => setSvcPassword(e.target.value)}
+              placeholder={svcStatus?.configured ? '••••••••••••' : 'Strong password for the Auth user'}
+            />
+            <div className="flex flex-wrap gap-3">
+              <Button onClick={handleSaveService} loading={savingSvc}>Save & Sign In</Button>
+              {svcStatus?.configured && (
+                <Button variant="secondary" onClick={handleClearService} loading={savingSvc}>
+                  Remove (revert to anon)
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -483,6 +658,43 @@ export function SettingsPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Audit Entry Detail */}
+      <Modal isOpen={!!auditDetail} onClose={() => setAuditDetail(null)} title="Audit Entry" size="lg">
+        {auditDetail && (
+          <div className="space-y-4 text-sm">
+            <div className="grid grid-cols-2 gap-3">
+              <div><p className="text-2xs text-surface-500">Action</p><p className="text-surface-200">{auditDetail.action.replace(/_/g, ' ')}</p></div>
+              <div><p className="text-2xs text-surface-500">When</p><p className="text-surface-200">{new Date(auditDetail.created_at).toLocaleString()}</p></div>
+              <div><p className="text-2xs text-surface-500">Entity</p><p className="text-surface-200">{auditDetail.entity_type}{auditDetail.entity_id ? ` · ${auditDetail.entity_id}` : ''}</p></div>
+              <div><p className="text-2xs text-surface-500">Actor</p><p className="text-surface-200">{auditDetail.full_name || auditDetail.username || 'system'}</p></div>
+            </div>
+            {auditDetail.old_values && (
+              <div>
+                <p className="text-2xs text-surface-500 mb-1">Before</p>
+                <pre className="text-2xs text-surface-300 bg-surface-900/70 border border-surface-800 rounded-lg p-3 overflow-auto max-h-52 whitespace-pre-wrap break-all">{formatJson(auditDetail.old_values)}</pre>
+              </div>
+            )}
+            {auditDetail.new_values && (
+              <div>
+                <p className="text-2xs text-surface-500 mb-1">After</p>
+                <pre className="text-2xs text-surface-300 bg-surface-900/70 border border-surface-800 rounded-lg p-3 overflow-auto max-h-52 whitespace-pre-wrap break-all">{formatJson(auditDetail.new_values)}</pre>
+              </div>
+            )}
+            <div className="flex justify-end">
+              <Button variant="secondary" onClick={() => setAuditDetail(null)}>Close</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
+}
+
+function formatJson(raw: string): string {
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
 }

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { ipcInvoke } from '../lib/ipc';
+import { reportLoadError } from '../lib/notify';
 import type { EquipmentLoan, EquipmentLoanWithItems } from '../../shared/types';
 
 interface LoansState {
@@ -25,7 +26,8 @@ export const useLoansStore = create<LoansState>((set, get) => ({
     try {
       const loans = await ipcInvoke<EquipmentLoan[]>('db:loans:getAll');
       set({ loans, loading: false });
-    } catch {
+    } catch (err) {
+      reportLoadError('loans', err);
       set({ loading: false });
     }
   },

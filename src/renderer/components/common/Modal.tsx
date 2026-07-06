@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useId, useRef } from 'react';
 import { X } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -10,23 +10,79 @@ interface ModalProps {
   size?: 'sm' | 'md' | 'lg' | 'xl';
 }
 
+const FOCUSABLE = 'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
+
 export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalProps) {
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previouslyFocused = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+    if (!isOpen) return;
+
+    // Remember what had focus so we can restore it when the modal closes.
+    previouslyFocused.current = document.activeElement as HTMLElement | null;
+
+    // Move focus into the dialog.
+    const focusFirst = () => {
+      const node = dialogRef.current;
+      if (!node) return;
+      const first = node.querySelector<HTMLElement>(FOCUSABLE);
+      (first ?? node).focus();
     };
-    if (isOpen) document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
+    focusFirst();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      // Trap Tab within the dialog.
+      if (e.key === 'Tab') {
+        const node = dialogRef.current;
+        if (!node) return;
+        const focusable = Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE))
+          .filter((el) => el.offsetParent !== null || el === document.activeElement);
+        if (focusable.length === 0) {
+          e.preventDefault();
+          node.focus();
+          return;
+        }
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (!first || !last) return;
+        const active = document.activeElement as HTMLElement;
+        if (e.shiftKey && active === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && active === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      // Restore focus to the trigger element on close.
+      previouslyFocused.current?.focus?.();
+    };
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         className={clsx(
-          'relative glass-panel rounded-xl shadow-2xl animate-fade-in',
+          'relative glass-panel rounded-xl shadow-2xl animate-fade-in outline-none',
           'max-h-[90vh] overflow-y-auto',
           {
             'w-full max-w-sm': size === 'sm',
@@ -37,9 +93,11 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
         )}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-surface-800">
-          <h2 className="text-lg font-semibold text-surface-100">{title}</h2>
+          <h2 id={titleId} className="text-lg font-semibold text-surface-100">{title}</h2>
           <button
+            type="button"
             onClick={onClose}
+            aria-label="Close dialog"
             className="p-1 rounded-lg text-surface-400 hover:text-surface-100 hover:bg-surface-800 transition-colors"
           >
             <X size={18} />

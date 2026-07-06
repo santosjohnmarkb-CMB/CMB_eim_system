@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { ipcInvoke } from '../lib/ipc';
+import { reportLoadError } from '../lib/notify';
 import type { Vendor } from '../../shared/types';
 
 interface VendorsState {
@@ -20,7 +21,8 @@ export const useVendorsStore = create<VendorsState>((set, get) => ({
     try {
       const vendors = await ipcInvoke<Vendor[]>('db:vendors:getAll');
       set({ vendors, loading: false });
-    } catch {
+    } catch (err) {
+      reportLoadError('vendors', err);
       set({ loading: false });
     }
   },

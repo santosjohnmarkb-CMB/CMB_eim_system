@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { ipcInvoke } from '../lib/ipc';
+import { reportLoadError } from '../lib/notify';
 import type { MaintenanceTicket, MaintenanceNote, PreventiveSchedule, TicketAction, CompletedHistoryEntry } from '../../shared/types';
 
 interface MaintenanceState {
@@ -39,7 +40,8 @@ export const useMaintenanceStore = create<MaintenanceState>((set, get) => ({
     try {
       const tickets = await ipcInvoke<MaintenanceTicket[]>('db:maintenance:getAll');
       set({ tickets, loading: false });
-    } catch {
+    } catch (err) {
+      reportLoadError('maintenance tickets', err);
       set({ loading: false });
     }
   },

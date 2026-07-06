@@ -1,7 +1,8 @@
 import { ipcMain } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../database/index';
-import { requireSession } from './session';
+import { requireWriteAccess } from './session';
+import { writeAuditLog } from './audit';
 import { PartCreateSchema, PartUpdateSchema, StockAdjustmentSchema } from '../../shared/schemas';
 import { pushOperationalToCloud } from '../sync/operational-sync';
 import { sessionDepartment } from './department';
@@ -17,6 +18,17 @@ function generatePartCode(db: any, category: string): string {
 
 export function registerPartsHandlers(): void {
   const db = getDatabase();
+
+  // Department users may only mutate parts owned by their own department.
+  const assertPartInDepartment = (event: any, id: string): void => {
+    const dept = sessionDepartment(event);
+    if (!dept) return;
+    const part: any = db.prepare('SELECT department FROM parts_catalog WHERE id = ?').get(id);
+    if (!part) throw new Error('Part not found');
+    if (part.department !== dept) {
+      throw new Error('This part belongs to another department.');
+    }
+  };
 
   ipcMain.handle('db:parts:getAll', (event: any) => {
     const dept = sessionDepartment(event);
@@ -45,8 +57,12 @@ export function registerPartsHandlers(): void {
   });
 
   ipcMain.handle('db:parts:create', (event: any, data: unknown) => {
-    requireSession(event);
+    requireWriteAccess(event);
     const input = PartCreateSchema.parse(data);
+    const dept = sessionDepartment(event);
+    if (dept && input.department !== dept) {
+      throw new Error('You can only create parts for your own department.');
+    }
     const id = uuidv4();
     const invId = uuidv4();
     const partCode = generatePartCode(db, input.category);
@@ -70,7 +86,8 @@ export function registerPartsHandlers(): void {
   });
 
   ipcMain.handle('db:parts:update', (event: any, id: string, data: unknown) => {
-    requireSession(event);
+    requireWriteAccess(event);
+    assertPartInDepartment(event, id);
     const input = PartUpdateSchema.parse(data);
     const fields: string[] = [];
     const values: any[] = [];
@@ -90,21 +107,29 @@ export function registerPartsHandlers(): void {
   });
 
   ipcMain.handle('db:parts:delete', (event: any, id: string) => {
-    requireSession(event);
+    requireWriteAccess(event);
+    assertPartInDepartment(event, id);
+    const before: any = db.prepare('SELECT * FROM parts_catalog WHERE id = ?').get(id);
     db.prepare("UPDATE parts_catalog SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(id);
+    writeAuditLog(event, { action: 'part_deactivate', entityType: 'part', entityId: id, oldValues: before });
     return { success: true };
   });
 
   ipcMain.handle('db:parts:adjustStock', (event: any, data: unknown) => {
-    requireSession(event);
+    const user = requireWriteAccess(event);
     const input = StockAdjustmentSchema.parse(data);
+    assertPartInDepartment(event, input.part_id);
     const txType = input.quantity > 0 ? 'receive' : 'adjust';
+    // Attribute the movement to the authenticated operator, never a client-supplied
+    // name — the transaction log is an audit trail and must not be spoofable.
+    const actor = user.full_name;
 
     const tx = db.transaction(() => {
-      db.prepare("UPDATE parts_inventory SET qty_on_hand = qty_on_hand + ?, updated_at = datetime('now') WHERE part_id = ?")
+      // Never let on-hand stock go negative; a reduction is clamped at zero.
+      db.prepare("UPDATE parts_inventory SET qty_on_hand = MAX(0, qty_on_hand + ?), updated_at = datetime('now') WHERE part_id = ?")
         .run(input.quantity, input.part_id);
       db.prepare(`INSERT INTO parts_transactions (id, part_id, transaction_type, quantity, performed_by, notes) VALUES (?, ?, ?, ?, ?, ?)`)
-        .run(uuidv4(), input.part_id, txType, input.quantity, input.performed_by, `${input.reason}: ${input.notes}`);
+        .run(uuidv4(), input.part_id, txType, input.quantity, actor, `${input.reason}: ${input.notes}`);
     });
     tx();
 
@@ -143,7 +168,8 @@ export function registerPartsHandlers(): void {
   });
 
   ipcMain.handle('db:parts:setCompatibility', (event: any, partId: string, equipmentIds: string[]) => {
-    requireSession(event);
+    requireWriteAccess(event);
+    assertPartInDepartment(event, partId);
     const tx = db.transaction(() => {
       db.prepare('DELETE FROM parts_compatibility WHERE part_id = ?').run(partId);
       for (const eqId of equipmentIds) {

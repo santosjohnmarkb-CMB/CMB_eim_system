@@ -487,7 +487,7 @@ class GoogleDriveService {
     stream.push(Buffer.from('CMB EIM Google Drive connection test. Safe to delete.', 'utf-8'));
     stream.push(null);
 
-    let testFileId = '';
+    let testFileId: string;
     try {
       const created = await drive.files.create({
         requestBody: { name: filename, parents: [folderId] },
