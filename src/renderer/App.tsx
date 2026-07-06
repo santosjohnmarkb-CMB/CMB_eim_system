@@ -110,7 +110,7 @@ export default function App() {
                   <Route path="/parts/adjust" element={<RoleGuard roles={['parts_clerk']}><StockAdjustmentPage /></RoleGuard>} />
                   <Route path="/parts/:id" element={<RoleGuard roles={['maintenance_lead', 'parts_clerk']}><PartsDetailPage /></RoleGuard>} />
                   <Route path="/settings" element={<RoleGuard roles={[]}><SettingsPage /></RoleGuard>} />
-                  <Route path="/archives" element={<RoleGuard roles={[]}><ArchivesPage /></RoleGuard>} />
+                  <Route path="/archives" element={<ArchivesPage />} />
                   <Route path="*" element={<DefaultRedirect />} />
                 </Routes>
               </Layout>

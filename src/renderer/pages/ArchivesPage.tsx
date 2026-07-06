@@ -2,11 +2,19 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Archive, ChevronRight, ChevronDown, Camera, Lightbulb,
-  Wrench, PackageCheck, ShoppingCart, Trash2,
+  Wrench, PackageCheck, ShoppingCart, Trash2, Printer,
 } from 'lucide-react';
 import { getClearedArchive, deleteArchivedEntry, type ClearedArchiveEntry, type ListSection } from '../lib/archiveList';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { useToast } from '../hooks';
+import { useAuthStore } from '../stores/auth.store';
+import { useMaintenanceStore } from '../stores/maintenance.store';
+import { useLoansStore } from '../stores/loans.store';
+import { usePurchaseRequestsStore } from '../stores/purchaseRequests.store';
+import { printHtml } from '../lib/print';
+import { buildMaintenanceForm } from '../../shared/forms/maintenanceForm';
+import { printLoanReleaseForm, printInwardLoanForm } from '../lib/loanForms';
+import { printPurchaseRequestForm } from '../lib/purchaseForms';
 import { DEPARTMENT_CONFIG } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 
@@ -57,10 +65,12 @@ interface DeptGroup { key: string; label: string; years: Map<string, YearGroup>;
 export function ArchivesPage() {
   const navigate = useNavigate();
   const toast = useToast();
+  const isAdmin = useAuthStore((s) => s.user?.role === 'admin');
   const [entries, setEntries] = useState<ClearedArchiveEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [printingId, setPrintingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -95,6 +105,48 @@ export function ArchivesPage() {
       toast.error(err instanceof Error ? err.message : 'Failed to delete the entry.');
     } finally {
       setDeletingId(null);
+    }
+  }, [toast]);
+
+  // Re-prints the individual record's document, reusing the same form builders the
+  // detail pages use. Needs the full record, so we fetch it on demand.
+  const handlePrint = useCallback(async (entry: ClearedArchiveEntry) => {
+    setPrintingId(entry.id);
+    try {
+      if (entry.section === 'maintenance') {
+        const [ticket, actions] = await Promise.all([
+          useMaintenanceStore.getState().getById(entry.id),
+          useMaintenanceStore.getState().getActions(entry.id),
+        ]);
+        if (!ticket) { toast.error('Record not found.'); return; }
+        printHtml(ticket.ticket_number, buildMaintenanceForm(ticket, actions));
+      } else if (entry.section === 'loan') {
+        const loan = await useLoansStore.getState().getById(entry.id);
+        if (!loan) { toast.error('Record not found.'); return; }
+        const loanInput = {
+          loan_number: loan.loan_number,
+          department: loan.department,
+          person_or_org: loan.person_or_org,
+          purpose: loan.purpose,
+          location: loan.location,
+          loaned_date: loan.loaned_date,
+          tentative_return_date: loan.tentative_return_date,
+          duration: loan.duration,
+          remarks: loan.remarks,
+          released_by: loan.created_by,
+          items: loan.items.map((it) => ({ code: it.equipment_code, name: it.equipment_name || '' })),
+        };
+        if ((loan.direction ?? 'OUTWARD') === 'INWARD') printInwardLoanForm(loanInput);
+        else printLoanReleaseForm(loanInput);
+      } else {
+        const req = await usePurchaseRequestsStore.getState().getById(entry.id);
+        if (!req) { toast.error('Record not found.'); return; }
+        printPurchaseRequestForm(req);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to print the entry.');
+    } finally {
+      setPrintingId(null);
     }
   }, [toast]);
 
@@ -247,15 +299,28 @@ export function ArchivesPage() {
                                                     {r.closedDate ? new Date(r.closedDate).toLocaleDateString() : '—'}
                                                   </td>
                                                   <td className="py-2 align-top text-right whitespace-nowrap">
-                                                    <button
-                                                      type="button"
-                                                      title="Delete this entry permanently"
-                                                      disabled={deletingId === r.id}
-                                                      onClick={(e) => { e.stopPropagation(); handleDelete(r); }}
-                                                      className="p-1.5 rounded-md text-surface-500 hover:text-danger-400 hover:bg-danger-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                                                    >
-                                                      <Trash2 size={14} />
-                                                    </button>
+                                                    <div className="flex items-center justify-end gap-0.5">
+                                                      <button
+                                                        type="button"
+                                                        title="Print this entry"
+                                                        disabled={printingId === r.id}
+                                                        onClick={(e) => { e.stopPropagation(); handlePrint(r); }}
+                                                        className="p-1.5 rounded-md text-surface-500 hover:text-primary-400 hover:bg-primary-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                                      >
+                                                        <Printer size={14} />
+                                                      </button>
+                                                      {isAdmin && (
+                                                        <button
+                                                          type="button"
+                                                          title="Delete this entry permanently"
+                                                          disabled={deletingId === r.id}
+                                                          onClick={(e) => { e.stopPropagation(); handleDelete(r); }}
+                                                          className="p-1.5 rounded-md text-surface-500 hover:text-danger-400 hover:bg-danger-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                                        >
+                                                          <Trash2 size={14} />
+                                                        </button>
+                                                      )}
+                                                    </div>
                                                   </td>
                                                 </tr>
                                               ))}

@@ -319,8 +319,15 @@ export function MaintenanceQueuePage() {
                             onClick={() => navigate(`/maintenance/${ticket.id}`)}
                             className="hover:bg-surface-800/40 transition-colors cursor-pointer"
                           >
-                            <td className="px-5 py-3 font-mono text-xs text-primary-400 whitespace-nowrap">
-                              {ticket.ticket_number}
+                            <td className="px-5 py-3 whitespace-nowrap">
+                              <p className="font-mono text-xs text-primary-400">
+                                {ticket.ticket_number}
+                              </p>
+                              {ticket.reported_date && (
+                                <p className="text-2xs text-surface-500 mt-0.5">
+                                  {new Date(ticket.reported_date).toLocaleDateString()}
+                                </p>
+                              )}
                             </td>
                             <td className="px-3 py-3">
                               <p className="text-surface-200 font-medium truncate max-w-[220px] flex items-center gap-1.5">

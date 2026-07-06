@@ -13,7 +13,7 @@ import { ipcMain, shell } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { getDatabase } from '../database/index';
-import { requireAdmin } from './session';
+import { requireAdmin, requireSession } from './session';
 import { renderAndArchiveList, type ArchiveListInput } from '../sync/archive-list';
 import { getLocalArchiveRoot } from '../sync/archive-path';
 import { pushOperationalToCloud } from '../sync/operational-sync';
@@ -112,7 +112,10 @@ export function registerArchiveHandlers(): void {
   });
 
   ipcMain.handle('archive:list:getCleared', (event: any): ClearedArchiveEntry[] => {
-    requireAdmin(event);
+    // Readable by any signed-in user so they can print archived records. Deleting
+    // is still admin-only (see archive:list:deleteEntry). Department users are
+    // scoped to their own department; admins and viewers see every department.
+    const user = requireSession(event);
     const entries: ClearedArchiveEntry[] = [];
 
     // Maintenance — department derived from the equipment's category.
@@ -187,6 +190,8 @@ export function registerArchiveHandlers(): void {
       });
     }
 
-    return entries;
+    // Department users only see their own department's archives.
+    const scopeDept = (user.role !== 'admin' && user.role !== 'viewer') ? (user.department ?? null) : null;
+    return scopeDept ? entries.filter((e) => e.department === scopeDept) : entries;
   });
 }

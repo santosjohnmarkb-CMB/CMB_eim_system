@@ -83,3 +83,56 @@ export function buildLoanReleaseForm(input: ReleaseFormInput): string {
       ${signBlock('Approved By', '')}
     </div>`;
 }
+
+// Builds the printable HTML body for an INWARD loan — equipment we have borrowed from
+// an external owner. Mirrors the release form but with receiving semantics: the owner
+// releases the items to us, our staff acknowledges receipt, and the gear stays the
+// owner's property until returned. `person_or_org` is the owner; `released_by` is our
+// receiving staff member.
+export function buildInwardLoanForm(input: ReleaseFormInput): string {
+  const rows = input.items.map((it, idx) => `
+    <tr>
+      <td style="text-align:center;">${idx + 1}</td>
+      <td>${escapeHtml(it.code || '—')}</td>
+      <td>${escapeHtml(it.name || '—')}</td>
+      <td style="text-align:center;">1</td>
+      <td></td>
+    </tr>`).join('');
+
+  return `
+    <div class="header">
+      <h1>Inward Equipment Receiving Form</h1>
+      <p class="muted">${escapeHtml(input.loan_number)} · ${escapeHtml(DEPARTMENT_CONFIG[input.department].label)}</p>
+    </div>
+
+    <p>This form certifies that the equipment listed below was received by ${escapeHtml(COMPANY.name)} on loan from the owner named below. All items remain the property of the owner and will be returned on or before the expected return date.</p>
+
+    <h2>Receiving Details</h2>
+    <div class="grid">
+      <div class="field"><label>Received From (Owner)</label><span>${escapeHtml(input.person_or_org)}</span></div>
+      <div class="field"><label>Department</label><span>${escapeHtml(DEPARTMENT_CONFIG[input.department].label)}</span></div>
+      <div class="field"><label>Date Received</label><span>${escapeHtml(fmtDate(input.loaned_date))}</span></div>
+      <div class="field"><label>Expected Return</label><span>${escapeHtml(fmtDate(input.tentative_return_date))}</span></div>
+      <div class="field"><label>Purpose</label><span>${escapeHtml(input.purpose || '') || '—'}</span></div>
+      <div class="field"><label>Location / Where Used</label><span>${escapeHtml(input.location || '') || '—'}</span></div>
+      <div class="field"><label>Duration</label><span>${escapeHtml(input.duration || '') || '—'}</span></div>
+      <div class="field"><label>Received By</label><span>${escapeHtml(input.released_by || '') || '—'}</span></div>
+    </div>
+
+    <h2>Borrowed Equipment (${input.items.length})</h2>
+    <table>
+      <thead><tr><th style="width:32px;">#</th><th style="width:110px;">Code</th><th>Equipment Description</th><th style="width:48px;">Qty</th><th style="width:150px;">Condition on Receipt</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="5">No equipment listed</td></tr>'}</tbody>
+    </table>
+
+    ${input.remarks ? `<h2>Remarks</h2><p>${escapeHtml(input.remarks)}</p>` : ''}
+
+    <h2>Acknowledgment</h2>
+    <p>${escapeHtml(COMPANY.name)} acknowledges receipt of the equipment listed above in good working condition on loan from the owner, and accepts responsibility for its safekeeping while in our possession. We agree to return all items on or before the expected return date and to report any loss or damage immediately. All equipment remains the property of the owner at all times.</p>
+
+    <div style="margin-top:44px; display:flex; gap:48px;">
+      ${signBlock('Released By (Owner)', input.person_or_org || '')}
+      ${signBlock('Received By', input.released_by || '')}
+      ${signBlock('Approved By', '')}
+    </div>`;
+}

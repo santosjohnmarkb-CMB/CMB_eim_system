@@ -11,7 +11,7 @@ import { DocumentUpload } from '../components/common/DocumentUpload';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { useToast } from '../hooks';
 import { DEPARTMENT_CONFIG, LOAN_STATUS_CONFIG, LOAN_DIRECTION_CONFIG } from '../../shared/constants';
-import { printLoanReleaseForm } from '../lib/loanForms';
+import { printLoanReleaseForm, printInwardLoanForm } from '../lib/loanForms';
 import type { EquipmentLoanWithItems } from '../../shared/types';
 
 const STATUS_VARIANT: Record<string, 'info' | 'warning' | 'success'> = {
@@ -185,9 +185,9 @@ export function LoanDetailPage() {
     setSavingEdit(false);
   };
 
-  const handlePrintReleaseForm = () => {
+  const handlePrintForm = () => {
     if (!loan) return;
-    printLoanReleaseForm({
+    const input = {
       loan_number: loan.loan_number,
       department: loan.department,
       person_or_org: loan.person_or_org,
@@ -199,7 +199,11 @@ export function LoanDetailPage() {
       remarks: loan.remarks,
       released_by: loan.created_by,
       items: loan.items.map((it) => ({ code: it.equipment_code, name: it.equipment_name || '' })),
-    });
+    };
+    // Inward loans (borrowed from an owner) print a receiving form; outward loans
+    // print the release form.
+    if ((loan.direction ?? 'OUTWARD') === 'INWARD') printInwardLoanForm(input);
+    else printLoanReleaseForm(input);
   };
 
   if (loading) return <LoadingSpinner size="lg" className="py-24" />;
@@ -241,8 +245,10 @@ export function LoanDetailPage() {
           <p className="text-sm text-surface-500">{DEPARTMENT_CONFIG[loan.department].label} · {dirCfg.description}</p>
         </div>
         <div className="flex gap-2 flex-wrap justify-end">
-          {isOutward && !isViewer && (
-            <Button variant="secondary" onClick={handlePrintReleaseForm}><FileSignature size={16} /> Print Release Form</Button>
+          {!isViewer && (
+            <Button variant="secondary" onClick={handlePrintForm}>
+              <FileSignature size={16} /> {isOutward ? 'Print Release Form' : 'Print Receiving Form'}
+            </Button>
           )}
           {isOutward && !isViewer && (
             <Button variant="secondary" onClick={() => openUpload(false)}>
