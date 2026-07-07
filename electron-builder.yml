@@ -64,6 +64,9 @@ dmg:
 
 win:
   icon: build/icon.png
+  # Listing both archs under a single nsis target makes electron-builder emit a
+  # single "universal" installer that installs the correct binaries on x64 and
+  # arm64 Windows automatically.
   target:
     - target: nsis
       arch:
@@ -75,6 +78,10 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
+  # Build one combined installer covering every arch above. The universal file
+  # is the one WITHOUT an -x64/-arm64 suffix (electron-builder also emits the
+  # per-arch installers as byproducts).
+  buildUniversalInstaller: true
 
 linux:
   category: Office

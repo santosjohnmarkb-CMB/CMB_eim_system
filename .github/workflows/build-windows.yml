@@ -31,10 +31,18 @@ jobs:
           # Ensure electron-builder never tries to sign (unsigned build).
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
-      - name: Upload installer artifacts
+      # The universal installer is the .exe WITHOUT an -x64/-arm64 suffix.
+      - name: Upload universal installer
         uses: actions/upload-artifact@v4
         with:
-          name: cmb-eim-windows-installer
+          name: cmb-eim-windows-universal-installer
+          path: release/*-win.exe
+          if-no-files-found: error
+
+      - name: Upload all installers (universal + per-arch byproducts)
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmb-eim-windows-all-installers
           path: |
             release/*.exe
             release/*.exe.blockmap
