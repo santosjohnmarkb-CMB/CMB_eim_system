@@ -1,0 +1,42 @@
+name: Build Windows Installer (unsigned)
+
+# Builds the NSIS installer on a real Windows runner. Runs on demand from the
+# Actions tab, or automatically when you push a version tag like "v1.0.0".
+# No code-signing secrets are used, so the output is an unsigned installer.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-win:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and package Windows installer
+        run: npm run package:win
+        env:
+          # Ensure electron-builder never tries to sign (unsigned build).
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmb-eim-windows-installer
+          path: |
+            release/*.exe
+            release/*.exe.blockmap
+            release/latest*.yml
+          if-no-files-found: error
