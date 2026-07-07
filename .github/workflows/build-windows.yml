@@ -1,8 +1,14 @@
 name: Build Windows Installer (unsigned)
 
-# Builds the NSIS installer on a real Windows runner. Runs on demand from the
+# Builds unsigned NSIS installers on Windows runners. Runs on demand from the
 # Actions tab, or automatically when you push a version tag like "v1.0.0".
-# No code-signing secrets are used, so the output is an unsigned installer.
+#
+# Two independent jobs:
+#   build-x64        -> reliable single-arch installer (runs on all Windows
+#                       machines; ARM via built-in x64 emulation). Fast.
+#   build-universal  -> combined x64 + arm64 installer. Needs the ARM64 MSVC
+#                       toolchain to cross-compile the native better-sqlite3
+#                       module, so it installs that first. Slower / best-effort.
 on:
   workflow_dispatch:
   push:
@@ -10,7 +16,8 @@ on:
       - "v*"
 
 jobs:
-  build-win:
+  build-x64:
+    name: Build x64 installer
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -25,10 +32,64 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build and package Windows installer
-        run: npm run package:win
+      - name: Build renderer + main
+        run: npm run build
+
+      - name: Package x64 installer
+        run: npx electron-builder --win --x64
         env:
-          # Ensure electron-builder never tries to sign (unsigned build).
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Upload x64 installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmb-eim-windows-x64-installer
+          path: |
+            release/*.exe
+            release/*.exe.blockmap
+            release/latest*.yml
+          if-no-files-found: error
+
+  build-universal:
+    name: Build universal (x64 + arm64) installer
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      # The universal installer bundles an arm64 build of the native
+      # better-sqlite3 module. Cross-compiling arm64 on the x64 runner requires
+      # the ARM64 MSVC tools, which are not installed by default.
+      - name: Install ARM64 MSVC build tools
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+          $vsPath = & $vswhere -latest -property installationPath
+          Write-Host "Adding ARM64 tools to $vsPath"
+          $p = Start-Process -FilePath $installer -Wait -PassThru -ArgumentList @(
+            "modify", "--installPath", "`"$vsPath`"",
+            "--add", "Microsoft.VisualStudio.Component.VC.Tools.ARM64",
+            "--quiet", "--norestart", "--force"
+          )
+          Write-Host "vs_installer exit code: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { exit $p.ExitCode }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer + main
+        run: npm run build
+
+      - name: Package universal installer
+        run: npx electron-builder --win --x64 --arm64
+        env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
       # The universal installer is the .exe WITHOUT an -x64/-arm64 suffix.
@@ -39,7 +100,7 @@ jobs:
           path: release/*-win.exe
           if-no-files-found: error
 
-      - name: Upload all installers (universal + per-arch byproducts)
+      - name: Upload all installers (universal + per-arch)
         uses: actions/upload-artifact@v4
         with:
           name: cmb-eim-windows-all-installers
