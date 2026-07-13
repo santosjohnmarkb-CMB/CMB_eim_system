@@ -461,3 +461,30 @@ CREATE POLICY "Allow all for purchase_requests" ON purchase_requests FOR ALL USI
 ALTER TABLE purchase_request_items ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all for purchase_request_items" ON purchase_request_items;
 CREATE POLICY "Allow all for purchase_request_items" ON purchase_request_items FOR ALL USING (true) WITH CHECK (true);
+
+-- ═══════════════════════════════════════════════════
+-- Migration: Delete tombstones (cross-machine delete propagation)
+-- ═══════════════════════════════════════════════════
+-- Fixes "deleted records come back". EIM's reconcile pushes any local row that is
+-- missing from the cloud — which is indistinguishable from "another machine
+-- deleted it", so a machine still holding the row re-uploads it. This ledger
+-- records each delete (by the row's UUID) so every machine removes the row and the
+-- reconcile never resurrects it. Rows are pruned client-side after a retention
+-- window (see TOMBSTONE_RETENTION_DAYS in operational-sync.ts).
+
+CREATE TABLE IF NOT EXISTS sync_tombstones (
+  id UUID PRIMARY KEY,
+  table_name TEXT NOT NULL,
+  deleted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE sync_tombstones;
+EXCEPTION WHEN duplicate_object THEN
+  NULL; -- already published
+END $$;
+
+ALTER TABLE sync_tombstones ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for sync_tombstones" ON sync_tombstones;
+CREATE POLICY "Allow all for sync_tombstones" ON sync_tombstones FOR ALL USING (true) WITH CHECK (true);

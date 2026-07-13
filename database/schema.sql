@@ -443,6 +443,16 @@ CREATE TABLE IF NOT EXISTS google_drive_config (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Delete tombstones: record that a row was deleted so the cross-machine reconcile
+-- can't resurrect it. Without this, a machine that still holds a locally-deleted
+-- row would re-push it to the cloud on the next full reconcile ("deletes come back").
+-- id is the deleted row's UUID (globally unique across tables).
+CREATE TABLE IF NOT EXISTS sync_tombstones (
+  id TEXT PRIMARY KEY,
+  table_name TEXT NOT NULL,
+  deleted_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Sync metadata
 CREATE TABLE IF NOT EXISTS sync_metadata (
   id TEXT PRIMARY KEY,

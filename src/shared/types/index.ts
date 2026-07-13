@@ -179,6 +179,8 @@ export interface MaintenanceTicket {
   equipment_code?: string;
   category_id?: string;
   category_name?: string;
+  asset_serial?: string | null;
+  asset_tag?: string | null;
   notes_count?: number;
   last_action_date?: string | null;
   last_action_taken?: string | null;

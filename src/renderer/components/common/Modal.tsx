@@ -15,7 +15,17 @@ const FOCUSABLE = 'a[href], button:not([disabled]), textarea, input, select, [ta
 export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalProps) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
+
+  // Route onClose through a ref so the focus/keydown effect below can depend only on
+  // `isOpen`. Callers typically pass an inline arrow for onClose (new identity every
+  // render); if the effect depended on it, it would tear down and re-run on every
+  // parent re-render — e.g. on each keystroke in a form field — stealing focus back
+  // to the first focusable element (the close button). Keeping the ref current avoids
+  // stale closures without re-subscribing.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
 
   useEffect(() => {
     if (!isOpen) return;
@@ -23,18 +33,21 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
     // Remember what had focus so we can restore it when the modal closes.
     previouslyFocused.current = document.activeElement as HTMLElement | null;
 
-    // Move focus into the dialog.
+    // Move focus to the first focusable element inside the body (the actual form
+    // fields) rather than the header's close button, which is first in DOM order.
     const focusFirst = () => {
+      const body = bodyRef.current;
       const node = dialogRef.current;
-      if (!node) return;
-      const first = node.querySelector<HTMLElement>(FOCUSABLE);
-      (first ?? node).focus();
+      const first =
+        body?.querySelector<HTMLElement>(FOCUSABLE) ??
+        node?.querySelector<HTMLElement>(FOCUSABLE);
+      (first ?? node)?.focus();
     };
     focusFirst();
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose();
+        onCloseRef.current();
         return;
       }
       // Trap Tab within the dialog.
@@ -68,7 +81,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
       // Restore focus to the trigger element on close.
       previouslyFocused.current?.focus?.();
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -103,7 +116,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
             <X size={18} />
           </button>
         </div>
-        <div className="px-6 py-4">
+        <div ref={bodyRef} className="px-6 py-4">
           {children}
         </div>
       </div>

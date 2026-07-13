@@ -34,6 +34,7 @@ const ALLOWED_CHANNELS = new Set([
   'db:maintenance:updateSchedule',
   'db:maintenance:deleteSchedule',
   'db:maintenance:delete',
+  'db:maintenance:archiveReleaseForm',
   'db:maintenance:getActions',
   'db:maintenance:addAction',
   'db:maintenance:updateAction',

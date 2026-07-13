@@ -8,7 +8,7 @@ import { pushOperationalToCloud } from '../sync/operational-sync';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { sessionDepartment, categoriesForDepartment, departmentForCategory, assertEquipmentInDepartment } from './department';
 import { recomputeAvailability, pickAvailableAsset } from './availability';
-import { archiveMaintenanceTicket } from '../sync/archive-eim';
+import { archiveMaintenanceTicket, archiveRepairReleaseForm } from '../sync/archive-eim';
 import { saveBlob, deleteBlob, resolveBlob } from '../blob-store';
 
 const DEPT_PREFIX: Record<string, string> = {
@@ -103,10 +103,12 @@ export function registerMaintenanceHandlers(): void {
 
   ipcMain.handle('db:maintenance:getById', (event: any, id: string) => {
     const row: any = db.prepare(`
-      SELECT mt.*, e.name as equipment_name, e.equipment_code, c.name as category_name
+      SELECT mt.*, e.name as equipment_name, e.equipment_code, c.name as category_name,
+        ea.serial_number as asset_serial, ea.asset_tag as asset_tag
       FROM maintenance_tickets mt
       JOIN equipment_items e ON e.id = mt.equipment_id
       LEFT JOIN categories c ON c.id = e.category_id
+      LEFT JOIN equipment_assets ea ON ea.id = mt.asset_id
       WHERE mt.id = ?
     `).get(id);
     if (!row) return null;
@@ -114,6 +116,16 @@ export function registerMaintenanceHandlers(): void {
     if (dept && departmentForCategory(row.category_name) !== dept) return null;
     // Detail view may display/re-upload the service doc, so return a real data URL.
     return { ...row, service_doc_data: resolveBlob(row.service_doc_data) };
+  });
+
+  // Generate + cloud-archive an Equipment Repair - Release Form for an OPEN ticket.
+  // "Prepared By" is authoritatively the initiating account (from the session); the
+  // renderer prints an identical copy from the same shared builder. Returns where the
+  // PDF landed so the UI can confirm the cloud save.
+  ipcMain.handle('db:maintenance:archiveReleaseForm', async (event: any, id: string, inChargeOfRepair: string) => {
+    const user = requireWriteAccess(event);
+    getTicketInDept(event, id); // department scope check (throws if foreign)
+    return await archiveRepairReleaseForm(String(id), String(inChargeOfRepair || '').trim(), user.full_name);
   });
 
   ipcMain.handle('db:maintenance:create', (event: any, data: unknown) => {

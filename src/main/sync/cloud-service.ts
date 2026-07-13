@@ -23,6 +23,7 @@ type TableName =
   | 'preventive_schedules'
   | 'vendors'
   | 'sync_metadata'
+  | 'sync_tombstones'
   | 'audit_logs';
 
 export class CloudService {

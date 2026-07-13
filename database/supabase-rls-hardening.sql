@@ -53,7 +53,8 @@ DECLARE
     'parts_inventory',
     'parts_transactions',
     'parts_compatibility',
-    'preventive_schedules'
+    'preventive_schedules',
+    'sync_tombstones'
   ];
 BEGIN
   FOREACH t IN ARRAY eim_tables LOOP
@@ -104,7 +105,7 @@ END $$;
 --     'equipment_assets','asset_status_log','maintenance_tickets','maintenance_notes',
 --     'ticket_actions','equipment_loans','equipment_loan_items','purchase_requests',
 --     'purchase_request_items','parts_catalog','parts_inventory','parts_transactions',
---     'parts_compatibility','preventive_schedules','vendors'
+--     'parts_compatibility','preventive_schedules','sync_tombstones','vendors'
 --   ];
 -- BEGIN
 --   FOREACH t IN ARRAY eim_tables LOOP

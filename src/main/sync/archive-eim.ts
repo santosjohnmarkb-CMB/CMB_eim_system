@@ -19,6 +19,7 @@ import type { PurchaseRequest } from '../../shared/types';
 import { buildMaintenanceForm } from '../../shared/forms/maintenanceForm';
 import { buildLoanReleaseForm } from '../../shared/forms/loanForm';
 import { buildPurchaseRequestForm } from '../../shared/forms/purchaseForm';
+import { buildRepairReleaseForm } from '../../shared/forms/repairReleaseForm';
 import { renderDocumentToPdf } from '../pdf/html-to-pdf';
 import { appendAttachmentToPdf } from '../pdf/merge-pdf';
 import { resolveBlob } from '../blob-store';
@@ -26,6 +27,8 @@ import {
   resolveEimArchivePath,
   sanitizeFileName,
   uploadOrSaveArchive,
+  uploadOrSaveArchiveSegments,
+  ARCHIVE_PARENT,
   type ArchiveKind,
 } from './archive-path';
 import { pushOperationalToCloud } from './operational-sync';
@@ -178,4 +181,71 @@ export async function archivePurchaseRequest(id: string): Promise<void> {
   } catch (err) {
     console.error('[Archive] purchase request failed:', err instanceof Error ? err.message : err);
   }
+}
+
+// Drive/local subfolder for repair release forms. These are generated on demand for
+// OPEN tickets (equipment handed off for repair), so unlike the completion archives
+// they are filed under their own section and do NOT stamp the ticket row.
+const REPAIR_RELEASE_SECTION = 'Maintenance - Repair Release Forms';
+
+/**
+ * Render an Equipment Repair - Release Form for an open ticket to a PDF and save it
+ * to Google Drive (with a local mirror). Unlike the completion archives this is not
+ * fire-and-forget: it returns the save result and rethrows on failure so the caller
+ * can surface the outcome to the operator. The printed copy is produced separately in
+ * the renderer from the exact same shared builder, so the two are identical.
+ */
+export async function archiveRepairReleaseForm(
+  id: string,
+  inChargeOfRepair: string,
+  preparedBy: string,
+): Promise<{ savedLocally: boolean; uploadedToDrive: boolean }> {
+  const db = getDatabase();
+  const ticket: any = db.prepare(
+    `SELECT mt.*, e.name AS equipment_name, e.equipment_code, c.name AS category_name,
+            ea.serial_number AS asset_serial
+     FROM maintenance_tickets mt
+     LEFT JOIN equipment_items e ON e.id = mt.equipment_id
+     LEFT JOIN categories c ON c.id = e.category_id
+     LEFT JOIN equipment_assets ea ON ea.id = mt.asset_id
+     WHERE mt.id = ?`,
+  ).get(id);
+  if (!ticket) throw new Error('Ticket not found');
+
+  const actions: any[] = db.prepare(
+    'SELECT * FROM ticket_actions WHERE ticket_id = ? ORDER BY action_date ASC, created_at ASC',
+  ).all(id);
+  const lastAction = actions.length > 0 ? actions[actions.length - 1] : null;
+
+  const preparedDate = new Date().toISOString();
+  const body = buildRepairReleaseForm({
+    ticket_number: ticket.ticket_number,
+    equipment_name: ticket.equipment_name,
+    equipment_code: ticket.equipment_code,
+    asset_serial: ticket.asset_serial,
+    category_name: ticket.category_name,
+    maintenance_type: ticket.maintenance_type,
+    issue_description: ticket.issue_description,
+    last_action_date: lastAction?.action_date ?? null,
+    last_action_taken: lastAction?.action_taken ?? null,
+    last_action_personnel: lastAction?.personnel ?? null,
+    in_charge_of_repair: inChargeOfRepair,
+    prepared_by: preparedBy,
+    prepared_date: preparedDate,
+  });
+
+  const pdf = await renderDocumentToPdf(`Equipment Repair Release Form ${ticket.ticket_number}`, body);
+  const now = new Date(preparedDate);
+  const segments = [
+    ARCHIVE_PARENT,
+    REPAIR_RELEASE_SECTION,
+    String(now.getFullYear()),
+    String(now.getMonth() + 1).padStart(2, '0'),
+  ];
+  const filename = `${sanitizeFileName(`${ticket.ticket_number} - Repair Release Form`)}.pdf`;
+  const result = await uploadOrSaveArchiveSegments(segments, [{ filename, buffer: pdf }]);
+  console.log(
+    `[Archive] repair release ${id}: saved locally=${result.savedLocally}, drive=${result.uploadedToDrive}`,
+  );
+  return { savedLocally: result.savedLocally, uploadedToDrive: result.uploadedToDrive };
 }

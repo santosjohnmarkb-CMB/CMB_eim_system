@@ -22,6 +22,7 @@ interface MaintenanceState {
   updateSchedule: (id: string, data: any) => Promise<PreventiveSchedule>;
   deleteSchedule: (id: string) => Promise<void>;
   getActions: (ticketId: string) => Promise<TicketAction[]>;
+  archiveReleaseForm: (id: string, inChargeOfRepair: string) => Promise<{ savedLocally: boolean; uploadedToDrive: boolean }>;
   addAction: (data: any) => Promise<TicketAction>;
   updateAction: (id: string, data: any) => Promise<TicketAction>;
   deleteAction: (id: string) => Promise<void>;
@@ -114,6 +115,12 @@ export const useMaintenanceStore = create<MaintenanceState>((set, get) => ({
 
   getActions: async (ticketId: string) => {
     return await ipcInvoke<TicketAction[]>('db:maintenance:getActions', ticketId);
+  },
+
+  archiveReleaseForm: async (id: string, inChargeOfRepair: string) => {
+    return await ipcInvoke<{ savedLocally: boolean; uploadedToDrive: boolean }>(
+      'db:maintenance:archiveReleaseForm', id, inChargeOfRepair,
+    );
   },
 
   addAction: async (data: any) => {

@@ -13,6 +13,7 @@ import {
   Pencil,
   Upload,
   CheckCircle2,
+  FileText,
 } from 'lucide-react';
 import { useMaintenanceStore } from '../stores/maintenance.store';
 import { useAuthStore } from '../stores/auth.store';
@@ -21,6 +22,7 @@ import { DocumentUpload } from '../components/common/DocumentUpload';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { REPAIR_STATUS_CONFIG, COMPLETION_OUTCOME_CONFIG, DOCUMENT_TYPE_CONFIG } from '../lib/constants';
 import { printHtml } from '../lib/print';
+import { printRepairReleaseForm } from '../lib/maintenanceForms';
 import { buildMaintenanceForm } from '../../shared/forms/maintenanceForm';
 import { useToast } from '../hooks';
 import type { MaintenanceTicket, MaintenanceNote, TicketAction, CompletionOutcome } from '../../shared/types';
@@ -217,7 +219,7 @@ export function MaintenanceDetailPage() {
   const isViewer = user?.role === 'viewer';
   const {
     getById, updateStatus, update, addNote, getNotes, getActions, addAction, updateAction, deleteAction, deleteTicket,
-    uploadServiceDoc, clearServiceDoc,
+    uploadServiceDoc, clearServiceDoc, archiveReleaseForm,
   } = useMaintenanceStore();
 
   const [ticket, setTicket] = useState<MaintenanceTicket | null>(null);
@@ -235,6 +237,9 @@ export function MaintenanceDetailPage() {
   const [showActionModal, setShowActionModal] = useState(false);
   const [actionForm, setActionForm] = useState({ action_date: '', action_taken: '', remarks: '', personnel: '' });
   const [savingAction, setSavingAction] = useState(false);
+  const [showReleaseModal, setShowReleaseModal] = useState(false);
+  const [releaseInCharge, setReleaseInCharge] = useState('');
+  const [savingRelease, setSavingRelease] = useState(false);
   const [loadingTicket, setLoadingTicket] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const cellRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
@@ -366,6 +371,53 @@ export function MaintenanceDetailPage() {
     const printableActions = actions.filter((a) => !(a._isNew && !a.action_taken));
     const body = buildMaintenanceForm(ticket, printableActions);
     printHtml(`${docTypeLabel} ${ticket.ticket_number}`, body);
+  };
+
+  const openReleaseModal = () => {
+    // Default to the ticket's assigned technician when one is set.
+    setReleaseInCharge(ticket.assigned_technician || '');
+    setShowReleaseModal(true);
+  };
+
+  // Prints the Equipment Repair - Release Form and archives an identical copy to the
+  // cloud (Google Drive + local mirror). Printing happens first so the operator always
+  // gets the paper copy even if the cloud save later fails.
+  const handleGenerateReleaseForm = async () => {
+    if (!ticket) return;
+    if (!releaseInCharge.trim()) {
+      toast.error('Enter who is in charge of the repair');
+      return;
+    }
+    setSavingRelease(true);
+    try {
+      const savedActions = actions.filter((a) => !a._isNew && a.action_taken);
+      const last = savedActions[savedActions.length - 1];
+      printRepairReleaseForm({
+        ticket_number: ticket.ticket_number,
+        equipment_name: ticket.equipment_name,
+        equipment_code: ticket.equipment_code,
+        asset_serial: ticket.asset_serial,
+        category_name: ticket.category_name,
+        maintenance_type: ticket.maintenance_type,
+        issue_description: ticket.issue_description,
+        last_action_date: last?.action_date ?? null,
+        last_action_taken: last?.action_taken ?? null,
+        last_action_personnel: last?.personnel ?? null,
+        in_charge_of_repair: releaseInCharge.trim(),
+        prepared_by: user?.full_name || 'System',
+        prepared_date: new Date().toISOString(),
+      });
+      const result = await archiveReleaseForm(ticket.id, releaseInCharge.trim());
+      setShowReleaseModal(false);
+      toast.success(
+        result?.uploadedToDrive
+          ? 'Release form printed and saved to Google Drive'
+          : 'Release form printed and saved to local archive (Drive not connected)',
+      );
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to save the release form to the cloud');
+    }
+    setSavingRelease(false);
   };
 
   const handleSelectChange = async (field: string, value: string) => {
@@ -532,6 +584,16 @@ export function MaintenanceDetailPage() {
             {ticket.service_doc_data
               ? <><CheckCircle2 size={14} className="text-success-400" /> Service Document Uploaded</>
               : <><Upload size={14} /> Service Completion Document</>}
+          </Button>
+        )}
+        {!isViewer && !isLoss && ticket.repair_status !== 'COMPLETED' && ticket.repair_status !== 'CANCELLED' && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={openReleaseModal}
+            className="print:hidden"
+          >
+            <FileText size={14} /> Print Equipment Repair - Release Form
           </Button>
         )}
         {isAdmin && (
@@ -907,6 +969,47 @@ export function MaintenanceDetailPage() {
               <Button variant="ghost" size="sm" onClick={() => setShowActionModal(false)}>Cancel</Button>
               <Button size="sm" onClick={handleSaveNewAction} loading={savingAction}>
                 <Plus size={14} /> Add Entry
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Equipment Repair Release Form Modal ── */}
+      {showReleaseModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm print:hidden">
+          <div className="bg-surface-900 border border-surface-700 rounded-xl shadow-2xl w-full max-w-lg mx-4 p-6">
+            <h3 className="text-lg font-semibold text-surface-100 mb-1">Equipment Repair — Release Form</h3>
+            <p className="text-sm text-surface-400 mb-5">
+              Generate a print-ready release form for this equipment. A copy is also saved to the
+              cloud archive. Enter the person or representative in charge of the repair.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-surface-400 mb-1">In Charge of Repair *</label>
+                <input
+                  type="text"
+                  value={releaseInCharge}
+                  onChange={(e) => setReleaseInCharge(e.target.value)}
+                  autoFocus
+                  placeholder="Name of person or representative doing the repair"
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !savingRelease) handleGenerateReleaseForm(); }}
+                  className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
+                />
+              </div>
+
+              <div className="rounded-lg bg-surface-800/60 border border-surface-700/60 px-4 py-3 text-xs text-surface-400 space-y-1">
+                <p><span className="text-surface-500">Prepared By:</span> <span className="text-surface-200">{user?.full_name || 'System'}</span></p>
+                <p><span className="text-surface-500">Approved By:</span> <span className="text-surface-300">Signature space on printed form</span></p>
+                <p><span className="text-surface-500">Received By:</span> <span className="text-surface-300">Signature space for the person in charge of repair</span></p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <Button variant="ghost" size="sm" onClick={() => setShowReleaseModal(false)}>Cancel</Button>
+              <Button size="sm" onClick={handleGenerateReleaseForm} loading={savingRelease}>
+                <FileText size={14} /> Print & Save
               </Button>
             </div>
           </div>

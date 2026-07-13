@@ -638,6 +638,24 @@ const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    // Delete tombstones. Records each deleted row's id so the cross-machine
+    // reconcile (syncOperationalWithCloud) never re-pushes a row that was deleted
+    // on another machine. Without it, a machine still holding the row locally
+    // resurrects the delete on its next full reconcile.
+    id: '023_sync_tombstones',
+    up: (db: any) => {
+      if (!tableExists(db, 'sync_tombstones')) {
+        db.exec(`
+          CREATE TABLE sync_tombstones (
+            id TEXT PRIMARY KEY,
+            table_name TEXT NOT NULL,
+            deleted_at TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+        `);
+      }
+    },
+  },
 ];
 
 export function runMigrations(db: any): void {
