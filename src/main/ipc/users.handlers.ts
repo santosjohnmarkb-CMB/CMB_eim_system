@@ -4,16 +4,34 @@ import { getDatabase, hashPassword } from '../database/index';
 import { requireAdmin } from './session';
 import { writeAuditLog, redactUser } from './audit';
 import { UserCreateSchema, UserUpdateSchema } from '../../shared/schemas';
+import { pushCatalogToCloud } from '../sync/catalog-sync';
+import { EIM_RECOGNIZED_ROLES, normalizeEimRole } from '../../shared/constants';
+
+// Push the full user row (INCLUDING password_hash) to the cloud so other machines
+// can both see the account and authenticate against it. The catalog reconcile
+// deliberately protects an existing local hash from being clobbered, so pushing
+// the hash here is safe and required for cross-machine login.
+function pushUserToCloud(db: any, id: string, action: 'INSERT' | 'UPDATE'): void {
+  const fullRow: any = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  if (fullRow) void pushCatalogToCloud('users', action, fullRow);
+}
 
 export function registerUserHandlers(): void {
   const db = getDatabase();
 
+  // The users table is shared with the Rental (1Take) app, so scope EIM's list
+  // to accounts whose role belongs to EIM (canonical + legacy). Rental-only
+  // users stay in the cloud table but never surface here. Legacy operational
+  // roles are normalized to equipment_manager for display.
+  const eimRolePlaceholders = EIM_RECOGNIZED_ROLES.map(() => '?').join(', ');
+
   ipcMain.handle('db:users:getAll', (event: any) => {
     requireAdmin(event);
     const users: any[] = db.prepare(
-      'SELECT id, username, full_name, email, role, department, is_active, created_at, updated_at FROM users ORDER BY created_at DESC'
-    ).all();
-    return users;
+      `SELECT id, username, full_name, email, role, department, is_active, created_at, updated_at
+       FROM users WHERE role IN (${eimRolePlaceholders}) ORDER BY created_at DESC`
+    ).all(...EIM_RECOGNIZED_ROLES);
+    return users.map((u) => ({ ...u, role: normalizeEimRole(u.role) }));
   });
 
   ipcMain.handle('db:users:create', (event: any, data: unknown) => {
@@ -31,6 +49,7 @@ export function registerUserHandlers(): void {
     const user: any = db.prepare(
       'SELECT id, username, full_name, email, role, department, is_active, created_at, updated_at FROM users WHERE id = ?'
     ).get(id);
+    pushUserToCloud(db, id, 'INSERT');
     writeAuditLog(event, { action: 'user_create', entityType: 'user', entityId: id, newValues: user });
     return user;
   });
@@ -63,6 +82,7 @@ export function registerUserHandlers(): void {
     const user: any = db.prepare(
       'SELECT id, username, full_name, email, role, department, is_active, created_at, updated_at FROM users WHERE id = ?'
     ).get(id);
+    pushUserToCloud(db, id, 'UPDATE');
     writeAuditLog(event, {
       action: 'user_update', entityType: 'user', entityId: id,
       oldValues: redactUser(before), newValues: user,
@@ -74,6 +94,9 @@ export function registerUserHandlers(): void {
     requireAdmin(event);
     const before: any = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
     db.prepare("UPDATE users SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(id);
+    // Soft delete → propagate as an UPDATE (is_active = 0) so other machines
+    // deactivate the same account rather than dropping the row entirely.
+    pushUserToCloud(db, id, 'UPDATE');
     writeAuditLog(event, {
       action: 'user_deactivate', entityType: 'user', entityId: id,
       oldValues: redactUser(before),

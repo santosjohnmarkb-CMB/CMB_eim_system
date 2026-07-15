@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../database/index';
-import { requireWriteAccess } from './session';
+import { requireInventoryAccess } from './session';
 import { writeAuditLog } from './audit';
 import { EquipmentCreateSchema, EquipmentUpdateSchema, AssetUpdateSchema, AssetStatusUpdateSchema } from '../../shared/schemas';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
@@ -111,7 +111,7 @@ export function registerEquipmentHandlers(): void {
   });
 
   ipcMain.handle('db:equipment:create', (event: any, data: unknown) => {
-    requireWriteAccess(event);
+    requireInventoryAccess(event);
     const input = EquipmentCreateSchema.parse(data);
     assertCategoryInDepartment(event, input.category_id);
     const equipmentId = uuidv4();
@@ -230,7 +230,7 @@ export function registerEquipmentHandlers(): void {
   };
 
   ipcMain.handle('db:equipment:update', (event: any, id: string, data: unknown) => {
-    requireWriteAccess(event);
+    requireInventoryAccess(event);
     assertEquipmentInDepartment(db, event, id);
     const input = EquipmentUpdateSchema.parse(data);
     // If the item is being moved to a different category, that target must also
@@ -261,7 +261,7 @@ export function registerEquipmentHandlers(): void {
   });
 
   ipcMain.handle('db:equipment:updateAsset', (event: any, data: unknown) => {
-    requireWriteAccess(event);
+    requireInventoryAccess(event);
     const input = AssetUpdateSchema.parse(data);
     assertAssetInDepartment(event, input.asset_id);
     const asset: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(input.asset_id);
@@ -283,7 +283,7 @@ export function registerEquipmentHandlers(): void {
   });
 
   ipcMain.handle('db:equipment:updateAssetStatus', (event: any, data: unknown) => {
-    const user = requireWriteAccess(event);
+    const user = requireInventoryAccess(event);
     const input = AssetStatusUpdateSchema.parse(data);
     assertAssetInDepartment(event, input.asset_id);
     const asset: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(input.asset_id);
@@ -312,7 +312,7 @@ export function registerEquipmentHandlers(): void {
   });
 
   ipcMain.handle('db:equipment:delete', (event: any, id: string) => {
-    requireWriteAccess(event);
+    requireInventoryAccess(event);
     assertEquipmentInDepartment(db, event, id);
     db.prepare("UPDATE equipment_items SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(id);
     const row: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(id);
@@ -354,7 +354,7 @@ export function registerEquipmentHandlers(): void {
   };
 
   ipcMain.handle('db:equipment:updateStatus', (event: any, equipmentId: string, newStatus: string, reason: string) => {
-    const user = requireWriteAccess(event);
+    const user = requireInventoryAccess(event);
     assertEquipmentInDepartment(db, event, equipmentId);
     let assetIds: string[] = [];
     const tx = db.transaction(() => {
@@ -373,7 +373,7 @@ export function registerEquipmentHandlers(): void {
   });
 
   ipcMain.handle('db:equipment:batchUpdateStatus', (event: any, ids: string[], newStatus: string, reason: string) => {
-    const user = requireWriteAccess(event);
+    const user = requireInventoryAccess(event);
     for (const equipmentId of ids) assertEquipmentInDepartment(db, event, equipmentId);
     const tx = db.transaction(() => {
       for (const equipmentId of ids) {
@@ -449,7 +449,7 @@ export function registerEquipmentHandlers(): void {
   });
 
   ipcMain.handle('db:equipment:importCsv', (event: any, csvContent: string) => {
-    requireWriteAccess(event);
+    requireInventoryAccess(event);
     const lines = csvContent.trim().split('\n');
     if (lines.length < 2) throw new Error('CSV must have a header row and at least one data row');
     const headers = lines[0]!.split(',').map(h => h.trim().toLowerCase());

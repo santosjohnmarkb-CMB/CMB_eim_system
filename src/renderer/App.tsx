@@ -108,23 +108,23 @@ export default function App() {
                   <Route path="/" element={<DefaultRedirect />} />
                   <Route path="/dashboard" element={<RoleGuard roles={['viewer']}><DashboardPage /></RoleGuard>} />
                   <Route path="/equipment" element={<EquipmentDashboardPage />} />
-                  <Route path="/equipment/new" element={<RoleGuard roles={['inventory_manager']}><EquipmentAddPage /></RoleGuard>} />
+                  <Route path="/equipment/new" element={<RoleGuard roles={['equipment_manager']}><EquipmentAddPage /></RoleGuard>} />
                   <Route path="/equipment/use-count" element={<EquipmentUseCountPage />} />
                   <Route path="/equipment/:dept" element={<DepartmentGuard><EquipmentListPage /></DepartmentGuard>} />
                   <Route path="/equipment/detail/:id" element={<EquipmentDetailPage />} />
                   <Route path="/vendors" element={<VendorsPage />} />
                   <Route path="/loans" element={<LoansPage />} />
-                  <Route path="/loans/new" element={<RoleGuard roles={['equipment_manager', 'inventory_manager']}><LoanNewPage /></RoleGuard>} />
+                  <Route path="/loans/new" element={<RoleGuard roles={['equipment_manager']}><LoanNewPage /></RoleGuard>} />
                   <Route path="/loans/:id" element={<LoanDetailPage />} />
                   <Route path="/purchase-requests" element={<PurchaseRequestsPage />} />
-                  <Route path="/purchase-requests/new" element={<RoleGuard roles={['equipment_manager', 'inventory_manager']}><PurchaseRequestNewPage /></RoleGuard>} />
+                  <Route path="/purchase-requests/new" element={<RoleGuard roles={['equipment_manager']}><PurchaseRequestNewPage /></RoleGuard>} />
                   <Route path="/purchase-requests/:id" element={<PurchaseRequestDetailPage />} />
                   <Route path="/maintenance" element={<MaintenanceQueuePage />} />
-                  <Route path="/maintenance/new" element={<RoleGuard roles={['equipment_manager', 'inventory_manager', 'maintenance_lead']}><MaintenanceNewPage /></RoleGuard>} />
-                  <Route path="/maintenance/:id" element={<RoleGuard roles={['equipment_manager', 'inventory_manager', 'maintenance_lead', 'technician', 'viewer']}><MaintenanceDetailPage /></RoleGuard>} />
-                  <Route path="/parts" element={<RoleGuard roles={['maintenance_lead', 'parts_clerk', 'inventory_manager']}><PartsInventoryPage /></RoleGuard>} />
-                  <Route path="/parts/adjust" element={<RoleGuard roles={['parts_clerk']}><StockAdjustmentPage /></RoleGuard>} />
-                  <Route path="/parts/:id" element={<RoleGuard roles={['maintenance_lead', 'parts_clerk']}><PartsDetailPage /></RoleGuard>} />
+                  <Route path="/maintenance/new" element={<RoleGuard roles={['equipment_manager']}><MaintenanceNewPage /></RoleGuard>} />
+                  <Route path="/maintenance/:id" element={<RoleGuard roles={['equipment_manager', 'viewer']}><MaintenanceDetailPage /></RoleGuard>} />
+                  <Route path="/parts" element={<RoleGuard roles={['equipment_manager']}><PartsInventoryPage /></RoleGuard>} />
+                  <Route path="/parts/adjust" element={<RoleGuard roles={['equipment_manager']}><StockAdjustmentPage /></RoleGuard>} />
+                  <Route path="/parts/:id" element={<RoleGuard roles={['equipment_manager']}><PartsDetailPage /></RoleGuard>} />
                   <Route path="/settings" element={<RoleGuard roles={[]}><SettingsPage /></RoleGuard>} />
                   <Route path="/archives" element={<ArchivesPage />} />
                   <Route path="*" element={<DefaultRedirect />} />

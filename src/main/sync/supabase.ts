@@ -7,6 +7,10 @@ import { loadSupabaseServiceCredentials } from './secrets-store';
 
 let supabase: SupabaseClient | null = null;
 let authenticated = false;
+// Last service-account sign-in error message (e.g. "Invalid login credentials",
+// "Email not confirmed"). Surfaced to the admin so a failed sign-in is
+// actionable instead of a generic failure. Cleared on a successful sign-in.
+let lastAuthError: string | null = null;
 
 interface SyncConfig {
   supabaseUrl: string;
@@ -77,6 +81,7 @@ export async function authenticateClient(): Promise<boolean> {
   const creds = loadSupabaseServiceCredentials();
   if (!creds) {
     authenticated = false;
+    lastAuthError = null;
     return false; // No service account configured → anon mode (backward compatible).
   }
 
@@ -86,7 +91,8 @@ export async function authenticateClient(): Promise<boolean> {
       password: creds.password,
     });
     if (error || !data.session) {
-      console.error('[Sync] Service-account sign-in failed; falling back to anon:', error?.message);
+      lastAuthError = error?.message ?? 'Sign-in failed (no session returned)';
+      console.error('[Sync] Service-account sign-in failed; falling back to anon:', lastAuthError);
       authenticated = false;
       return false;
     }
@@ -95,9 +101,11 @@ export async function authenticateClient(): Promise<boolean> {
       supabase.realtime.setAuth(data.session.access_token);
     } catch { /* older client versions apply it automatically */ }
     authenticated = true;
+    lastAuthError = null;
     console.log('[Sync] Signed in as Supabase service account (authenticated role).');
     return true;
   } catch (err) {
+    lastAuthError = err instanceof Error ? err.message : String(err);
     console.error('[Sync] Service-account sign-in threw; falling back to anon:', err);
     authenticated = false;
     return false;
@@ -106,6 +114,15 @@ export async function authenticateClient(): Promise<boolean> {
 
 export function isAuthenticated(): boolean {
   return authenticated;
+}
+
+/**
+ * The reason the most recent service-account sign-in failed, or null when the
+ * client is authenticated / no service account is configured. Lets the Settings
+ * UI tell the admin *why* sign-in failed (wrong password vs. missing user).
+ */
+export function getLastAuthError(): string | null {
+  return lastAuthError;
 }
 
 export function disconnectSupabase(): void {

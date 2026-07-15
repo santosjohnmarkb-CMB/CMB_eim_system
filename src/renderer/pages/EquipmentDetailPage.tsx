@@ -69,7 +69,7 @@ export function EquipmentDetailPage() {
   }
 
   const units = equipment.assets ?? (equipment.asset ? [equipment.asset] : []);
-  const canEdit = role === 'admin' || role === 'inventory_manager';
+  const canEdit = role === 'admin' || role === 'equipment_manager';
 
   const openEdit = () => {
     setEditForm({

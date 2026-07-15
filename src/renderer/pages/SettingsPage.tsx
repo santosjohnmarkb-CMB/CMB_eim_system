@@ -5,21 +5,16 @@ import { Input } from '../components/common/Input';
 import { Modal } from '../components/common/Modal';
 import { useToast } from '../hooks';
 import { RefreshCw, Database, Cloud, Users, Plus, Edit2, Trash2, HardDrive, AlertTriangle, Copy, ScrollText } from 'lucide-react';
-import { ipcInvoke } from '../lib/ipc';
+import { ipcInvoke, ipcOn, ipcRemoveListener } from '../lib/ipc';
 import type { User } from '../../shared/types';
-import { DEPARTMENT_CONFIG } from '../../shared/constants';
+import { DEPARTMENT_CONFIG, EIM_APP_ROLES } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 
-const ROLES = [
-  'admin', 'equipment_manager', 'accounts_manager', 'billing_user', 'payroll_user',
-  'inventory_manager', 'maintenance_lead', 'technician', 'parts_clerk',
-  'camera_personnel', 'lighting_personnel', 'viewer',
-] as const;
+// The users table is shared with the Rental (1Take) app; EIM only assigns its
+// own roles, so the create/edit picker is scoped to EIM_APP_ROLES.
+const ROLES = EIM_APP_ROLES;
 
-const ROLE_LABELS: Record<string, string> = {
-  camera_personnel: 'Camera Dept. Personnel',
-  lighting_personnel: 'Lighting Dept. Personnel',
-};
+const ROLE_LABELS: Record<string, string> = {};
 
 const roleLabel = (role: string) => ROLE_LABELS[role] || role.replace(/_/g, ' ');
 
@@ -31,7 +26,7 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false);
 
   // CRIT-2: optional Supabase Auth service account (authenticated-role sync).
-  interface ServiceAccountStatus { configured: boolean; email: string; authenticated: boolean; }
+  interface ServiceAccountStatus { configured: boolean; email: string; authenticated: boolean; authError?: string | null; }
   const [svcStatus, setSvcStatus] = useState<ServiceAccountStatus | null>(null);
   const [svcEmail, setSvcEmail] = useState('');
   const [svcPassword, setSvcPassword] = useState('');
@@ -101,6 +96,18 @@ export function SettingsPage() {
 
   useEffect(() => { loadUsers(); }, []);
 
+  // Live-update the list when a user is created/edited on another machine and
+  // arrives via realtime (or the periodic reconcile), so the admin doesn't have
+  // to reopen Settings to see remote changes.
+  useEffect(() => {
+    const handler = (...args: unknown[]) => {
+      const payload = args[0] as { table?: string } | undefined;
+      if (payload?.table === 'users') loadUsers();
+    };
+    ipcOn('sync:dataChanged', handler);
+    return () => ipcRemoveListener('sync:dataChanged', handler);
+  }, []);
+
   const loadGdrive = async () => {
     try {
       const cfg = await ipcInvoke<GDriveConfig | null>('gdrive:config:get');
@@ -141,11 +148,11 @@ export function SettingsPage() {
     if (!svcEmail.trim() || !svcPassword) { toast.error('Enter the service-account email and password'); return; }
     setSavingSvc(true);
     try {
-      const res = await ipcInvoke<{ authenticated: boolean }>('sync:serviceAccount:set', svcEmail.trim(), svcPassword);
+      const res = await ipcInvoke<{ authenticated: boolean; authError?: string | null }>('sync:serviceAccount:set', svcEmail.trim(), svcPassword);
       setSvcPassword('');
       await loadServiceStatus();
       if (res?.authenticated) toast.success('Service account saved — sync is now authenticated');
-      else toast.error('Saved, but sign-in failed. Check the credentials and that the Auth user exists.');
+      else toast.error(res?.authError ? `Sign-in failed: ${res.authError}` : 'Saved, but sign-in failed. Check the credentials and that the Auth user exists.');
     } catch (err: any) {
       toast.error(err?.message || 'Failed to save service account');
     }
@@ -468,6 +475,16 @@ export function SettingsPage() {
               <span className="text-2xs px-2 py-0.5 rounded-full bg-surface-700 text-surface-400">Using anon key</span>
             )}
           </div>
+          {svcStatus?.configured && !svcStatus.authenticated && (
+            <div className="mb-3 rounded-lg border border-warning-500/40 bg-warning-500/10 p-2.5">
+              <p className="text-2xs text-warning-400">
+                Sign-in failed{svcStatus.authError ? `: ${svcStatus.authError}` : ''}. Cloud sync is running on the
+                anon key, so equipment, maintenance, parts, loans, and purchase requests are blocked from syncing.
+                Enter the correct credentials (the same account this system uses on your other machine) and press
+                Save &amp; Sign In.
+              </p>
+            </div>
+          )}
           <p className="text-2xs text-surface-500 mb-4">
             When set, cloud sync signs in with this dedicated Supabase Auth user so it runs as the
             <span className="text-surface-300"> authenticated </span> role instead of the public anon key.

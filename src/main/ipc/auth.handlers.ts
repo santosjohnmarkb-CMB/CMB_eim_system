@@ -3,6 +3,7 @@ import { getDatabase, hashPassword, verifyPassword } from '../database/index';
 import { setSession, clearSession, getSession } from './session';
 import { writeAuditLog } from './audit';
 import { LoginSchema } from '../../shared/schemas';
+import { isEimAppRole, normalizeEimRole } from '../../shared/constants';
 
 export function registerAuthHandlers(): void {
   const db = getDatabase();
@@ -20,6 +21,13 @@ export function registerAuthHandlers(): void {
       return null;
     }
 
+    // The users table is shared with the Rental (1Take) app; reject accounts
+    // whose role does not belong to EIM so rental-only users can't sign in here.
+    if (!isEimAppRole(user.role)) {
+      writeAuditLog(event, { action: 'login_failed', entityType: 'user', entityId: user.id, userId: null, newValues: { username, reason: 'non_eim_role' } });
+      return null;
+    }
+
     if (!verifyPassword(password, user.password_hash)) {
       writeAuditLog(event, { action: 'login_failed', entityType: 'user', entityId: user.id, userId: null, newValues: { username } });
       return null;
@@ -30,12 +38,15 @@ export function registerAuthHandlers(): void {
       db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(upgraded, user.id);
     }
 
-    const { password_hash, ...safeUser } = user;
+    // Collapse any legacy operational role (inventory_manager, technician, …)
+    // into equipment_manager so the app only ever deals with the 3 EIM roles.
+    const { password_hash, ...rest } = user;
+    const safeUser = { ...rest, role: normalizeEimRole(user.role) };
     setSession(event, {
       id: safeUser.id,
       username: safeUser.username,
       full_name: safeUser.full_name,
-      role: safeUser.role,
+      role: safeUser.role as string,
       email: safeUser.email,
       department: safeUser.department ?? null,
     });
@@ -80,11 +91,11 @@ export function registerAuthHandlers(): void {
     const user: any = db
       .prepare('SELECT * FROM users WHERE id = ? AND is_active = 1')
       .get(session.id);
-    if (!user) {
+    if (!user || !isEimAppRole(user.role)) {
       clearSession(event);
       return null;
     }
-    const { password_hash: _ph, ...safeUser } = user;
-    return safeUser;
+    const { password_hash: _ph, ...rest } = user;
+    return { ...rest, role: normalizeEimRole(user.role) };
   });
 }

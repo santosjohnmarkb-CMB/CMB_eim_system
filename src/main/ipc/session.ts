@@ -52,6 +52,18 @@ export function requireWriteAccess(event: IpcMainInvokeEvent): SessionUser {
   return user;
 }
 
+// Equipment inventory management (create/edit/delete/status/import) is limited to
+// admins and equipment managers. This mirrors the renderer's canCreate/canEdit
+// gating on the equipment pages so a non-privileged role (viewer) can't reach
+// these mutations by invoking the IPC channel directly.
+export function requireInventoryAccess(event: IpcMainInvokeEvent): SessionUser {
+  const user = requireSession(event);
+  if (user.role !== 'admin' && user.role !== 'equipment_manager') {
+    throw new Error('Only admins and equipment managers can manage equipment.');
+  }
+  return user;
+}
+
 export function requireRole(event: IpcMainInvokeEvent, ...roles: string[]): SessionUser {
   const user = requireSession(event);
   if (!roles.includes(user.role)) {

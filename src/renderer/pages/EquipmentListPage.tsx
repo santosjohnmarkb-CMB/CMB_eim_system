@@ -260,7 +260,7 @@ export function EquipmentListPage() {
     }, className: 'w-14 text-center' },
   ];
 
-  const canCreate = role === 'admin' || role === 'inventory_manager';
+  const canCreate = role === 'admin' || role === 'equipment_manager';
 
   return (
     <div className="space-y-4">

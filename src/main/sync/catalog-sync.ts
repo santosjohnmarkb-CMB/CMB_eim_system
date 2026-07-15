@@ -3,8 +3,9 @@ import { getSupabase } from './supabase';
 import { cloudService } from './cloud-service';
 import { offlineQueue } from './offline-queue';
 import { recordSchemaError } from './schema-health';
+import { EIM_RECOGNIZED_ROLES, isEimAppRole, normalizeEimRole } from '../../shared/constants';
 
-const CATALOG_TABLES = ['categories', 'subcategories', 'equipment_items', 'package_definitions', 'package_items'] as const;
+const CATALOG_TABLES = ['categories', 'subcategories', 'equipment_items', 'package_definitions', 'package_items', 'users'] as const;
 
 type CatalogTable = typeof CATALOG_TABLES[number];
 
@@ -46,9 +47,19 @@ export async function syncCatalogWithCloud(): Promise<void> {
     try {
       const cloudRows = await cloudService.getAll(table);
 
+      // The users table is shared with the Rental (1Take) app, so the cloud
+      // table holds both apps' accounts. Only ingest users whose role belongs
+      // to EIM; rental-only accounts stay in the cloud but never touch EIM's DB.
+      // Legacy operational roles are collapsed into equipment_manager on the way in.
+      const rowsToApply = table === 'users'
+        ? cloudRows
+            .filter((r: any) => isEimAppRole(r.role))
+            .map((r: any) => ({ ...r, role: normalizeEimRole(r.role) }))
+        : cloudRows;
+
       if (cloudRows.length > 0) {
         const tx = db.transaction(() => {
-          for (const row of cloudRows) {
+          for (const row of rowsToApply) {
             upsertLocalRow(db, table, row);
           }
         });
@@ -58,6 +69,19 @@ export async function syncCatalogWithCloud(): Promise<void> {
         if (localRows.length > 0) {
           await cloudService.upsertMany(table, localRows);
         }
+      }
+
+      if (table === 'users') {
+        try {
+          // Purge any rental-only users a prior sync may have pulled into the
+          // local DB, so EIM's list and login stay EIM-only.
+          const placeholders = EIM_RECOGNIZED_ROLES.map(() => '?').join(', ');
+          db.prepare(`DELETE FROM users WHERE role NOT IN (${placeholders})`).run(...EIM_RECOGNIZED_ROLES);
+          // Collapse any lingering legacy operational roles into equipment_manager.
+          db.prepare(
+            `UPDATE users SET role = 'equipment_manager' WHERE role NOT IN ('admin', 'equipment_manager', 'viewer')`,
+          ).run();
+        } catch { /* non-fatal */ }
       }
     } catch (err) {
       recordSchemaError(table, err);
@@ -89,6 +113,9 @@ export function applyCatalogRealtimeChange(table: string, event: string, newReco
 
   if (!CATALOG_TABLES.includes(catalogTable as any)) return;
 
+  // Ignore realtime changes for rental-only user accounts (shared users table).
+  if (catalogTable === 'users' && event !== 'DELETE' && !isEimAppRole(newRecord?.role)) return;
+
   if (event === 'DELETE' && oldRecord?.id) {
     if (catalogTable === 'package_items') {
       db.prepare(`DELETE FROM package_items WHERE id = ?`).run(oldRecord.id);
@@ -96,7 +123,11 @@ export function applyCatalogRealtimeChange(table: string, event: string, newReco
       db.prepare(`UPDATE ${catalogTable} SET is_active = 0 WHERE id = ?`).run(oldRecord.id);
     }
   } else if (newRecord?.id) {
-    upsertLocalRow(db, catalogTable, newRecord);
+    // Collapse legacy operational roles into equipment_manager on the way in.
+    const row = catalogTable === 'users'
+      ? { ...newRecord, role: normalizeEimRole(newRecord.role) }
+      : newRecord;
+    upsertLocalRow(db, catalogTable, row);
   }
 }
 

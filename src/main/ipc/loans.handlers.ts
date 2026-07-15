@@ -211,7 +211,10 @@ export function registerLoanHandlers(): void {
 
   ipcMain.handle('db:loans:update', (event: any, id: string, data: unknown) => {
     const user = requireSession(event);
-    if (user.role !== 'admin') throw new Error('Only admins can edit loans');
+    // Mirror purchase-request edit permissions: admins and equipment/inventory managers.
+    if (user.role !== 'admin' && !['equipment_manager', 'inventory_manager'].includes(user.role)) {
+      throw new Error('You do not have permission to edit loans.');
+    }
     getLoanInDept(event, id);
     const input = LoanUpdateSchema.parse(data);
     db.prepare(`

@@ -115,6 +115,36 @@ export const PARTS_CATEGORY_CONFIG: Record<string, { label: string; description:
   accessory:  { label: 'Accessories',  description: 'Add-on items that accompany equipment' },
 };
 
+// EIM uses exactly three roles. `admin` is the superuser, `equipment_manager`
+// is the general operational role (create/edit equipment, loans, purchases,
+// maintenance, parts), and `viewer` is cross-department read-only.
+export const EIM_APP_ROLES = ['admin', 'equipment_manager', 'viewer'] as const;
+
+export type EimAppRole = typeof EIM_APP_ROLES[number];
+
+// Roles from earlier EIM versions that have been collapsed into
+// `equipment_manager`. Accounts still carrying one of these are treated as
+// equipment_manager everywhere (list, login, permissions) and migrated on sync.
+const LEGACY_EIM_ROLES = ['inventory_manager', 'maintenance_lead', 'technician', 'parts_clerk'] as const;
+
+// Every role EIM still recognizes as one of its own accounts (canonical +
+// legacy). Used to tell EIM users apart from the rental (1Take) app's users in
+// the SHARED Supabase `users` table.
+export const EIM_RECOGNIZED_ROLES = [...EIM_APP_ROLES, ...LEGACY_EIM_ROLES] as const;
+
+// Map any stored role to the EIM role EIM should treat it as, or null when the
+// account is not an EIM user (e.g. a rental-app-only role in the shared table).
+export function normalizeEimRole(role: unknown): EimAppRole | null {
+  if (typeof role !== 'string') return null;
+  if ((EIM_APP_ROLES as readonly string[]).includes(role)) return role as EimAppRole;
+  if ((LEGACY_EIM_ROLES as readonly string[]).includes(role)) return 'equipment_manager';
+  return null;
+}
+
+export function isEimAppRole(role: unknown): boolean {
+  return normalizeEimRole(role) !== null;
+}
+
 export type Department = 'camera' | 'lights_grips';
 
 export const DEPARTMENT_CONFIG: Record<Department, { label: string; shortLabel: string; icon: string; categories: string[] }> = {

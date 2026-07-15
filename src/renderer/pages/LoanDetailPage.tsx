@@ -32,6 +32,9 @@ export function LoanDetailPage() {
   const role = useAuthStore((s) => s.user?.role);
   const isAdmin = role === 'admin';
   const isViewer = role === 'viewer';
+  // Editing a loan is allowed for admins and equipment/inventory managers,
+  // matching the Purchase Request edit permission.
+  const canEdit = isAdmin || role === 'equipment_manager' || role === 'inventory_manager';
 
   const [loan, setLoan] = useState<EquipmentLoanWithItems | null>(null);
   const [loading, setLoading] = useState(true);
@@ -258,7 +261,7 @@ export function LoanDetailPage() {
               {loan.signed_form_data ? 'Signed Form Uploaded' : 'Upload Signed Form'}
             </Button>
           )}
-          {isAdmin && (
+          {canEdit && (
             <Button variant="secondary" onClick={openEdit}><Pencil size={16} /> Edit</Button>
           )}
           {outItems.length > 0 && !isViewer && (

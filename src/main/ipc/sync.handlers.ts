@@ -2,7 +2,7 @@ import { ipcMain, app } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { syncManager } from '../sync/sync-manager';
-import { loadSyncConfig, isAuthenticated } from '../sync/supabase';
+import { loadSyncConfig, isAuthenticated, getLastAuthError } from '../sync/supabase';
 import {
   saveSupabaseServiceCredentials,
   loadSupabaseServiceCredentials,
@@ -57,6 +57,7 @@ export function registerSyncHandlers(): void {
       configured: !!creds,
       email: creds?.email ?? '',
       authenticated: isAuthenticated(),
+      authError: !!creds && !isAuthenticated() ? getLastAuthError() : null,
     };
   });
 
@@ -67,7 +68,12 @@ export function registerSyncHandlers(): void {
     // Reconnect so the new credential takes effect immediately (signs in).
     const cfg = loadSyncConfig();
     if (cfg) await syncManager.connect(cfg.supabaseUrl, cfg.supabaseAnonKey);
-    return { configured: true, authenticated: isAuthenticated(), state: syncManager.getState() };
+    return {
+      configured: true,
+      authenticated: isAuthenticated(),
+      authError: isAuthenticated() ? null : getLastAuthError(),
+      state: syncManager.getState(),
+    };
   });
 
   ipcMain.handle('sync:serviceAccount:clear', async (event: any) => {
