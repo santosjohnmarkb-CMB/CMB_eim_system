@@ -28,14 +28,25 @@ export function EquipmentAddPage() {
   const set = (field: string, value: any) => setForm((p) => ({ ...p, [field]: value }));
 
   // Keep the per-unit rows in sync with the quantity field (at least one unit).
+  // Allow the field to be cleared / mid-typed without snapping back to 1, so a
+  // single digit can be replaced (e.g. clear "1" then type "2").
   const setQuantity = (raw: string) => {
-    const q = Math.max(1, parseInt(raw, 10) || 1);
+    if (raw === '') { set('quantity', ''); return; }
+    const parsed = parseInt(raw, 10);
+    if (Number.isNaN(parsed)) return;
+    const q = Math.max(1, parsed);
     set('quantity', q);
     setUnits((prev) => {
       if (q === prev.length) return prev;
       if (q > prev.length) return [...prev, ...Array.from({ length: q - prev.length }, emptyUnit)];
       return prev.slice(0, q);
     });
+  };
+
+  // Normalize an empty / invalid quantity back to the current unit count on blur.
+  const normalizeQuantity = () => {
+    const n = parseInt(String(form.quantity), 10);
+    if (Number.isNaN(n) || n < 1) setQuantity(String(Math.max(1, units.length)));
   };
 
   const setUnit = (idx: number, field: keyof UnitRow, value: string) => {
@@ -85,7 +96,7 @@ export function EquipmentAddPage() {
           </div>
           <Input label="Brand" value={form.brand} onChange={(e) => set('brand', e.target.value)} />
           <Input label="Model" value={form.model} onChange={(e) => set('model', e.target.value)} />
-          <Input label="Quantity" type="number" min={1} value={form.quantity} onChange={(e) => setQuantity(e.target.value)} />
+          <Input label="Quantity" type="number" min={1} value={form.quantity} onChange={(e) => setQuantity(e.target.value)} onBlur={normalizeQuantity} />
         </div>
         <Input label="Description" value={form.description} onChange={(e) => set('description', e.target.value)} />
       </div>

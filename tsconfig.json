@@ -18,7 +18,6 @@
     "jsx": "react-jsx",
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/renderer/*"],
       "@shared/*": ["./src/shared/*"],

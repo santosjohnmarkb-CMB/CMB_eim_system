@@ -23,6 +23,28 @@ export function registerEquipmentHandlers(): void {
     }
   };
 
+  // Generate the next unused equipment code for a category prefix. Orders by the
+  // numeric suffix (not lexicographically, so CAM-1000 beats CAM-999) and skips any
+  // code that already exists to avoid UNIQUE constraint failures on equipment_code.
+  const nextEquipmentCode = (prefix: string): string => {
+    const last: any = db.prepare(
+      `SELECT equipment_code FROM equipment_items WHERE equipment_code LIKE ?
+       ORDER BY CAST(substr(equipment_code, instr(equipment_code, '-') + 1) AS INTEGER) DESC LIMIT 1`,
+    ).get(`${prefix}-%`);
+    let seq = 1;
+    if (last) {
+      const num = parseInt(last.equipment_code.split('-')[1] || '0', 10);
+      seq = (Number.isFinite(num) ? num : 0) + 1;
+    }
+    const exists = db.prepare('SELECT 1 FROM equipment_items WHERE equipment_code = ?');
+    let code = `${prefix}-${String(seq).padStart(3, '0')}`;
+    while (exists.get(code)) {
+      seq += 1;
+      code = `${prefix}-${String(seq).padStart(3, '0')}`;
+    }
+    return code;
+  };
+
   // Reject touching an asset (by asset_id) that belongs to another department.
   const assertAssetInDepartment = (event: any, assetId: string): void => {
     const dept = sessionDepartment(event);
@@ -99,15 +121,7 @@ export function registerEquipmentHandlers(): void {
     const cat: any = db.prepare('SELECT name FROM categories WHERE id = ?').get(categoryId);
     if (!cat) throw new Error('Category not found');
     const prefix = CATEGORY_PREFIXES[cat.name] || 'EQP';
-    const last: any = db.prepare(
-      `SELECT equipment_code FROM equipment_items WHERE equipment_code LIKE ? ORDER BY equipment_code DESC LIMIT 1`
-    ).get(`${prefix}-%`);
-    let seq = 1;
-    if (last) {
-      const num = parseInt(last.equipment_code.split('-')[1] || '0', 10);
-      seq = num + 1;
-    }
-    return `${prefix}-${String(seq).padStart(3, '0')}`;
+    return nextEquipmentCode(prefix);
   });
 
   ipcMain.handle('db:equipment:create', (event: any, data: unknown) => {
@@ -120,15 +134,7 @@ export function registerEquipmentHandlers(): void {
 
     const cat: any = db.prepare('SELECT name FROM categories WHERE id = ?').get(input.category_id);
     const prefix = cat ? (CATEGORY_PREFIXES[cat.name] || 'EQP') : 'EQP';
-    const last: any = db.prepare(
-      `SELECT equipment_code FROM equipment_items WHERE equipment_code LIKE ? ORDER BY equipment_code DESC LIMIT 1`
-    ).get(`${prefix}-%`);
-    let seq = 1;
-    if (last) {
-      const num = parseInt(last.equipment_code.split('-')[1] || '0', 10);
-      seq = num + 1;
-    }
-    const equipmentCode = `${prefix}-${String(seq).padStart(3, '0')}`;
+    const equipmentCode = nextEquipmentCode(prefix);
 
     // Build the per-unit list. When explicit `units` are provided, one asset row is
     // created per entry; otherwise `quantity` units are created with the first unit
@@ -487,10 +493,7 @@ export function registerEquipmentHandlers(): void {
           }
 
           const prefix = CATEGORY_PREFIXES[categoryName] || 'EQP';
-          const last: any = db.prepare('SELECT equipment_code FROM equipment_items WHERE equipment_code LIKE ? ORDER BY equipment_code DESC LIMIT 1').get(`${prefix}-%`);
-          let seq = 1;
-          if (last) { seq = parseInt(last.equipment_code.split('-')[1] || '0', 10) + 1; }
-          const code = `${prefix}-${String(seq).padStart(3, '0')}`;
+          const code = nextEquipmentCode(prefix);
 
           const eqId = uuidv4();
           const assetId = uuidv4();
