@@ -2,6 +2,7 @@ import { registerAuthHandlers } from './auth.handlers';
 import { registerUserHandlers } from './users.handlers';
 import { registerAuditHandlers } from './audit.handlers';
 import { registerEquipmentHandlers } from './equipment.handlers';
+import { registerPackageHandlers } from './packages.handlers';
 import { registerMaintenanceHandlers } from './maintenance.handlers';
 import { registerPartsHandlers } from './parts.handlers';
 import { registerVendorHandlers } from './vendors.handlers';
@@ -18,6 +19,7 @@ export function registerAllHandlers(): void {
   registerUserHandlers();
   registerAuditHandlers();
   registerEquipmentHandlers();
+  registerPackageHandlers();
   registerMaintenanceHandlers();
   registerPartsHandlers();
   registerVendorHandlers();

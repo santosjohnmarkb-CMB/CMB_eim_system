@@ -1,9 +1,16 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useEquipmentStore } from '../stores/equipment.store';
+import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
 import { useToast, useDepartmentFilter } from '../hooks';
+
+const PRICING_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'per_day', label: 'Per Day' },
+  { value: 'per_project', label: 'Per Project' },
+  { value: 'package_rate', label: 'Package Rate' },
+];
 
 interface UnitRow { serial_number: string; vendor_name: string; delivered_date: string; }
 
@@ -14,6 +21,8 @@ export function EquipmentAddPage() {
   const { isEquipmentInDepartment } = useDepartmentFilter();
   const navigate = useNavigate();
   const toast = useToast();
+  // Only admins set prices; managers add equipment at 0 (enforced server-side too).
+  const isAdmin = useAuthStore((s) => s.user?.role) === 'admin';
   const [form, setForm] = useState<Record<string, any>>({
     name: '', display_name: '', category_id: '', subcategory_id: '', brand: '', model: '',
     description: '', pricing_type: 'per_day', base_price: 0, quantity: 1,
@@ -60,6 +69,7 @@ export function EquipmentAddPage() {
     try {
       await createEquipment({
         ...form,
+        base_price: Number(form.base_price) || 0,
         display_name: form.display_name || form.name,
         units: units.map((u) => ({
           serial_number: u.serial_number,
@@ -97,6 +107,17 @@ export function EquipmentAddPage() {
           <Input label="Brand" value={form.brand} onChange={(e) => set('brand', e.target.value)} />
           <Input label="Model" value={form.model} onChange={(e) => set('model', e.target.value)} />
           <Input label="Quantity" type="number" min={1} value={form.quantity} onChange={(e) => setQuantity(e.target.value)} onBlur={normalizeQuantity} />
+          {isAdmin && (
+            <>
+              <Input label="Price (₱)" type="number" min={0} step="0.01" value={form.base_price} onChange={(e) => set('base_price', e.target.value === '' ? '' : parseFloat(e.target.value))} placeholder="0.00" />
+              <div>
+                <label className="block text-xs font-medium text-surface-400 mb-1">Pricing Type</label>
+                <select value={form.pricing_type} onChange={(e) => set('pricing_type', e.target.value)} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100">
+                  {PRICING_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+            </>
+          )}
         </div>
         <Input label="Description" value={form.description} onChange={(e) => set('description', e.target.value)} />
       </div>

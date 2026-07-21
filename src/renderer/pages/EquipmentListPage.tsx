@@ -1,17 +1,27 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Plus, ArrowLeft, Camera, Lightbulb, Printer, ChevronDown } from 'lucide-react';
+import { Plus, ArrowLeft, Camera, Lightbulb, Printer, ChevronDown, Upload, Download } from 'lucide-react';
 import { useEquipmentStore } from '../stores/equipment.store';
 import { Button } from '../components/common/Button';
 import { SearchBox } from '../components/common/SearchBox';
 import { DataTable, type Column } from '../components/common/DataTable';
 import { Badge } from '../components/common/Badge';
+import { Modal } from '../components/common/Modal';
 import { EQUIPMENT_STATUS_CONFIG } from '../lib/constants';
 import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
-import type { EquipmentWithAsset, EquipmentStatus } from '../../shared/types';
+import type { EquipmentWithAsset, EquipmentStatus, BulkImportResult } from '../../shared/types';
 import { useAuthStore } from '../stores/auth.store';
+import { useToast } from '../hooks';
 import { printHtml, escapeHtml } from '../lib/print';
+
+// Columns the equipment CSV importer understands (see db:equipment:importCsv).
+// base_price is honored only for admins; a manager's import always lands at 0.
+const EQUIPMENT_CSV_HEADERS = [
+  'name', 'category', 'subcategory', 'display_name', 'sub_subcategory', 'brand', 'model',
+  'description', 'base_price', 'notes', 'serial_number', 'asset_tag', 'purchase_date',
+  'delivered_date', 'purchase_price', 'vendor_name', 'warranty_expiry',
+];
 
 const statusVariantMap: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'purple' | 'default'> = {
   AVAILABLE: 'success', DEPLOYED: 'info', IN_REPAIR: 'warning', ON_HOLD: 'default',
@@ -86,8 +96,9 @@ export function EquipmentListPage() {
   const deptConfig = department ? DEPARTMENT_CONFIG[department] : null;
   const DeptIcon = department ? DEPT_ICONS[department] : null;
 
-  const { items, categories, subcategories, loading, fetchAll, fetchCategories, fetchSubcategories } = useEquipmentStore();
+  const { items, categories, subcategories, loading, fetchAll, fetchCategories, fetchSubcategories, importCsv } = useEquipmentStore();
   const navigate = useNavigate();
+  const toast = useToast();
   const role = useAuthStore((s) => s.user?.role);
   const userDept = useAuthStore((s) => s.user?.department);
   const isAdmin = role === 'admin';
@@ -98,6 +109,9 @@ export function EquipmentListPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [printMenuOpen, setPrintMenuOpen] = useState(false);
   const printMenuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importResult, setImportResult] = useState<BulkImportResult | null>(null);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -262,6 +276,43 @@ export function EquipmentListPage() {
 
   const canCreate = role === 'admin' || role === 'equipment_manager';
 
+  // Client-side CSV template so managers can bulk-load without a backend round trip.
+  // base_price is only pre-filled for admins (managers can't set prices).
+  const handleDownloadTemplate = () => {
+    const sample: Record<string, string> = {
+      name: 'Sample Camera', category: 'Camera', subcategory: 'Camera Body',
+      display_name: 'Sample Camera Body', sub_subcategory: '', brand: 'ARRI', model: 'Alexa Mini',
+      description: '', base_price: isAdmin ? '15000' : '', notes: '', serial_number: 'SN-001',
+      asset_tag: '', purchase_date: '', delivered_date: '', purchase_price: '', vendor_name: '', warranty_expiry: '',
+    };
+    const csv = EQUIPMENT_CSV_HEADERS.join(',') + '\n' + EQUIPMENT_CSV_HEADERS.map((h) => sample[h] ?? '').join(',') + '\n';
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'equipment_import_template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setIsImporting(true);
+    try {
+      const text = await file.text();
+      const result = (await importCsv(text)) as BulkImportResult;
+      setImportResult(result);
+      if (result.imported > 0) toast.success(`Imported ${result.imported} item${result.imported > 1 ? 's' : ''}`);
+      if (result.errors.length > 0 && result.imported === 0) toast.error('Import failed — see error details');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Import failed');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -320,13 +371,53 @@ export function EquipmentListPage() {
             )
           )}
         </div>
-        {canCreate && <Button onClick={() => navigate('/equipment/new')}><Plus size={16} /> Add Equipment</Button>}
+        {canCreate && (
+          <>
+            <Button variant="secondary" onClick={handleDownloadTemplate}><Download size={16} /> Template</Button>
+            <Button variant="secondary" onClick={() => fileInputRef.current?.click()} loading={isImporting}><Upload size={16} /> Import CSV</Button>
+            <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleFileSelected} />
+            <Button onClick={() => navigate('/equipment/new')}><Plus size={16} /> Add Equipment</Button>
+          </>
+        )}
       </div>
 
       <div className="glass-panel rounded-xl overflow-hidden">
         <DataTable columns={columns} data={filtered} onRowClick={(item) => navigate(`/equipment/detail/${item.id}`)} loading={loading} emptyMessage="No equipment found" />
       </div>
       <p className="text-xs text-surface-600">{filtered.length} of {deptItems.length} items</p>
+
+      <Modal isOpen={!!importResult} onClose={() => setImportResult(null)} title="Import Results" size="lg">
+        {importResult && (
+          <div className="space-y-4">
+            <div className="flex gap-4">
+              <div className="glass-panel rounded-lg p-4 flex-1">
+                <p className="text-xs text-surface-400 uppercase tracking-wider mb-1">Imported</p>
+                <p className="text-2xl font-bold text-success-400">{importResult.imported}</p>
+              </div>
+              <div className="glass-panel rounded-lg p-4 flex-1">
+                <p className="text-xs text-surface-400 uppercase tracking-wider mb-1">Errors</p>
+                <p className="text-2xl font-bold text-danger-400">{importResult.errors.length}</p>
+              </div>
+            </div>
+            {importResult.errors.length > 0 && (
+              <div>
+                <h4 className="text-sm font-medium text-surface-200 mb-2">Error Details</h4>
+                <div className="max-h-60 overflow-y-auto space-y-1">
+                  {importResult.errors.map((err, i) => (
+                    <div key={i} className="flex gap-3 text-xs py-1.5 px-3 rounded bg-surface-800/50">
+                      <span className="text-surface-500 shrink-0">Row {err.row}</span>
+                      <span className="text-danger-400">{err.message}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="flex justify-end pt-2">
+              <Button variant="secondary" onClick={() => setImportResult(null)}>Close</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

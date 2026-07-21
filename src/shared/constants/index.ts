@@ -270,6 +270,16 @@ export const IPC_CHANNELS = {
   EQUIPMENT_GET_DASHBOARD_STATS: 'db:equipment:getDashboardStats',
   EQUIPMENT_GET_USE_COUNTS: 'db:equipment:getUseCounts',
 
+  // Packages (EIM owns the catalog; writes gated by inventory access + department)
+  PACKAGES_GET_ALL: 'db:packages:getAll',
+  PACKAGES_GET_BY_ID: 'db:packages:getById',
+  PACKAGES_CREATE: 'db:packages:create',
+  PACKAGES_UPDATE: 'db:packages:update',
+  PACKAGES_DELETE: 'db:packages:delete',
+  PACKAGES_BULK_IMPORT: 'db:packages:bulkImport',
+  PACKAGES_READ_CSV_FILE: 'packages:readCsvFile',
+  PACKAGES_DOWNLOAD_TEMPLATE: 'packages:downloadTemplate',
+
   // Maintenance
   MAINTENANCE_GET_ALL: 'db:maintenance:getAll',
   MAINTENANCE_GET_BY_ID: 'db:maintenance:getById',

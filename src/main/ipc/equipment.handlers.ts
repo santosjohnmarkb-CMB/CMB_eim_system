@@ -125,9 +125,11 @@ export function registerEquipmentHandlers(): void {
   });
 
   ipcMain.handle('db:equipment:create', (event: any, data: unknown) => {
-    requireInventoryAccess(event);
+    const user = requireInventoryAccess(event);
     const input = EquipmentCreateSchema.parse(data);
     assertCategoryInDepartment(event, input.category_id);
+    // Admin-only pricing: managers create equipment at 0 price; only admins set a price.
+    const basePrice = user.role === 'admin' ? input.base_price : 0;
     const equipmentId = uuidv4();
     const assetId = uuidv4();
     const now = new Date().toISOString();
@@ -162,7 +164,7 @@ export function registerEquipmentHandlers(): void {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
       `).run(equipmentId, equipmentCode, input.name, input.display_name, input.category_id, input.subcategory_id,
         input.sub_subcategory || null, input.item_type, input.brand, input.model, input.description,
-        input.pricing_type, input.base_price, input.notes || null, qty, qty, now, now);
+        input.pricing_type, basePrice, input.notes || null, qty, qty, now, now);
 
       for (let i = 0; i < units.length; i++) {
         const unit = units[i]!;
@@ -236,14 +238,17 @@ export function registerEquipmentHandlers(): void {
   };
 
   ipcMain.handle('db:equipment:update', (event: any, id: string, data: unknown) => {
-    requireInventoryAccess(event);
+    const user = requireInventoryAccess(event);
     assertEquipmentInDepartment(db, event, id);
     const input = EquipmentUpdateSchema.parse(data);
     // If the item is being moved to a different category, that target must also
     // belong to the session's department.
     if (input.category_id !== undefined) assertCategoryInDepartment(event, input.category_id);
+    // Admin-only pricing: managers may edit every field except base_price, which is
+    // dropped from the allow-list so their submission can't change the stored price.
     const allowedFields = ['name', 'display_name', 'category_id', 'subcategory_id', 'sub_subcategory',
-      'item_type', 'brand', 'model', 'description', 'pricing_type', 'base_price', 'notes'];
+      'item_type', 'brand', 'model', 'description', 'pricing_type', 'notes',
+      ...(user.role === 'admin' ? ['base_price'] : [])];
     const updates: string[] = [];
     const values: any[] = [];
 
@@ -455,7 +460,9 @@ export function registerEquipmentHandlers(): void {
   });
 
   ipcMain.handle('db:equipment:importCsv', (event: any, csvContent: string) => {
-    requireInventoryAccess(event);
+    const user = requireInventoryAccess(event);
+    // Admin-only pricing: a non-admin bulk import never sets a price.
+    const canPrice = user.role === 'admin';
     const lines = csvContent.trim().split('\n');
     if (lines.length < 2) throw new Error('CSV must have a header row and at least one data row');
     const headers = lines[0]!.split(',').map(h => h.trim().toLowerCase());
@@ -502,7 +509,7 @@ export function registerEquipmentHandlers(): void {
             INSERT INTO equipment_items (id, equipment_code, name, display_name, category_id, subcategory_id, sub_subcategory, item_type, brand, model, description, pricing_type, base_price, notes, is_active, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, 'standalone', ?, ?, ?, 'per_day', ?, ?, 1, ?, ?)
           `).run(eqId, code, name, row['display_name'] || name, cat.id, subcat.id, row['sub_subcategory'] || null,
-            row['brand'] || '', row['model'] || '', row['description'] || '', parseFloat(row['base_price'] || '0'),
+            row['brand'] || '', row['model'] || '', row['description'] || '', canPrice ? parseFloat(row['base_price'] || '0') : 0,
             row['notes'] || null, now, now);
 
           db.prepare(`

@@ -64,6 +64,19 @@ export function requireInventoryAccess(event: IpcMainInvokeEvent): SessionUser {
   return user;
 }
 
+// Setting or changing catalog prices (equipment base_price / package cost) is an
+// admin-only action. Equipment managers can create and edit equipment and packages
+// within their department, but must never change pricing. Handlers use this to
+// decide whether to apply a submitted price; the renderer additionally hides price
+// inputs from non-admins, but the server is the source of truth.
+export function requirePricingAccess(event: IpcMainInvokeEvent): SessionUser {
+  const user = requireSession(event);
+  if (user.role !== 'admin') {
+    throw new Error('Only admins can set or change prices.');
+  }
+  return user;
+}
+
 export function requireRole(event: IpcMainInvokeEvent, ...roles: string[]): SessionUser {
   const user = requireSession(event);
   if (!roles.includes(user.role)) {

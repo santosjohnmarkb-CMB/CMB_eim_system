@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, Wrench, Settings, LogOut, Package,
+  LayoutDashboard, Wrench, Settings, LogOut, Package, Boxes,
   ChevronRight, ChevronDown, Camera, Lightbulb, PackageCheck, ShoppingCart, Archive, Truck,
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -146,6 +146,17 @@ export function Sidebar() {
             </CollapsibleSection>
           )}
 
+          {/* Packages — catalog bundles (admins manage across departments). Hidden
+              from read-only viewers, who cannot reach the write-only route. */}
+          {isAdmin && (
+            <NavButton
+              icon={<Boxes size={20} />}
+              label="Packages"
+              active={location.pathname.startsWith('/packages')}
+              onClick={() => navigate('/packages')}
+            />
+          )}
+
           <NavButton
             icon={<Wrench size={20} />}
             label="Maintenance"
@@ -222,6 +233,12 @@ export function Sidebar() {
           label="Equipment"
           active={location.pathname.startsWith('/equipment')}
           onClick={() => navigate('/equipment')}
+        />
+        <NavButton
+          icon={<Boxes size={20} />}
+          label="Packages"
+          active={location.pathname.startsWith('/packages')}
+          onClick={() => navigate('/packages')}
         />
         <NavButton
           icon={<Wrench size={20} />}

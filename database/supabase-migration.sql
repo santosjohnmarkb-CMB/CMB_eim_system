@@ -488,3 +488,75 @@ END $$;
 ALTER TABLE sync_tombstones ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all for sync_tombstones" ON sync_tombstones;
 CREATE POLICY "Allow all for sync_tombstones" ON sync_tombstones FOR ALL USING (true) WITH CHECK (true);
+
+-- ═══════════════════════════════════════════════════
+-- Migration: EIM catalog ownership (equipment superset + packages)
+-- ═══════════════════════════════════════════════════
+-- EIM is now the source of truth for the shared catalog. Its
+-- pushCatalogToCloud('equipment_items', ...) writes a superset of the columns the
+-- rental app pulls, so the cloud equipment_items table must carry EIM's extra
+-- columns or every upsert fails with "column does not exist" (PGRST204). These are
+-- idempotent — safe to run on a cloud DB the rental app created.
+--
+-- `quantity`/`available_qty` are also added early in this file; repeated here so this
+-- section is self-contained. `version` is EIM's optimistic-concurrency counter.
+
+ALTER TABLE equipment_items ADD COLUMN IF NOT EXISTS quantity INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE equipment_items ADD COLUMN IF NOT EXISTS available_qty INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE equipment_items ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
+
+-- Package catalog. These typically already exist in the shared project (the rental
+-- app pulls them), but EIM must be able to INSERT/UPDATE/DELETE them, so ensure the
+-- tables + RLS + realtime are present. `version` mirrors EIM's local schema. The
+-- item_type CHECK on equipment_items must already allow 'package_main' /
+-- 'package_component' (it does in both apps) or package main-item upserts are rejected.
+
+CREATE TABLE IF NOT EXISTS package_definitions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  main_item_id UUID NOT NULL REFERENCES equipment_items(id),
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS package_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  package_id UUID NOT NULL REFERENCES package_definitions(id),
+  component_id UUID NOT NULL REFERENCES equipment_items(id),
+  included_qty INTEGER NOT NULL DEFAULT 1,
+  is_required BOOLEAN NOT NULL DEFAULT true,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Idempotent backfill for shared DBs whose package tables predate the version column.
+ALTER TABLE package_definitions ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE package_items ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
+
+CREATE INDEX IF NOT EXISTS idx_package_items_package ON package_items(package_id);
+CREATE INDEX IF NOT EXISTS idx_package_items_component ON package_items(component_id);
+
+-- Enable Realtime so package edits made in EIM reach the rental picker live.
+DO $$
+DECLARE t text;
+BEGIN
+  FOR t IN SELECT unnest(ARRAY['package_definitions', 'package_items']) LOOP
+    BEGIN
+      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE %I', t);
+    EXCEPTION WHEN duplicate_object THEN
+      NULL; -- already published
+    END;
+  END LOOP;
+END $$;
+
+ALTER TABLE package_definitions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for package_definitions" ON package_definitions;
+CREATE POLICY "Allow all for package_definitions" ON package_definitions FOR ALL USING (true) WITH CHECK (true);
+
+ALTER TABLE package_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for package_items" ON package_items;
+CREATE POLICY "Allow all for package_items" ON package_items FOR ALL USING (true) WITH CHECK (true);

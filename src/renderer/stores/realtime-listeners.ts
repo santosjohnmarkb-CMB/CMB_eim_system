@@ -5,6 +5,7 @@ import { usePartsStore } from './parts.store';
 import { useVendorsStore } from './vendors.store';
 import { useLoansStore } from './loans.store';
 import { usePurchaseRequestsStore } from './purchaseRequests.store';
+import { usePackageStore } from './package.store';
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -19,6 +20,12 @@ const dataChangedHandler = (...args: unknown[]) => {
     if (['categories', 'subcategories', 'equipment_items', 'equipment_assets'].includes(table)) {
       useEquipmentStore.getState().fetchAll();
       useEquipmentStore.getState().fetchDashboardStats();
+    }
+    // Package edits (locally or from another machine via Supabase realtime) refresh
+    // the packages list. equipment_items also touches packages since a package's
+    // price/name lives on its main equipment item.
+    if (['package_definitions', 'package_items', 'equipment_items'].includes(table)) {
+      usePackageStore.getState().fetchAll();
     }
     if (['maintenance_tickets', 'maintenance_notes', 'ticket_actions'].includes(table)) {
       useMaintenanceStore.getState().fetchAll();

@@ -82,6 +82,8 @@ export function EquipmentDetailPage() {
       quantity: equipment.quantity ?? 1,
       description: equipment.description || '',
       notes: equipment.notes || '',
+      base_price: equipment.base_price ?? 0,
+      pricing_type: equipment.pricing_type || 'per_day',
     });
     setShowEditModal(true);
   };
@@ -105,6 +107,8 @@ export function EquipmentDetailPage() {
         quantity: Math.max(0, parseInt(editForm.quantity, 10) || 0),
         description: editForm.description,
         notes: editForm.notes,
+        // Admin-only pricing: managers omit these so the stored price is preserved.
+        ...(role === 'admin' ? { base_price: Number(editForm.base_price) || 0, pricing_type: editForm.pricing_type } : {}),
       });
       setShowEditModal(false);
       toast.success('Equipment updated');
@@ -265,6 +269,19 @@ export function EquipmentDetailPage() {
               <Input label="Brand" value={editForm.brand} onChange={(e) => setEdit('brand', e.target.value)} />
               <Input label="Model" value={editForm.model} onChange={(e) => setEdit('model', e.target.value)} />
               <Input label="Quantity" type="number" value={editForm.quantity} onChange={(e) => setEdit('quantity', e.target.value)} />
+              {role === 'admin' && (
+                <>
+                  <Input label="Price (₱)" type="number" min={0} step="0.01" value={editForm.base_price} onChange={(e) => setEdit('base_price', e.target.value === '' ? '' : parseFloat(e.target.value))} placeholder="0.00" />
+                  <div>
+                    <label className="block text-xs font-medium text-surface-400 mb-1">Pricing Type</label>
+                    <select value={editForm.pricing_type} onChange={(e) => setEdit('pricing_type', e.target.value)} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100">
+                      <option value="per_day">Per Day</option>
+                      <option value="per_project">Per Project</option>
+                      <option value="package_rate">Package Rate</option>
+                    </select>
+                  </div>
+                </>
+              )}
             </div>
             <Input label="Description" value={editForm.description} onChange={(e) => setEdit('description', e.target.value)} />
             <Input label="Notes" value={editForm.notes} onChange={(e) => setEdit('notes', e.target.value)} />

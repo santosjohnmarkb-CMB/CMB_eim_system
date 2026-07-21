@@ -10,6 +10,7 @@ import { EquipmentDashboardPage } from './pages/EquipmentDashboardPage';
 import { EquipmentListPage } from './pages/EquipmentListPage';
 import { EquipmentAddPage } from './pages/EquipmentAddPage';
 import { EquipmentDetailPage } from './pages/EquipmentDetailPage';
+import { PackagesPage } from './pages/PackagesPage';
 import { MaintenanceQueuePage } from './pages/MaintenanceQueuePage';
 import { MaintenanceNewPage } from './pages/MaintenanceNewPage';
 import { MaintenanceDetailPage } from './pages/MaintenanceDetailPage';
@@ -112,6 +113,7 @@ export default function App() {
                   <Route path="/equipment/use-count" element={<EquipmentUseCountPage />} />
                   <Route path="/equipment/:dept" element={<DepartmentGuard><EquipmentListPage /></DepartmentGuard>} />
                   <Route path="/equipment/detail/:id" element={<EquipmentDetailPage />} />
+                  <Route path="/packages" element={<RoleGuard roles={['equipment_manager']}><PackagesPage /></RoleGuard>} />
                   <Route path="/vendors" element={<VendorsPage />} />
                   <Route path="/loans" element={<LoansPage />} />
                   <Route path="/loans/new" element={<RoleGuard roles={['equipment_manager']}><LoanNewPage /></RoleGuard>} />

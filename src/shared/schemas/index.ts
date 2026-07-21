@@ -97,6 +97,29 @@ export const AssetStatusUpdateSchema = z.object({
   reason: z.string().max(2000).default(''),
 });
 
+// ── Packages ──
+// A single component line in a package. `equipment_id` must reference an existing
+// equipment item; qty defaults to 1 and required defaults to true.
+export const PackageComponentSchema = z.object({
+  equipment_id: z.string().uuid(),
+  qty: z.number().int().min(1).max(9999).default(1),
+  is_required: z.boolean().default(true),
+});
+
+// Create/update a package. `package_cost` is the headline price applied to the
+// package's main equipment item — only admins may actually change it (enforced in
+// the handler); managers may still create/edit the package's composition.
+export const PackageCreateSchema = z.object({
+  main_item_id: z.string().uuid(),
+  name: z.string().min(1).max(200),
+  description: z.string().max(2000).default(''),
+  package_cost: z.number().min(0).max(9999999).default(0),
+  components: z.array(PackageComponentSchema).default([]),
+});
+
+// Update shares the create shape (the id is a separate handler argument).
+export const PackageUpdateSchema = PackageCreateSchema;
+
 // ── Maintenance ──
 export const MaintenanceTicketCreateSchema = z.object({
   equipment_id: z.string().uuid(),
@@ -338,6 +361,9 @@ export type EquipmentCreateInput = z.infer<typeof EquipmentCreateSchema>;
 export type EquipmentUpdateInput = z.infer<typeof EquipmentUpdateSchema>;
 export type AssetUpdateInput = z.infer<typeof AssetUpdateSchema>;
 export type AssetStatusUpdateInput = z.infer<typeof AssetStatusUpdateSchema>;
+export type PackageComponentInput = z.infer<typeof PackageComponentSchema>;
+export type PackageCreateInput = z.infer<typeof PackageCreateSchema>;
+export type PackageUpdateInput = z.infer<typeof PackageUpdateSchema>;
 export type MaintenanceTicketCreateInput = z.infer<typeof MaintenanceTicketCreateSchema>;
 export type MaintenanceTicketUpdateInput = z.infer<typeof MaintenanceTicketUpdateSchema>;
 export type MaintenanceNoteInput = z.infer<typeof MaintenanceNoteSchema>;

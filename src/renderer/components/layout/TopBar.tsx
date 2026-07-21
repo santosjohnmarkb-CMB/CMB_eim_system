@@ -7,6 +7,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/equipment': 'Equipment Catalog',
   '/equipment/new': 'Add Equipment',
+  '/packages': 'Packages',
   '/maintenance': 'Maintenance Queue',
   '/maintenance/new': 'New Repair Ticket',
   '/parts': 'Parts Inventory',
