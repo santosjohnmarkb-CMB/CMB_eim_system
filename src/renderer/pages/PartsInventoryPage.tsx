@@ -5,7 +5,6 @@ import { usePartsStore } from '../stores/parts.store';
 import { Button } from '../components/common/Button';
 import { SearchBox } from '../components/common/SearchBox';
 import { DataTable, type Column } from '../components/common/DataTable';
-import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
 import { Input } from '../components/common/Input';
 import { useToast } from '../hooks';

@@ -53,11 +53,21 @@ export function registerPackageHandlers(): void {
 
   // Hydrate main_item + items on a package row so the edit form can pre-fill the
   // "Main Equipment" picker and component list without extra round trips.
+  //
+  // Returns a NEW object instead of mutating the input. The raw `pkg` row is
+  // handed to a fire-and-forget `pushCatalogToCloud` in create/update, and the
+  // cloud upsert serializes that same reference on a later tick. If we mutated
+  // it here we'd inject non-column fields (`main_item`, `items`) into the
+  // payload, Supabase would reject the row ("column ... does not exist"), and it
+  // would dead-letter in the offline queue — silently breaking catalog sync for
+  // every new/edited package.
   const hydratePackage = (pkg: any) => {
     if (!pkg) return pkg;
-    pkg.main_item = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(pkg.main_item_id);
-    pkg.items = loadPackageItems(pkg.id);
-    return pkg;
+    return {
+      ...pkg,
+      main_item: db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(pkg.main_item_id),
+      items: loadPackageItems(pkg.id),
+    };
   };
 
   // The department a package belongs to, derived from its main item's category.
@@ -105,6 +115,22 @@ export function registerPackageHandlers(): void {
     const user = requireInventoryAccess(event);
     const input = PackageCreateSchema.parse(data);
     assertEquipmentInDepartment(db, event, input.main_item_id);
+
+    // Each equipment item can back only ONE active package. Both the rental
+    // picker and equipment search surface a package through its main item, so a
+    // second active package on the same item collapses to one ambiguous row and
+    // is effectively invisible. Block it at the source.
+    const mainItemInUse: any = db
+      .prepare(
+        'SELECT id, name FROM package_definitions WHERE main_item_id = ? AND is_active = 1',
+      )
+      .get(input.main_item_id);
+    if (mainItemInUse) {
+      throw new Error(
+        `That equipment item already backs the active package "${mainItemInUse.name}". Pick a different main item, or edit the existing package.`,
+      );
+    }
+
     const isPricingAdmin = user.role === 'admin';
 
     const pkgId = uuidv4();
@@ -165,6 +191,20 @@ export function registerPackageHandlers(): void {
     const current: any = db.prepare('SELECT main_item_id FROM package_definitions WHERE id = ?').get(id);
     if (current) assertEquipmentInDepartment(db, event, current.main_item_id);
     assertEquipmentInDepartment(db, event, input.main_item_id);
+
+    // One active package per main item (see create handler). Allow this package
+    // to keep its own main item, but block pointing it at an item that already
+    // backs a different active package.
+    const mainItemConflict: any = db
+      .prepare(
+        'SELECT id, name FROM package_definitions WHERE main_item_id = ? AND is_active = 1 AND id != ?',
+      )
+      .get(input.main_item_id, id);
+    if (mainItemConflict) {
+      throw new Error(
+        `That equipment item already backs the active package "${mainItemConflict.name}". Pick a different main item.`,
+      );
+    }
 
     const isPricingAdmin = user.role === 'admin';
     const now = new Date().toISOString();
@@ -371,6 +411,19 @@ export function registerPackageHandlers(): void {
           .get(pkgName);
         if (existingPkg) {
           errors.push({ row: group.firstRow, message: `Package "${pkgName}" already exists` });
+          continue;
+        }
+
+        // One active package per main item (see the create handler) — otherwise
+        // the package is invisible in the rental picker / equipment search.
+        const mainItemInUse: any = db
+          .prepare('SELECT name FROM package_definitions WHERE main_item_id = ? AND is_active = 1')
+          .get(mainEquip.id);
+        if (mainItemInUse) {
+          errors.push({
+            row: group.firstRow,
+            message: `Main equipment "${group.mainCode}" already backs active package "${mainItemInUse.name}"`,
+          });
           continue;
         }
 

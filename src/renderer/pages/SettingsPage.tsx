@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSyncStore } from '../stores/sync.store';
 import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
@@ -108,28 +108,28 @@ export function SettingsPage() {
     return () => ipcRemoveListener('sync:dataChanged', handler);
   }, []);
 
-  const loadGdrive = async () => {
+  const loadGdrive = useCallback(async () => {
     try {
       const cfg = await ipcInvoke<GDriveConfig | null>('gdrive:config:get');
       setGdrive(cfg);
       setGdriveClientId(cfg?.client_id || '');
       setGdriveFolderId(cfg?.folder_id || '');
     } catch { /* ignore */ }
-  };
+  }, []);
 
-  useEffect(() => { loadGdrive(); }, []);
+  useEffect(() => { loadGdrive(); }, [loadGdrive]);
 
-  const loadServiceStatus = async () => {
+  const loadServiceStatus = useCallback(async () => {
     try {
       const s = await ipcInvoke<ServiceAccountStatus>('sync:serviceAccount:status');
       setSvcStatus(s);
       setSvcEmail(s?.email || '');
     } catch { /* ignore */ }
-  };
+  }, []);
 
-  useEffect(() => { loadServiceStatus(); }, []);
+  useEffect(() => { loadServiceStatus(); }, [loadServiceStatus]);
 
-  const loadAudit = async () => {
+  const loadAudit = useCallback(async () => {
     setLoadingAudit(true);
     try {
       const [rows, actions] = await Promise.all([
@@ -140,9 +140,9 @@ export function SettingsPage() {
       setAuditActions(actions || []);
     } catch { /* ignore */ }
     setLoadingAudit(false);
-  };
+  }, [auditFilter]);
 
-  useEffect(() => { loadAudit(); }, [auditFilter]);
+  useEffect(() => { loadAudit(); }, [loadAudit]);
 
   const handleSaveService = async () => {
     if (!svcEmail.trim() || !svcPassword) { toast.error('Enter the service-account email and password'); return; }

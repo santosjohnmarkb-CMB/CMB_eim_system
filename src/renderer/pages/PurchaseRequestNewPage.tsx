@@ -7,13 +7,13 @@ import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
 import { useToast } from '../hooks';
 import { printPurchaseRequestForm } from '../lib/purchaseForms';
+import { PurchaseRequestItemsEditor } from '../components/purchase/PurchaseRequestItemsEditor';
 import {
-  PurchaseRequestItemsEditor,
   makeEmptyPRItem,
   toItemsPayload,
   validatePRItems,
   type PRItemForm,
-} from '../components/purchase/PurchaseRequestItemsEditor';
+} from '../components/purchase/purchase-request-items';
 import { DEPARTMENT_CONFIG } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 

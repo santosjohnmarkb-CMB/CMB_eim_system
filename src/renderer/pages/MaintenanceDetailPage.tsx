@@ -34,8 +34,6 @@ const OUTCOME_OPTIONS: Record<'repair' | 'loss', CompletionOutcome[]> = {
 
 const PIPELINE = ['REPORTED', 'ASSESSED', 'IN_PROGRESS', 'COMPLETED'] as const;
 
-const MAINTENANCE_TYPE_OPTIONS = ['routine_maintenance', 'update', 'repair'] as const;
-
 const MAINTENANCE_TYPE_LABELS: Record<string, string> = {
   routine_maintenance: 'Routine Maintenance',
   update: 'Update',
@@ -418,13 +416,6 @@ export function MaintenanceDetailPage() {
       toast.error(err?.message || 'Failed to save the release form to the cloud');
     }
     setSavingRelease(false);
-  };
-
-  const handleSelectChange = async (field: string, value: string) => {
-    try {
-      await update(ticket.id, { [field]: value });
-      setTicket((prev) => prev ? { ...prev, [field]: value } : prev);
-    } catch (err: any) { toast.error(err.message); }
   };
 
   const handleAddNote = async () => {

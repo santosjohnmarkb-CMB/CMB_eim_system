@@ -15,9 +15,6 @@ const EIM_TABLES = [
   'parts_catalog', 'parts_inventory', 'parts_transactions',
   'parts_compatibility', 'preventive_schedules', 'vendors',
 ] as const;
-
-type EimTable = typeof EIM_TABLES[number];
-
 // Parent → child relationships. The cloud enforces these with ON DELETE CASCADE
 // foreign keys; we mirror that locally when a parent tombstone is applied so an
 // orphaned child on another machine can't be re-pushed after its parent is gone.

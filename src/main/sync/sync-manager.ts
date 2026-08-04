@@ -1,6 +1,5 @@
 import { BrowserWindow } from 'electron';
 import { loadSyncConfig, initSupabase, getSupabase, disconnectSupabase, saveSyncConfig, authenticateClient } from './supabase';
-import { cloudService } from './cloud-service';
 import { offlineQueue } from './offline-queue';
 import { syncCatalogWithCloud, applyCatalogRealtimeChange } from './catalog-sync';
 import { syncOperationalWithCloud, applyOperationalRealtimeChange } from './operational-sync';

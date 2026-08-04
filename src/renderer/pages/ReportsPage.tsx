@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { BarChart3, Wrench, Box, TrendingUp, FileSpreadsheet, FileText } from 'lucide-react';
 import { ipcInvoke } from '../lib/ipc';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
@@ -16,7 +16,7 @@ export function ReportsPage() {
   const activeDepartment = useDepartmentStore((s) => s.activeDepartment);
   const addToast = useUiStore((s) => s.addToast);
 
-  const loadReport = async (type: ReportType) => {
+  const loadReport = useCallback(async (type: ReportType) => {
     setLoading(true);
     setActiveReport(type);
     try {
@@ -25,9 +25,9 @@ export function ReportsPage() {
       setData(result);
     } catch { setData(null); }
     setLoading(false);
-  };
+  }, [activeDepartment]);
 
-  useEffect(() => { loadReport('fleet'); }, [activeDepartment]);
+  useEffect(() => { loadReport('fleet'); }, [loadReport]);
 
   const handleExport = async (format: 'xlsx' | 'pdf') => {
     setExporting(format);

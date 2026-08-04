@@ -10,13 +10,13 @@ import { Modal } from '../components/common/Modal';
 import { DocumentUpload } from '../components/common/DocumentUpload';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { useToast } from '../hooks';
+import { PurchaseRequestItemsEditor } from '../components/purchase/PurchaseRequestItemsEditor';
 import {
-  PurchaseRequestItemsEditor,
   prItemFromRecord,
   toItemsPayload,
   validatePRItems,
   type PRItemForm,
-} from '../components/purchase/PurchaseRequestItemsEditor';
+} from '../components/purchase/purchase-request-items';
 import { DEPARTMENT_CONFIG, PURCHASE_REQUEST_STATUS_CONFIG, REQUEST_TYPE_CONFIG } from '../../shared/constants';
 import { printPurchaseRequestForm } from '../lib/purchaseForms';
 import type { PurchaseRequest, PurchaseRequestItem } from '../../shared/types';
