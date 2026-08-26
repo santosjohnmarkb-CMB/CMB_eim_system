@@ -7,6 +7,7 @@ import type { Department } from '../../shared/constants';
 export function useDepartmentFilter() {
   const activeDepartment = useDepartmentStore((s) => s.activeDepartment);
   const categories = useEquipmentStore((s) => s.categories);
+  const departments = useEquipmentStore((s) => s.departments);
 
   const departmentCategoryNames = useMemo(() => {
     if (!activeDepartment) return null;
@@ -16,8 +17,9 @@ export function useDepartmentFilter() {
   const departmentCategoryIds = useMemo(() => {
     if (!departmentCategoryNames) return null;
     const nameSet = new Set(departmentCategoryNames);
-    return new Set(categories.filter((c) => nameSet.has(c.name)).map((c) => c.id));
-  }, [departmentCategoryNames, categories]);
+    const deptIds = new Set(departments.filter((d) => nameSet.has(d.name)).map((d) => d.id));
+    return new Set(categories.filter((c) => deptIds.has(c.department_id)).map((c) => c.id));
+  }, [departmentCategoryNames, categories, departments]);
 
   const isEquipmentInDepartment = useMemo(() => {
     if (!departmentCategoryIds) return () => true;

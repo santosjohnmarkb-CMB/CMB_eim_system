@@ -1,6 +1,7 @@
 import { getSupabase } from './supabase';
 
 type TableName =
+  | 'departments'
   | 'categories'
   | 'subcategories'
   | 'equipment_items'

@@ -35,14 +35,13 @@ export const UserUpdateSchema = z.object({
 // ── Equipment ──
 export const EquipmentCreateSchema = z.object({
   name: z.string().min(1).max(200),
-  display_name: z.string().min(1).max(200),
+  department_id: z.string().uuid(),
   category_id: z.string().uuid(),
-  subcategory_id: z.string().uuid(),
+  subcategory_id: z.string().uuid().nullable().optional(),
   sub_subcategory: z.string().max(100).nullable().optional(),
   item_type: z.enum(['standalone', 'package_main', 'package_component', 'add_on']).default('standalone'),
   brand: z.string().max(100).default(''),
   model: z.string().max(100).default(''),
-  description: z.string().max(2000).default(''),
   pricing_type: z.enum(['per_day', 'per_project', 'package_rate']).default('per_day'),
   base_price: z.number().min(0).max(9999999).default(0),
   notes: z.string().max(2000).nullable().optional(),
@@ -68,14 +67,13 @@ export const EquipmentCreateSchema = z.object({
 // remains the source of truth for which columns are written.
 export const EquipmentUpdateSchema = z.object({
   name: z.string().min(1).max(200).optional(),
-  display_name: z.string().min(1).max(200).optional(),
+  department_id: z.string().uuid().optional(),
   category_id: z.string().uuid().optional(),
-  subcategory_id: z.string().uuid().optional(),
+  subcategory_id: z.string().uuid().nullable().optional(),
   sub_subcategory: z.string().max(100).nullable().optional(),
   item_type: z.enum(['standalone', 'package_main', 'package_component', 'add_on']).optional(),
   brand: z.string().max(100).optional(),
   model: z.string().max(100).optional(),
-  description: z.string().max(2000).optional(),
   pricing_type: z.enum(['per_day', 'per_project', 'package_rate']).optional(),
   base_price: z.number().min(0).max(9999999).optional(),
   notes: z.string().max(2000).nullable().optional(),

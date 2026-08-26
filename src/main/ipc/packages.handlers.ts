@@ -488,7 +488,7 @@ export function registerPackageHandlers(): void {
 
     const equipment: any[] = db
       .prepare(
-        'SELECT equipment_code, name, display_name FROM equipment_items WHERE is_active = 1 ORDER BY equipment_code',
+        'SELECT equipment_code, name FROM equipment_items WHERE is_active = 1 ORDER BY equipment_code',
       )
       .all();
 
@@ -541,7 +541,7 @@ export function registerPackageHandlers(): void {
     refSheet.columns = [
       { header: 'equipment_code', key: 'equipment_code', width: 20 },
       { header: 'name', key: 'name', width: 35 },
-      { header: 'display_name', key: 'display_name', width: 40 },
+      { header: 'name', key: 'name', width: 40 },
     ];
     const refHeader = refSheet.getRow(1);
     refHeader.eachCell((cell) => {
@@ -553,7 +553,7 @@ export function registerPackageHandlers(): void {
       refSheet.addRow({
         equipment_code: eq.equipment_code,
         name: eq.name,
-        display_name: eq.display_name,
+        name: eq.name,
       });
     }
 

@@ -1,15 +1,17 @@
 import { create } from 'zustand';
 import { ipcInvoke } from '../lib/ipc';
 import { reportLoadError } from '../lib/notify';
-import type { EquipmentWithAsset, Category, Subcategory, DashboardStats, AssetStatusLogEntry } from '../../shared/types';
+import type { EquipmentWithAsset, Category, Subcategory, Department as CatalogDepartment, DashboardStats, AssetStatusLogEntry } from '../../shared/types';
 
 interface EquipmentState {
   items: EquipmentWithAsset[];
+  departments: CatalogDepartment[];
   categories: Category[];
   subcategories: Subcategory[];
   loading: boolean;
   dashboardStats: DashboardStats | null;
   fetchAll: () => Promise<void>;
+  fetchDepartments: () => Promise<void>;
   fetchCategories: () => Promise<void>;
   fetchSubcategories: () => Promise<void>;
   fetchDashboardStats: (categoryNames?: string[]) => Promise<void>;
@@ -27,6 +29,7 @@ interface EquipmentState {
 
 export const useEquipmentStore = create<EquipmentState>((set, get) => ({
   items: [],
+  departments: [],
   categories: [],
   subcategories: [],
   loading: false,
@@ -41,6 +44,13 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
       reportLoadError('equipment', err);
       set({ loading: false });
     }
+  },
+
+  fetchDepartments: async () => {
+    try {
+      const departments = await ipcInvoke<CatalogDepartment[]>('db:departments:getAll');
+      set({ departments });
+    } catch { /* ignore */ }
   },
 
   fetchCategories: async () => {

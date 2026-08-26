@@ -2,8 +2,18 @@
 // SHARED TYPES (compatible with Rental Request System)
 // ═══════════════════════════════════════════════════════════════════
 
+export interface Department {
+  id: string;
+  name: string;
+  display_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Category {
   id: string;
+  department_id: string;
   name: string;
   display_order: number;
   is_active: boolean;
@@ -28,14 +38,13 @@ export interface EquipmentItem {
   id: string;
   equipment_code: string;
   name: string;
-  display_name: string;
+  department_id: string;
   category_id: string;
-  subcategory_id: string;
+  subcategory_id: string | null;
   sub_subcategory: string | null;
   item_type: ItemType;
   brand: string;
   model: string;
-  description: string;
   pricing_type: PricingType;
   base_price: number;
   notes: string | null;
@@ -118,6 +127,7 @@ export interface EquipmentAsset {
 export interface EquipmentWithAsset extends EquipmentItem {
   asset?: EquipmentAsset;
   assets?: EquipmentAsset[];
+  department_name?: string;
   category_name?: string;
   subcategory_name?: string;
 }
@@ -461,6 +471,7 @@ export interface EquipmentUseCount {
   model: string;
   category_name: string;
   subcategory_name: string;
+  department_name?: string;
   use_count: number;
 }
 

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 
 const ALLOWED_CHANNELS = new Set([
+  'db:departments:getAll',
   'db:categories:getAll',
   'db:subcategories:getAll',
   'db:subcategories:getByCategory',

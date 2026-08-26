@@ -8,7 +8,7 @@ import { DataTable, type Column } from '../components/common/DataTable';
 import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
 import { EQUIPMENT_STATUS_CONFIG } from '../lib/constants';
-import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT } from '../../shared/constants';
+import { DEPARTMENT_CONFIG, opsDepartmentOf } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import type { EquipmentWithAsset, EquipmentStatus, BulkImportResult } from '../../shared/types';
 import { useAuthStore } from '../stores/auth.store';
@@ -18,9 +18,8 @@ import { printHtml, escapeHtml } from '../lib/print';
 // Columns the equipment CSV importer understands (see db:equipment:importCsv).
 // base_price is honored only for admins; a manager's import always lands at 0.
 const EQUIPMENT_CSV_HEADERS = [
-  'name', 'category', 'subcategory', 'display_name', 'sub_subcategory', 'brand', 'model',
-  'description', 'base_price', 'notes', 'serial_number', 'asset_tag', 'purchase_date',
-  'delivered_date', 'purchase_price', 'vendor_name', 'warranty_expiry',
+  'equipment_code', 'name', 'department', 'category', 'sub_category', 'sub_sub_category',
+  'item_type', 'brand', 'model', 'pricing_type', 'base_price', 'notes',
 ];
 
 const statusVariantMap: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'purple' | 'default'> = {
@@ -131,10 +130,10 @@ export function EquipmentListPage() {
   const deptItems = useMemo(() => {
     const visible = items.filter((i) => !isZeroPricedPackageComponent(i));
     if (!deptCategoryNames) return visible;
-    const catIdSet = new Set(
-      categories.filter((c) => deptCategoryNames.has(c.name)).map((c) => c.id)
-    );
-    return visible.filter((i) => catIdSet.has(i.category_id));
+    return visible.filter((i) => {
+      const ops = opsDepartmentOf(i.department_name, i.category_name);
+      return department ? ops === department : true;
+    });
   }, [items, categories, deptCategoryNames]);
 
   const usedCategoryIds = useMemo(() => new Set(deptItems.map((i) => i.category_id)), [deptItems]);
@@ -204,7 +203,7 @@ export function EquipmentListPage() {
   const buildPrintSection = (d: Department) => {
     // Respect the active page filters so the printout matches what's visible on screen.
     const list = items
-      .filter((i) => i.category_name && CATEGORY_TO_DEPARTMENT[i.category_name] === d && matchesFilters(i))
+      .filter((i) => opsDepartmentOf(i.department_name, i.category_name) === d && matchesFilters(i))
       .map((item, index) => ({ item, index }))
       .sort((a, b) => defaultGroupRank(a.item, d) - defaultGroupRank(b.item, d) || a.index - b.index)
       .map((x) => x.item);
@@ -280,10 +279,9 @@ export function EquipmentListPage() {
   // base_price is only pre-filled for admins (managers can't set prices).
   const handleDownloadTemplate = () => {
     const sample: Record<string, string> = {
-      name: 'Sample Camera', category: 'Camera', subcategory: 'Camera Body',
-      display_name: 'Sample Camera Body', sub_subcategory: '', brand: 'ARRI', model: 'Alexa Mini',
-      description: '', base_price: isAdmin ? '15000' : '', notes: '', serial_number: 'SN-001',
-      asset_tag: '', purchase_date: '', delivered_date: '', purchase_price: '', vendor_name: '', warranty_expiry: '',
+      name: 'ARRI Alexa Mini LF', department: 'Camera', category: 'Camera Body',
+      sub_category: '4K', sub_sub_category: '', item_type: 'standalone', brand: 'ARRI', model: 'Alexa Mini LF',
+      pricing_type: 'per_day', base_price: isAdmin ? '15000' : '', notes: '', equipment_code: 'CAM-001',
     };
     const csv = EQUIPMENT_CSV_HEADERS.join(',') + '\n' + EQUIPMENT_CSV_HEADERS.map((h) => sample[h] ?? '').join(',') + '\n';
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });

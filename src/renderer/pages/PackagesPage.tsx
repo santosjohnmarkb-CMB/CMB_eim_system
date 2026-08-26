@@ -277,7 +277,7 @@ function PackageCard({ pkg, canManage, onEdit, onDelete }: {
             <tbody className="divide-y divide-surface-800/40">
               {pkg.items.map((pkgItem) => (
                 <tr key={pkgItem.id} className="text-sm">
-                  <td className="py-2.5 text-surface-200">{pkgItem.component?.display_name || pkgItem.component?.name || '—'}</td>
+                  <td className="py-2.5 text-surface-200">{pkgItem.component?.name || '—'}</td>
                   <td className="py-2.5 text-surface-400">{pkgItem.component?.brand || '—'}</td>
                   <td className="py-2.5 text-center tabular-nums text-surface-300">{pkgItem.included_qty}</td>
                   <td className="py-2.5 text-center">
@@ -389,7 +389,7 @@ function PackageForm({ onSubmit, onCancel, initial, submitLabel = 'Create Packag
         <label className={labelClass}>Main Equipment *</label>
         {mainItem ? (
           <div className="flex items-center gap-2 bg-surface-800 border border-surface-700 rounded-lg h-9 px-3">
-            <span className="text-sm text-surface-200 truncate flex-1">{mainItem.display_name || mainItem.name}</span>
+            <span className="text-sm text-surface-200 truncate flex-1">{mainItem.name}</span>
             <span className="text-xs text-surface-500">{mainItem.brand}</span>
             {isAdmin && <span className="text-xs font-semibold text-primary-400">{formatCurrency(mainItem.base_price)}</span>}
             <button type="button" onClick={() => setMainItem(null)} className="ml-1 p-0.5 rounded text-surface-500 hover:text-surface-300">
@@ -443,7 +443,7 @@ function PackageForm({ onSubmit, onCancel, initial, submitLabel = 'Create Packag
             {lines.filter((l) => l.equipment).map((line) => (
               <div key={line.id} className="grid grid-cols-[1fr_70px_80px_36px] gap-2 items-center">
                 <div className="flex items-center gap-2 bg-surface-800 border border-surface-700 rounded-lg h-9 px-3">
-                  <span className="text-sm text-surface-200 truncate flex-1">{line.equipment!.display_name || line.equipment!.name}</span>
+                  <span className="text-sm text-surface-200 truncate flex-1">{line.equipment!.name}</span>
                   <span className="text-xs text-surface-500">{line.equipment!.brand}</span>
                 </div>
                 <input type="number" min={1} value={line.qty}
@@ -470,6 +470,15 @@ function PackageForm({ onSubmit, onCancel, initial, submitLabel = 'Create Packag
         </button>
       </div>
 
+      {lines.some((l) => l.equipment) && (
+        <div className="rounded-lg border border-surface-700 bg-surface-800/40 px-3 py-2">
+          <p className="text-[10px] font-semibold text-surface-500 uppercase tracking-wider mb-1">Includes preview</p>
+          <p className="text-sm text-surface-200">
+            {lines.filter((l) => l.equipment).map((l) => (l.qty > 1 ? `${l.qty}× ${l.equipment!.name}` : l.equipment!.name)).join(' · ')}
+          </p>
+        </div>
+      )}
+
       <div className="flex justify-end gap-3 pt-3 border-t border-surface-800/80">
         <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
         <Button type="submit" loading={isSubmitting}>{submitLabel}</Button>
@@ -484,7 +493,7 @@ function PackageForm({ onSubmit, onCancel, initial, submitLabel = 'Create Packag
             const first = items[0];
             if (first) {
               setMainItem(first.equipment);
-              if (!name) setName(first.equipment.display_name || first.equipment.name);
+              if (!name) setName(first.equipment.name);
               if (isAdmin && !packageCost && (first.equipment.base_price ?? 0) > 0) setPackageCost(String(first.equipment.base_price));
             }
             setMainPickerOpen(false);
@@ -533,7 +542,7 @@ function EquipmentPickerModal({ title, multi, excludeIds, onConfirm, onClose }: 
     const q = search.trim().toLowerCase();
     return items
       .filter((i) => !excludeIds.has(i.id))
-      .filter((i) => !q || i.name.toLowerCase().includes(q) || (i.display_name || '').toLowerCase().includes(q)
+      .filter((i) => !q || i.name.toLowerCase().includes(q)
         || (i.equipment_code || '').toLowerCase().includes(q) || (i.brand || '').toLowerCase().includes(q));
   }, [items, excludeIds, search]);
 
@@ -583,7 +592,7 @@ function EquipmentPickerModal({ title, multi, excludeIds, onConfirm, onClose }: 
                   {isSel && <div className="h-2 w-2 rounded-sm bg-white" />}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm text-surface-100 truncate">{item.display_name || item.name}</p>
+                  <p className="text-sm text-surface-100 truncate">{item.name}</p>
                   <p className="text-xs text-surface-500 truncate">{[item.equipment_code, item.brand, item.model].filter(Boolean).join(' · ')}</p>
                 </div>
                 {multi && isSel && (

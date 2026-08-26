@@ -95,68 +95,13 @@ function warnIfDefaultAdminPassword(): void {
 }
 
 function seedDataIfEmpty(): void {
-  const categoryCount = db.prepare('SELECT COUNT(*) as count FROM categories').get();
   const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get();
-  if (categoryCount.count > 0 || userCount.count > 0) return;
+  if (userCount.count > 0) return;
 
-  const insertCategory = db.prepare(
-    'INSERT INTO categories (id, name, display_order, is_active) VALUES (?, ?, ?, 1)'
-  );
-  const insertSubcategory = db.prepare(
-    'INSERT INTO subcategories (id, category_id, name, display_order, is_active) VALUES (?, ?, ?, ?, 1)'
-  );
   const insertUser = db.prepare(
     'INSERT INTO users (id, username, password_hash, full_name, email, role, is_active) VALUES (?, ?, ?, ?, ?, ?, 1)'
   );
-
-  const seed = db.transaction(() => {
-    const catCamera = uuidv4();
-    const catDollies = uuidv4();
-    const catLightsGrips = uuidv4();
-    const catPowerTransport = uuidv4();
-    const catSpecial = uuidv4();
-
-    insertCategory.run(catCamera, 'Camera', 1);
-    insertCategory.run(catDollies, 'Dollies Mounts & Cranes', 2);
-    insertCategory.run(catLightsGrips, 'Lights and Grips', 3);
-    insertCategory.run(catPowerTransport, 'Power & Transport', 4);
-    insertCategory.run(catSpecial, 'Special Equipment', 5);
-
-    // Camera subcategories
-    insertSubcategory.run(uuidv4(), catCamera, 'Camera Body', 1);
-    insertSubcategory.run(uuidv4(), catCamera, 'Camera Support', 2);
-    insertSubcategory.run(uuidv4(), catCamera, 'Filters', 3);
-    insertSubcategory.run(uuidv4(), catCamera, 'Lens', 4);
-    insertSubcategory.run(uuidv4(), catCamera, 'Special Rig', 5);
-    insertSubcategory.run(uuidv4(), catCamera, 'Video Peripherals', 6);
-    insertSubcategory.run(uuidv4(), catCamera, 'Camera Package Components', 7);
-    insertSubcategory.run(uuidv4(), catCamera, 'Cables', 8);
-    insertSubcategory.run(uuidv4(), catCamera, 'Power Supply & Battery', 9);
-
-    // Lights and Grips subcategories
-    insertSubcategory.run(uuidv4(), catLightsGrips, 'Grip', 1);
-    insertSubcategory.run(uuidv4(), catLightsGrips, 'Lighting', 2);
-
-    // Dollies subcategories
-    insertSubcategory.run(uuidv4(), catDollies, 'Crane', 1);
-    insertSubcategory.run(uuidv4(), catDollies, 'Dolly', 2);
-    insertSubcategory.run(uuidv4(), catDollies, 'Motorized Dolly', 3);
-    insertSubcategory.run(uuidv4(), catDollies, 'Mounts', 4);
-    insertSubcategory.run(uuidv4(), catDollies, 'Tracks', 5);
-    insertSubcategory.run(uuidv4(), catDollies, 'Slider/Table Top Dolly', 6);
-
-    // Power & Transport subcategories
-    insertSubcategory.run(uuidv4(), catPowerTransport, 'Power', 1);
-    insertSubcategory.run(uuidv4(), catPowerTransport, 'Transport', 2);
-
-    // Special Equipment subcategories
-    insertSubcategory.run(uuidv4(), catSpecial, 'SFX & Others', 1);
-
-    // Admin user
-    insertUser.run(uuidv4(), 'admin', hashPassword('admin123'), 'System Administrator', 'admin@cmbfilmservices.com', 'admin');
-  });
-
-  seed();
+  insertUser.run(uuidv4(), 'admin', hashPassword('admin123'), 'System Administrator', 'admin@cmbfilmservices.com', 'admin');
 }
 
 function ensureAdminRecoverable(): void {

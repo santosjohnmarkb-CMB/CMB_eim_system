@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Camera, Lightbulb, ArrowLeft, BarChart3, Search } from 'lucide-react';
-import { DEPARTMENT_CONFIG, USE_COUNT_SUBCATEGORIES, CATEGORY_TO_DEPARTMENT } from '../../shared/constants';
+import { DEPARTMENT_CONFIG, USE_COUNT_SUBCATEGORIES, opsDepartmentOf } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { ipcInvoke } from '../lib/ipc';
@@ -59,7 +59,7 @@ export function EquipmentUseCountPage() {
         c.equipment_code.toLowerCase().includes(q) ||
         (c.brand || '').toLowerCase().includes(q)
       )) continue;
-      const dept = CATEGORY_TO_DEPARTMENT[c.category_name];
+      const dept = opsDepartmentOf((c as any).department_name, c.category_name);
       if (dept) result[dept].push(c);
     }
     return result;
@@ -108,7 +108,7 @@ export function EquipmentUseCountPage() {
           const preferredOrder = subGroups.flatMap((g) => g.subcategoryNames);
           const itemsBySubcategory = new Map<string, EquipmentUseCount[]>();
           for (const c of deptCounts) {
-            const key = c.subcategory_name || OTHER_GROUP_LABEL;
+            const key = c.category_name || c.subcategory_name || OTHER_GROUP_LABEL;
             const existing = itemsBySubcategory.get(key);
             if (existing) existing.push(c);
             else itemsBySubcategory.set(key, [c]);

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { EQUIPMENT_HIERARCHY } from '../../shared/constants';
 
 interface Migration {
   id: string;
@@ -654,6 +655,194 @@ const MIGRATIONS: Migration[] = [
           );
         `);
       }
+    },
+  },
+  {
+    id: '024_equipment_departments',
+    up: (db: any) => {
+      const seedHierarchy = () => {
+        const insertCat = db.prepare(
+          `INSERT INTO categories (id, department_id, name, display_order, is_active) VALUES (?, ?, ?, ?, 1)`
+        );
+        const findDept = db.prepare('SELECT id FROM departments WHERE name = ? LIMIT 1');
+        const findCat = db.prepare('SELECT id FROM categories WHERE department_id = ? AND name = ? LIMIT 1');
+        const findSub = db.prepare('SELECT id FROM subcategories WHERE category_id = ? AND name = ? LIMIT 1');
+        const insertSubFinal = db.prepare(
+          `INSERT INTO subcategories (id, category_id, name, display_order, is_active) VALUES (?, ?, ?, ?, 1)`
+        );
+        const insertDept = db.prepare(
+          `INSERT INTO departments (id, name, display_order, is_active) VALUES (?, ?, ?, 1)`
+        );
+
+        let deptOrder = 0;
+        for (const [deptName, catMap] of Object.entries(EQUIPMENT_HIERARCHY)) {
+          deptOrder += 1;
+          let dept = findDept.get(deptName) as { id: string } | undefined;
+          if (!dept) {
+            const id = randomUUID();
+            insertDept.run(id, deptName, deptOrder);
+            dept = { id };
+          }
+          let catOrder = 0;
+          for (const [catName, subNames] of Object.entries(catMap)) {
+            catOrder += 1;
+            let cat = findCat.get(dept.id, catName) as { id: string } | undefined;
+            if (!cat) {
+              const id = randomUUID();
+              insertCat.run(id, dept.id, catName, catOrder);
+              cat = { id };
+            }
+            let subOrder = 0;
+            for (const subName of subNames) {
+              subOrder += 1;
+              const existing = findSub.get(cat.id, subName);
+              if (!existing) insertSubFinal.run(randomUUID(), cat.id, subName, subOrder);
+            }
+          }
+        }
+      };
+
+      if (tableExists(db, 'departments') && columnExists(db, 'equipment_items', 'department_id')) {
+        seedHierarchy();
+        return;
+      }
+      if (!tableExists(db, 'categories') || !tableExists(db, 'equipment_items')) return;
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS departments (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          display_order INTEGER NOT NULL DEFAULT 0,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      db.exec(`
+        INSERT INTO departments (id, name, display_order, is_active, created_at, updated_at)
+        SELECT id, name, display_order, is_active, created_at, updated_at FROM categories
+      `);
+
+      db.exec(`
+        CREATE TABLE categories_new (
+          id TEXT PRIMARY KEY,
+          department_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          display_order INTEGER NOT NULL DEFAULT 0,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      db.exec(`
+        INSERT INTO categories_new (id, department_id, name, display_order, is_active, created_at, updated_at)
+        SELECT id, category_id, name, display_order, is_active, created_at, updated_at FROM subcategories
+      `);
+
+      db.exec(`
+        CREATE TABLE subcategories_new (
+          id TEXT PRIMARY KEY,
+          category_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          display_order INTEGER NOT NULL DEFAULT 0,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+
+      const pairs: Array<{ category_id: string; name: string }> = db.prepare(
+        `SELECT DISTINCT subcategory_id AS category_id, TRIM(sub_subcategory) AS name
+         FROM equipment_items
+         WHERE sub_subcategory IS NOT NULL AND TRIM(sub_subcategory) <> ''`
+      ).all();
+      const insertSub = db.prepare(
+        `INSERT INTO subcategories_new (id, category_id, name, display_order, is_active) VALUES (?, ?, ?, ?, 1)`
+      );
+      const orderByCat: Record<string, number> = {};
+      const seenPair = new Set<string>();
+      for (const pair of pairs) {
+        const key = `${pair.category_id}::${pair.name}`;
+        if (seenPair.has(key)) continue;
+        seenPair.add(key);
+        orderByCat[pair.category_id] = (orderByCat[pair.category_id] || 0) + 1;
+        insertSub.run(randomUUID(), pair.category_id, pair.name, orderByCat[pair.category_id]);
+      }
+
+      const hasQty = columnExists(db, 'equipment_items', 'quantity');
+      const hasAvail = columnExists(db, 'equipment_items', 'available_qty');
+      const hasVersion = columnExists(db, 'equipment_items', 'version');
+      const hasDisplay = columnExists(db, 'equipment_items', 'display_name');
+
+      db.exec(`
+        CREATE TABLE equipment_items_new (
+          id TEXT PRIMARY KEY,
+          equipment_code TEXT UNIQUE NOT NULL,
+          name TEXT NOT NULL,
+          department_id TEXT NOT NULL,
+          category_id TEXT NOT NULL,
+          subcategory_id TEXT,
+          sub_subcategory TEXT,
+          item_type TEXT NOT NULL CHECK (item_type IN ('standalone', 'package_main', 'package_component', 'add_on')),
+          brand TEXT NOT NULL DEFAULT '',
+          model TEXT NOT NULL DEFAULT '',
+          pricing_type TEXT NOT NULL CHECK (pricing_type IN ('per_day', 'per_project', 'package_rate')),
+          base_price REAL NOT NULL DEFAULT 0,
+          notes TEXT,
+          quantity INTEGER NOT NULL DEFAULT 1,
+          available_qty INTEGER NOT NULL DEFAULT 1,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          version INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+
+      const nameExpr = hasDisplay
+        ? "CASE WHEN TRIM(COALESCE(ei.display_name, '')) <> '' THEN ei.display_name ELSE ei.name END"
+        : 'ei.name';
+      const qtyExpr = hasQty ? 'ei.quantity' : '1';
+      const availExpr = hasAvail ? 'ei.available_qty' : qtyExpr;
+      const versionExpr = hasVersion ? 'ei.version' : '1';
+
+      db.exec(`
+        INSERT INTO equipment_items_new (
+          id, equipment_code, name, department_id, category_id, subcategory_id, sub_subcategory,
+          item_type, brand, model, pricing_type, base_price, notes, quantity, available_qty,
+          is_active, version, created_at, updated_at
+        )
+        SELECT
+          ei.id, ei.equipment_code, ${nameExpr},
+          ei.category_id,
+          ei.subcategory_id,
+          sn.id,
+          '',
+          ei.item_type, ei.brand, ei.model, ei.pricing_type, ei.base_price, ei.notes,
+          ${qtyExpr}, ${availExpr},
+          ei.is_active, ${versionExpr}, ei.created_at, ei.updated_at
+        FROM equipment_items ei
+        INNER JOIN categories_new cn ON cn.id = ei.subcategory_id
+        LEFT JOIN subcategories_new sn
+          ON sn.category_id = ei.subcategory_id
+         AND sn.name = TRIM(COALESCE(ei.sub_subcategory, ''))
+      `);
+
+      db.exec('DROP TABLE equipment_items');
+      db.exec('ALTER TABLE equipment_items_new RENAME TO equipment_items');
+      db.exec('DROP TABLE subcategories');
+      db.exec('ALTER TABLE subcategories_new RENAME TO subcategories');
+      db.exec('DROP TABLE categories');
+      db.exec('ALTER TABLE categories_new RENAME TO categories');
+
+      db.exec('CREATE INDEX IF NOT EXISTS idx_equipment_department ON equipment_items(department_id)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_equipment_category ON equipment_items(category_id)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_equipment_subcategory ON equipment_items(subcategory_id)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_equipment_code ON equipment_items(equipment_code)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_equipment_active ON equipment_items(is_active)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_categories_department ON categories(department_id)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_subcategories_category ON subcategories(category_id)');
+
+      seedHierarchy();
     },
   },
 ];

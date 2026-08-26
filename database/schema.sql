@@ -11,8 +11,18 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 -- SHARED TABLES (compatible with Rental Request System)
 -- ═══════════════════════════════════════════════════════════════════
 
+CREATE TABLE IF NOT EXISTS departments (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS categories (
   id TEXT PRIMARY KEY,
+  department_id TEXT NOT NULL REFERENCES departments(id),
   name TEXT NOT NULL,
   display_order INTEGER NOT NULL DEFAULT 0,
   is_active INTEGER NOT NULL DEFAULT 1,
@@ -34,14 +44,13 @@ CREATE TABLE IF NOT EXISTS equipment_items (
   id TEXT PRIMARY KEY,
   equipment_code TEXT UNIQUE NOT NULL,
   name TEXT NOT NULL,
-  display_name TEXT NOT NULL,
+  department_id TEXT NOT NULL REFERENCES departments(id),
   category_id TEXT NOT NULL REFERENCES categories(id),
-  subcategory_id TEXT NOT NULL REFERENCES subcategories(id),
+  subcategory_id TEXT REFERENCES subcategories(id),
   sub_subcategory TEXT,
   item_type TEXT NOT NULL CHECK (item_type IN ('standalone', 'package_main', 'package_component', 'add_on')),
   brand TEXT NOT NULL DEFAULT '',
   model TEXT NOT NULL DEFAULT '',
-  description TEXT NOT NULL DEFAULT '',
   pricing_type TEXT NOT NULL CHECK (pricing_type IN ('per_day', 'per_project', 'package_rate')),
   base_price REAL NOT NULL DEFAULT 0,
   notes TEXT,

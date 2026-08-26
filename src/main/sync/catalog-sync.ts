@@ -5,7 +5,7 @@ import { offlineQueue } from './offline-queue';
 import { recordSchemaError } from './schema-health';
 import { EIM_RECOGNIZED_ROLES, isEimAppRole, normalizeEimRole } from '../../shared/constants';
 
-const CATALOG_TABLES = ['categories', 'subcategories', 'equipment_items', 'package_definitions', 'package_items', 'users'] as const;
+const CATALOG_TABLES = ['departments', 'categories', 'subcategories', 'equipment_items', 'package_definitions', 'package_items', 'users'] as const;
 
 type CatalogTable = typeof CATALOG_TABLES[number];
 
@@ -19,7 +19,14 @@ function coerceForSqlite(value: unknown): string | number | bigint | Buffer | nu
 }
 
 function upsertLocalRow(db: any, table: CatalogTable, row: Record<string, unknown>): void {
-  const keys = Object.keys(row);
+  const rec: Record<string, unknown> = { ...row };
+  if (table === 'equipment_items') {
+    const legacyDisplay = typeof rec.display_name === 'string' ? rec.display_name.trim() : '';
+    if (legacyDisplay && !rec.name) rec.name = legacyDisplay;
+    delete rec.display_name;
+    delete rec.description;
+  }
+  const keys = Object.keys(rec);
   const placeholders = keys.map(() => '?').join(', ');
   const updates = keys
     .filter(k => k !== 'id')
@@ -34,7 +41,7 @@ function upsertLocalRow(db: any, table: CatalogTable, row: Record<string, unknow
   db.prepare(
     `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${placeholders})
      ON CONFLICT(id) DO UPDATE SET ${updates}`
-  ).run(...keys.map(k => coerceForSqlite(row[k])));
+  ).run(...keys.map(k => coerceForSqlite(rec[k])));
 }
 
 export async function syncCatalogWithCloud(): Promise<void> {
@@ -55,7 +62,14 @@ export async function syncCatalogWithCloud(): Promise<void> {
         ? cloudRows
             .filter((r: any) => isEimAppRole(r.role))
             .map((r: any) => ({ ...r, role: normalizeEimRole(r.role) }))
-        : cloudRows;
+        : table === 'equipment_items'
+          ? cloudRows.filter((r: any) => r && r.department_id)
+          : cloudRows;
+
+      if (table === 'equipment_items' && cloudRows.length > 0 && rowsToApply.length === 0) {
+        console.warn('[CatalogSync] Cloud equipment_items is pre-department schema — skipping pull');
+        continue;
+      }
 
       if (cloudRows.length > 0) {
         const tx = db.transaction(() => {

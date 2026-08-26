@@ -6,7 +6,7 @@ import { syncOperationalWithCloud, applyOperationalRealtimeChange } from './oper
 import { resetSchemaIssues, getSchemaIssues } from './schema-health';
 
 const REALTIME_TABLES = [
-  'categories', 'subcategories', 'equipment_items', 'package_definitions', 'package_items', 'users',
+  'departments', 'categories', 'subcategories', 'equipment_items', 'package_definitions', 'package_items', 'users',
   'equipment_assets', 'asset_status_log',
   'maintenance_tickets', 'maintenance_notes', 'ticket_actions',
   'equipment_loans', 'equipment_loan_items',
@@ -15,7 +15,7 @@ const REALTIME_TABLES = [
   'vendors', 'preventive_schedules',
 ];
 
-const CATALOG_TABLES = new Set(['categories', 'subcategories', 'equipment_items', 'package_definitions', 'package_items', 'users']);
+const CATALOG_TABLES = new Set(['departments', 'categories', 'subcategories', 'equipment_items', 'package_definitions', 'package_items', 'users']);
 
 const ACTION_SYNC_THRESHOLD = 10;
 const HEALTH_CHECK_INTERVAL = 30_000;

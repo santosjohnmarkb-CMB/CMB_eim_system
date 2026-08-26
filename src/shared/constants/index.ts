@@ -1,14 +1,10 @@
 export const EQUIPMENT_HIERARCHY: Record<string, Record<string, string[]>> = {
   'Camera': {
-    'Camera Body': [],
-    'Camera Support': ['Clip-On Mattebox', 'Wireless Follow Focus', '6.6x6.6 Rod Mount'],
-    'Filters': ['4"x5.6"', '6.6"x6.6"'],
-    'Lens': ['Prime', 'Zoom', 'Macro', 'Extender', 'Probe', 'Viewfinder'],
-    'Special Rig': ['Camera Stabilizer', 'Underwater Housing'],
-    'Video Peripherals': ['Overhead Monitor', 'Floor Monitor', 'Monitor/Recorder', 'Wireless Video Assist'],
-    'Camera Package Components': [],
-    'Cables': [],
-    'Power Supply & Battery': [],
+    'Camera Body': ['3K', '4K', '6K', '8K', '12K', 'High Speed Camera'],
+    'Lens': ['Prime Lens', 'Zoom Lens', 'Special Lens'],
+    'Filters': ['Light Control', 'Special FX'],
+    'Camera Support Equipment': ['Tripod and Fluid Head', 'Matte Box', 'Follow Focus', 'Support System', 'Camera Rigs'],
+    'Camera Peripherals': ['Monitor', 'Recorder', 'Storage Media', 'Converters', 'Video Assist', 'Cables', 'Power'],
   },
   'Dollies Mounts & Cranes': {
     'Crane': [],
@@ -30,6 +26,31 @@ export const EQUIPMENT_HIERARCHY: Record<string, Record<string, string[]>> = {
     'SFX & Others': ['Dimmer/Variac', 'DMX Board', 'Smoke FX', 'Wind FX'],
   },
 };
+
+/** Third-level labels keyed by `category::subcategory`. Stored on equipment_items.sub_subcategory. */
+export const EQUIPMENT_SUB_SUBS: Record<string, string[]> = {
+  'Lens::Prime Lens': ['Prime Lens Set', 'Wide Lens', 'Telephoto Prime'],
+  'Lens::Zoom Lens': ['Short Zoom Lens', 'Long Zoom Lens'],
+  'Lens::Special Lens': ['Probe Lens', 'Macro Lens', 'Anamorphic', 'Lens Support'],
+  'Filters::Light Control': ['4x5.65', '6.6x6.6'],
+  'Filters::Special FX': ['4x5.65', '6.6x6.6'],
+  'Camera Support Equipment::Tripod and Fluid Head': ['100mm', '150mm'],
+  'Camera Support Equipment::Matte Box': ['Clip-On', 'Rod Mount'],
+  'Camera Support Equipment::Follow Focus': ['Wireless', 'Manual'],
+  'Camera Support Equipment::Support System': ['Mounting Plate', 'Rods'],
+  'Camera Support Equipment::Camera Rigs': ['Stabilizers', 'Mounts'],
+  'Camera Peripherals::Monitor': ['Overhead', 'Floor Monitor'],
+  'Camera Peripherals::Recorder': ['Monitor Recorder', 'Standalone'],
+  'Camera Peripherals::Storage Media': ['Cards', 'Hard Drive', 'Card Readers'],
+  'Camera Peripherals::Converters': ['Video Converter'],
+  'Camera Peripherals::Video Assist': ['Wireless', 'Wired'],
+  'Camera Peripherals::Cables': ['Video Cable', 'Modular Cable', 'Power Cable', 'Storage Media Cable'],
+  'Camera Peripherals::Power': ['Battery and Charger', 'V Mount', 'B Mount', 'Battery Pack', 'AC Power Supply'],
+};
+
+export function subSubsFor(categoryName: string, subcategoryName: string): string[] {
+  return EQUIPMENT_SUB_SUBS[`${categoryName}::${subcategoryName}`] ?? [];
+}
 
 export const EQUIPMENT_STATUS = {
   AVAILABLE: 'AVAILABLE',
@@ -152,30 +173,39 @@ export const DEPARTMENT_CONFIG: Record<Department, { label: string; shortLabel: 
     label: 'Camera Department',
     shortLabel: 'Camera',
     icon: 'Camera',
+    // Catalog department names (top inventory level), not category names.
     categories: ['Camera'],
   },
   lights_grips: {
     label: 'Lights & Grips Department',
     shortLabel: 'Lights & Grips',
     icon: 'Lightbulb',
-    categories: ['Lights and Grips', 'Dollies Mounts & Cranes', 'Special Equipment'],
+    categories: ['Lights and Grips', 'Dollies Mounts & Cranes', 'Power & Transport', 'Special Equipment'],
   },
 };
 
+/** Maps catalog department names (and legacy top-level category names) to EIM ops departments. */
 export const CATEGORY_TO_DEPARTMENT: Record<string, Department> = {
   'Camera': 'camera',
   'Lights and Grips': 'lights_grips',
   'Dollies Mounts & Cranes': 'lights_grips',
+  'Power & Transport': 'lights_grips',
   'Special Equipment': 'lights_grips',
 };
+
+export function opsDepartmentOf(departmentName?: string | null, categoryName?: string | null): Department | null {
+  if (departmentName && CATEGORY_TO_DEPARTMENT[departmentName]) return CATEGORY_TO_DEPARTMENT[departmentName];
+  if (categoryName && CATEGORY_TO_DEPARTMENT[categoryName]) return CATEGORY_TO_DEPARTMENT[categoryName];
+  return null;
+}
 
 export const USE_COUNT_SUBCATEGORIES: Record<Department, { label: string; subcategoryNames: string[] }[]> = {
   camera: [
     { label: 'Camera Body', subcategoryNames: ['Camera Body'] },
     { label: 'Lens', subcategoryNames: ['Lens'] },
     { label: 'Filters', subcategoryNames: ['Filters'] },
-    { label: 'Special Rig', subcategoryNames: ['Special Rig'] },
-    { label: 'Camera Support', subcategoryNames: ['Camera Support'] },
+    { label: 'Camera Support Equipment', subcategoryNames: ['Camera Support Equipment', 'Camera Support'] },
+    { label: 'Camera Peripherals', subcategoryNames: ['Camera Peripherals'] },
   ],
   lights_grips: [
     { label: 'Lighting', subcategoryNames: ['Lighting'] },
@@ -251,6 +281,7 @@ export const IPC_CHANNELS = {
   USERS_DELETE: 'db:users:delete',
 
   // Categories & Subcategories
+  DEPARTMENTS_GET_ALL: 'db:departments:getAll',
   CATEGORIES_GET_ALL: 'db:categories:getAll',
   SUBCATEGORIES_GET_ALL: 'db:subcategories:getAll',
   SUBCATEGORIES_GET_BY_CATEGORY: 'db:subcategories:getByCategory',

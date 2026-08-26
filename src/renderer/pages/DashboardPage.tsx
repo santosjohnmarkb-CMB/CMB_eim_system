@@ -5,7 +5,7 @@ import { useMaintenanceStore } from '../stores/maintenance.store';
 import { useLoansStore } from '../stores/loans.store';
 import { usePurchaseRequestsStore } from '../stores/purchaseRequests.store';
 import { useAuthStore } from '../stores/auth.store';
-import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT, USE_COUNT_SUBCATEGORIES, LOAN_STATUS_CONFIG, REQUEST_TYPE_CONFIG } from '../../shared/constants';
+import { DEPARTMENT_CONFIG, opsDepartmentOf, USE_COUNT_SUBCATEGORIES, LOAN_STATUS_CONFIG, REQUEST_TYPE_CONFIG } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG } from '../lib/constants';
 import type { DashboardStats, MaintenanceTicket, RepairStatus, EquipmentUseCount, CompletedHistoryEntry, EquipmentLoan, PurchaseRequest } from '../../shared/types';
@@ -170,7 +170,7 @@ export function DashboardPage() {
   const deptUseCounts = useMemo(() => {
     const result: Record<Department, EquipmentUseCount[]> = { camera: [], lights_grips: [] };
     for (const c of useCounts) {
-      const dept = CATEGORY_TO_DEPARTMENT[c.category_name];
+      const dept = opsDepartmentOf((c as any).department_name, c.category_name);
       if (dept) result[dept].push(c);
     }
     return result;

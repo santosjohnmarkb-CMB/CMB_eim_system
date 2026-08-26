@@ -4,7 +4,7 @@ import {
   Camera, Lightbulb, Package, CheckCircle, Wrench,
   AlertTriangle, ArrowRight, BarChart3,
 } from 'lucide-react';
-import { DEPARTMENT_CONFIG, USE_COUNT_SUBCATEGORIES, CATEGORY_TO_DEPARTMENT } from '../../shared/constants';
+import { DEPARTMENT_CONFIG, USE_COUNT_SUBCATEGORIES, opsDepartmentOf } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { ipcInvoke } from '../lib/ipc';
@@ -68,7 +68,7 @@ export function EquipmentDashboardPage() {
   const deptUseCounts = useMemo(() => {
     const result: Record<Department, EquipmentUseCount[]> = { camera: [], lights_grips: [] };
     for (const c of useCounts) {
-      const dept = CATEGORY_TO_DEPARTMENT[c.category_name];
+      const dept = opsDepartmentOf((c as any).department_name, c.category_name);
       if (dept) result[dept].push(c);
     }
     return result;

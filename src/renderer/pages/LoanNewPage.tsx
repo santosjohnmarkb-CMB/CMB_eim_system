@@ -8,7 +8,7 @@ import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
 import { useToast } from '../hooks';
 import { printLoanReleaseForm } from '../lib/loanForms';
-import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT, LOAN_DIRECTION_CONFIG } from '../../shared/constants';
+import { DEPARTMENT_CONFIG, opsDepartmentOf, LOAN_DIRECTION_CONFIG } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import type { EquipmentWithAsset, LoanDirection } from '../../shared/types';
 
@@ -83,7 +83,7 @@ export function LoanNewPage() {
 
   // Equipment scoped to the chosen department.
   const deptItems = useMemo(
-    () => allItems.filter((i) => i.category_name && CATEGORY_TO_DEPARTMENT[i.category_name] === department),
+    () => allItems.filter((i) => opsDepartmentOf(i.department_name, i.category_name) === department),
     [allItems, department],
   );
 

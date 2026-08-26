@@ -74,13 +74,14 @@ export function EquipmentDetailPage() {
   const openEdit = () => {
     setEditForm({
       name: equipment.name || '',
-      display_name: equipment.display_name || '',
+      department_id: equipment.department_id || '',
       category_id: equipment.category_id || '',
       subcategory_id: equipment.subcategory_id || '',
+      sub_subcategory: equipment.sub_subcategory || '',
+      item_type: equipment.item_type || 'standalone',
       brand: equipment.brand || '',
       model: equipment.model || '',
       quantity: equipment.quantity ?? 1,
-      description: equipment.description || '',
       notes: equipment.notes || '',
       base_price: equipment.base_price ?? 0,
       pricing_type: equipment.pricing_type || 'per_day',
@@ -91,21 +92,22 @@ export function EquipmentDetailPage() {
   const setEdit = (field: string, value: any) => setEditForm((p) => ({ ...p, [field]: value }));
 
   const handleEditSave = async () => {
-    if (!editForm.name || !editForm.category_id || !editForm.subcategory_id) {
-      toast.error('Name, category, and subcategory are required');
+    if (!editForm.name || !editForm.category_id) {
+      toast.error('Name and category are required');
       return;
     }
     setSavingEdit(true);
     try {
       await updateEquipment(equipment.id, {
         name: editForm.name,
-        display_name: editForm.display_name || editForm.name,
+        department_id: editForm.department_id,
         category_id: editForm.category_id,
-        subcategory_id: editForm.subcategory_id,
+        subcategory_id: editForm.subcategory_id || null,
+        sub_subcategory: editForm.sub_subcategory || null,
+        item_type: editForm.item_type,
         brand: editForm.brand,
         model: editForm.model,
         quantity: Math.max(0, parseInt(editForm.quantity, 10) || 0),
-        description: editForm.description,
         notes: editForm.notes,
         // Admin-only pricing: managers omit these so the stored price is preserved.
         ...(role === 'admin' ? { base_price: Number(editForm.base_price) || 0, pricing_type: editForm.pricing_type } : {}),
@@ -167,7 +169,7 @@ export function EquipmentDetailPage() {
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="sm" onClick={() => navigate('/equipment')}><ArrowLeft size={16} /> Back</Button>
         <div className="flex-1">
-          <h2 className="text-lg font-semibold text-surface-100">{equipment.display_name || equipment.name}</h2>
+          <h2 className="text-lg font-semibold text-surface-100">{equipment.name}</h2>
           <p className="text-sm text-surface-500">{equipment.equipment_code}</p>
         </div>
         {canEdit && <Button variant="secondary" size="sm" onClick={openEdit}><Edit2 size={14} /> Edit Details</Button>}
@@ -251,7 +253,6 @@ export function EquipmentDetailPage() {
             <h4 className="text-xs font-semibold text-surface-400 uppercase tracking-wide">Equipment Info</h4>
             <div className="grid grid-cols-2 gap-4">
               <Input label="Name *" value={editForm.name} onChange={(e) => setEdit('name', e.target.value)} required />
-              <Input label="Display Name" value={editForm.display_name} onChange={(e) => setEdit('display_name', e.target.value)} placeholder="Defaults to name if empty" />
               <div>
                 <label className="block text-xs font-medium text-surface-400 mb-1">Category *</label>
                 <select value={editForm.category_id} onChange={(e) => { setEdit('category_id', e.target.value); setEdit('subcategory_id', ''); }} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100">
@@ -283,7 +284,6 @@ export function EquipmentDetailPage() {
                 </>
               )}
             </div>
-            <Input label="Description" value={editForm.description} onChange={(e) => setEdit('description', e.target.value)} />
             <Input label="Notes" value={editForm.notes} onChange={(e) => setEdit('notes', e.target.value)} />
             <p className="text-xs text-surface-500">Changing quantity adds or removes units below. Per-unit serial number, supplier, and delivery date are edited in the Units table.</p>
           </div>
