@@ -36,8 +36,8 @@ export const UserUpdateSchema = z.object({
 export const EquipmentCreateSchema = z.object({
   name: z.string().min(1).max(200),
   department_id: z.string().uuid(),
-  category_id: z.string().uuid(),
-  subcategory_id: z.string().uuid().nullable().optional(),
+  category_id: z.string().min(1).max(200),
+  subcategory_id: z.string().min(1).max(200).nullable().optional(),
   sub_subcategory: z.string().max(100).nullable().optional(),
   item_type: z.enum(['standalone', 'package_main', 'package_component', 'add_on']).default('standalone'),
   brand: z.string().max(100).default(''),
@@ -68,8 +68,8 @@ export const EquipmentCreateSchema = z.object({
 export const EquipmentUpdateSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   department_id: z.string().uuid().optional(),
-  category_id: z.string().uuid().optional(),
-  subcategory_id: z.string().uuid().nullable().optional(),
+  category_id: z.string().min(1).max(200).optional(),
+  subcategory_id: z.string().min(1).max(200).nullable().optional(),
   sub_subcategory: z.string().max(100).nullable().optional(),
   item_type: z.enum(['standalone', 'package_main', 'package_component', 'add_on']).optional(),
   brand: z.string().max(100).optional(),

@@ -3,6 +3,7 @@ import { getSupabase } from './supabase';
 import { cloudService } from './cloud-service';
 import { offlineQueue } from './offline-queue';
 import { recordSchemaError } from './schema-health';
+import { remapCameraDepartmentTaxonomy } from '../database/migrate';
 import { EIM_RECOGNIZED_ROLES, isEimAppRole, normalizeEimRole } from '../../shared/constants';
 
 const CATALOG_TABLES = ['departments', 'categories', 'subcategories', 'equipment_items', 'package_definitions', 'package_items', 'users'] as const;
@@ -101,6 +102,34 @@ export async function syncCatalogWithCloud(): Promise<void> {
       recordSchemaError(table, err);
       console.error(`[CatalogSync] Failed to sync ${table}:`, err);
     }
+  }
+
+  // Re-apply the camera taxonomy after a cloud pull (which can restore old
+  // category_id values) and push the remapped catalog rows so other machines
+  // pick them up.
+  try {
+    const remapped = remapCameraDepartmentTaxonomy(db);
+    if (remapped > 0) {
+      const rows: any[] = db.prepare(`
+        SELECT e.* FROM equipment_items e
+        JOIN departments d ON d.id = e.department_id
+        WHERE d.name = 'Camera'
+      `).all();
+      if (rows.length > 0) await cloudService.upsertMany('equipment_items', rows);
+      const cats: any[] = db.prepare(`
+        SELECT c.* FROM categories c JOIN departments d ON d.id = c.department_id WHERE d.name = 'Camera' AND c.is_active = 1
+      `).all();
+      if (cats.length > 0) await cloudService.upsertMany('categories', cats);
+      const subs: any[] = db.prepare(`
+        SELECT s.* FROM subcategories s
+        JOIN categories c ON c.id = s.category_id
+        JOIN departments d ON d.id = c.department_id
+        WHERE d.name = 'Camera' AND s.is_active = 1
+      `).all();
+      if (subs.length > 0) await cloudService.upsertMany('subcategories', subs);
+    }
+  } catch (err) {
+    console.warn('[CatalogSync] Camera taxonomy remap/push failed:', err);
   }
 }
 

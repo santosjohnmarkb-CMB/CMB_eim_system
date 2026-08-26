@@ -1,10 +1,11 @@
 export const EQUIPMENT_HIERARCHY: Record<string, Record<string, string[]>> = {
   'Camera': {
-    'Camera Body': ['3K', '4K', '6K', '8K', '12K', 'High Speed Camera'],
-    'Lens': ['Prime Lens', 'Zoom Lens', 'Special Lens'],
+    'Camera': ['Camera Body', 'High Speed Camera'],
+    'Lens': ['Prime Lens', 'Zoom Lens', 'Special Lens', 'Lens Support'],
     'Filters': ['Light Control', 'Special FX'],
     'Camera Support Equipment': ['Tripod and Fluid Head', 'Matte Box', 'Follow Focus', 'Support System', 'Camera Rigs'],
-    'Camera Peripherals': ['Monitor', 'Recorder', 'Storage Media', 'Converters', 'Video Assist', 'Cables', 'Power'],
+    'Camera Peripherals': ['Monitor', 'Recorder', 'Storage Media', 'Converters', 'Video Assist', 'Cables'],
+    'Power': ['Battery and Charger', 'AC Power Supply'],
   },
   'Dollies Mounts & Cranes': {
     'Crane': [],
@@ -29,9 +30,11 @@ export const EQUIPMENT_HIERARCHY: Record<string, Record<string, string[]>> = {
 
 /** Fourth-level labels keyed by `category::subcategory`. Stored on equipment_items.sub_subcategory. */
 export const EQUIPMENT_SUB_SUBS: Record<string, string[]> = {
-  'Lens::Prime Lens': ['Prime Lens Set', 'Wide Lens', 'Telephoto Prime'],
+  'Camera::Camera Body': ['3K', '4K', '6K', '8K', '12K'],
+  'Camera::High Speed Camera': ['High Speed Camera'],
+  'Lens::Prime Lens': ['Prime Lens Set', 'Wide Lens', 'Telephoto', 'Prime'],
   'Lens::Zoom Lens': ['Short Zoom Lens', 'Long Zoom Lens'],
-  'Lens::Special Lens': ['Probe Lens', 'Macro Lens', 'Anamorphic', 'Lens Support'],
+  'Lens::Special Lens': ['Probe Lens', 'Macro Lens', 'Anamorphic'],
   'Filters::Light Control': ['4x5.65', '6.6x6.6'],
   'Filters::Special FX': ['4x5.65', '6.6x6.6'],
   'Camera Support Equipment::Tripod and Fluid Head': ['100mm', '150mm'],
@@ -45,7 +48,7 @@ export const EQUIPMENT_SUB_SUBS: Record<string, string[]> = {
   'Camera Peripherals::Converters': ['Video Converter'],
   'Camera Peripherals::Video Assist': ['Wireless', 'Wired'],
   'Camera Peripherals::Cables': ['Video Cable', 'Modular Cable', 'Power Cable', 'Storage Media Cable'],
-  'Camera Peripherals::Power': ['Battery and Charger', 'V Mount', 'B Mount', 'Battery Pack', 'AC Power Supply'],
+  'Power::Battery and Charger': ['V Mount', 'B Mount', 'Battery Pack'],
 };
 
 export function subSubsFor(categoryName: string, subcategoryName: string): string[] {
@@ -226,11 +229,12 @@ export const latestSubcategoryNamesFor = subcategoriesInCategory;
 
 export const USE_COUNT_SUBCATEGORIES: Record<Department, { label: string; subcategoryNames: string[] }[]> = {
   camera: [
-    { label: 'Camera Body', subcategoryNames: ['Camera Body'] },
+    { label: 'Camera', subcategoryNames: ['Camera', 'Camera Body'] },
     { label: 'Lens', subcategoryNames: ['Lens'] },
     { label: 'Filters', subcategoryNames: ['Filters'] },
     { label: 'Camera Support Equipment', subcategoryNames: ['Camera Support Equipment', 'Camera Support'] },
     { label: 'Camera Peripherals', subcategoryNames: ['Camera Peripherals'] },
+    { label: 'Power', subcategoryNames: ['Power'] },
   ],
   lights_grips: [
     { label: 'Lighting', subcategoryNames: ['Lighting'] },

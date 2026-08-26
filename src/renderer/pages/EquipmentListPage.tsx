@@ -10,7 +10,7 @@ import { Modal } from '../components/common/Modal';
 import { EQUIPMENT_STATUS_CONFIG } from '../lib/constants';
 import { DEPARTMENT_CONFIG, opsDepartmentOf } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
-import { latestCategories, latestSubcategories, latestSubSubs } from '../lib/catalogHierarchy';
+import { categoryOptionsForOps, subcategoryOptionsForCategory, subSubOptionsFor } from '../lib/catalogHierarchy';
 import type { EquipmentWithAsset, EquipmentStatus, BulkImportResult } from '../../shared/types';
 import { useAuthStore } from '../stores/auth.store';
 import { useToast } from '../hooks';
@@ -74,12 +74,13 @@ function isZeroPricedPackageComponent(item: EquipmentWithAsset): boolean {
 function defaultGroupRank(item: EquipmentWithAsset, department: Department | null): number {
   const cat = (item.category_name ?? '').toLowerCase();
   if (department === 'camera') {
-    if (cat.includes('camera body')) return 0;
-    if (cat.includes('lens')) return 1;
-    if (cat.includes('filter')) return 2;
     if (cat.includes('support')) return 3;
     if (cat.includes('peripheral')) return 4;
-    return 5;
+    if (cat === 'camera' || cat.includes('camera body')) return 0;
+    if (cat.includes('lens')) return 1;
+    if (cat.includes('filter')) return 2;
+    if (cat.includes('power')) return 5;
+    return 6;
   }
   if (department === 'lights_grips') {
     if (cat.includes('light')) return 0;
@@ -130,7 +131,7 @@ export function EquipmentListPage() {
   }, [items, department]);
 
   const hierarchyCategories = useMemo(
-    () => latestCategories(categories, departments, department),
+    () => categoryOptionsForOps(categories, departments, department),
     [categories, departments, department],
   );
 
@@ -139,9 +140,21 @@ export function EquipmentListPage() {
     [hierarchyCategories, categoryFilter],
   );
 
+  const selectedCategoryRow = useMemo(
+    () => categories.find((c) => c.id === categoryFilter)
+      || categories.find((c) => c.name === categoryFilter),
+    [categories, categoryFilter],
+  );
+
   const hierarchySubcategories = useMemo(
-    () => latestSubcategories(subcategories, departments, selectedCategory),
-    [subcategories, departments, selectedCategory],
+    () => subcategoryOptionsForCategory(
+      subcategories,
+      departments,
+      selectedCategory?.departmentId || selectedCategoryRow?.department_id || '',
+      categoryFilter,
+      categories,
+    ),
+    [subcategories, departments, selectedCategoryRow, categoryFilter, categories],
   );
 
   const selectedSubcategory = useMemo(
@@ -150,7 +163,7 @@ export function EquipmentListPage() {
   );
 
   const hierarchySubSubs = useMemo(
-    () => latestSubSubs(selectedCategory, selectedSubcategory),
+    () => subSubOptionsFor(selectedCategory?.name, selectedSubcategory?.name),
     [selectedCategory, selectedSubcategory],
   );
 
@@ -182,8 +195,8 @@ export function EquipmentListPage() {
       ].filter(Boolean).join(' ').toLowerCase();
       if (!haystack.includes(q)) return false;
     }
-    if (categoryFilter && item.category_id !== categoryFilter) return false;
-    if (subcategoryFilter && item.subcategory_id !== subcategoryFilter) return false;
+    if (categoryFilter && item.category_id !== categoryFilter && item.category_name !== categoryFilter) return false;
+    if (subcategoryFilter && item.subcategory_id !== subcategoryFilter && item.subcategory_name !== subcategoryFilter) return false;
     if (subSubFilter && (item.sub_subcategory || '') !== subSubFilter) return false;
     if (statusFilter) {
       const units = unitsOf(item);
@@ -296,8 +309,8 @@ export function EquipmentListPage() {
   // base_price is only pre-filled for admins (managers can't set prices).
   const handleDownloadTemplate = () => {
     const sample: Record<string, string> = {
-      name: 'ARRI Alexa Mini LF', department: 'Camera', category: 'Camera Body',
-      sub_category: '4K', sub_sub_category: '', item_type: 'standalone', brand: 'ARRI', model: 'Alexa Mini LF',
+      name: 'ARRI Alexa Mini LF', department: 'Camera', category: 'Camera',
+      sub_category: 'Camera Body', sub_sub_category: '4K', item_type: 'standalone', brand: 'ARRI', model: 'Alexa Mini LF',
       pricing_type: 'per_day', base_price: isAdmin ? '15000' : '', notes: '', equipment_code: 'CAM-001',
     };
     const csv = EQUIPMENT_CSV_HEADERS.join(',') + '\n' + EQUIPMENT_CSV_HEADERS.map((h) => sample[h] ?? '').join(',') + '\n';

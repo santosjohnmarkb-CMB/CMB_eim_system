@@ -5,9 +5,17 @@ import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
 import { useToast } from '../hooks';
-import { DEPARTMENT_CONFIG, opsDepartmentOf } from '../../shared/constants';
+import { DEPARTMENT_CONFIG } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
-import { latestCategories, latestDepartments, latestSubcategories, latestSubSubs } from '../lib/catalogHierarchy';
+import {
+  latestDepartments,
+  categoryOptionsForDepartment,
+  subcategoryChoices,
+  subSubChoices,
+  categoryNameForSubcategory,
+  pathForSubSub,
+} from '../lib/catalogHierarchy';
+import { CatalogCombobox } from '../components/common/CatalogCombobox';
 
 const PRICING_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'per_day', label: 'Per Day' },
@@ -59,15 +67,44 @@ export function EquipmentAddPage() {
   }, [defaultDeptId, form.department_id]);
 
   const departmentLocked = catalogDepts.length <= 1;
-  const selectedDept = departments.find((d) => d.id === form.department_id);
-  const selectedOpsDept = selectedDept ? opsDepartmentOf(selectedDept.name, null) : userDept;
-  const filteredCats = latestCategories(categories, departments, selectedOpsDept)
-    .filter((c) => c.department_id === form.department_id);
-  const selectedCat = filteredCats.find((c) => c.id === form.category_id) || categories.find((c) => c.id === form.category_id);
-  const filteredSubs = latestSubcategories(subcategories, departments, selectedCat);
-  const selectedSub = filteredSubs.find((s) => s.id === form.subcategory_id) || subcategories.find((s) => s.id === form.subcategory_id);
-  const subSubOptions = latestSubSubs(selectedCat, selectedSub);
+  const selectedDept = catalogDepts.find((d) => d.id === form.department_id)
+    || departments.find((d) => d.id === form.department_id);
+  const filteredCats = categoryOptionsForDepartment(categories, departments, form.department_id);
+  const selectedCat = filteredCats.find((c) => c.id === form.category_id);
+  const filteredSubs = subcategoryChoices(
+    subcategories, departments, form.department_id, form.category_id, categories,
+  );
+  const selectedSub = filteredSubs.find((s) => s.id === form.subcategory_id)
+    || subcategories.find((s) => s.id === form.subcategory_id)
+    || (form.subcategory_id ? { id: form.subcategory_id, name: form.subcategory_id } : undefined);
+  const subSubOptions = subSubChoices(selectedDept?.name, selectedCat?.name, selectedSub?.name);
   const set = (field: string, value: any) => setForm((p) => ({ ...p, [field]: value }));
+
+  const setSubcategory = (name: string) => {
+    const match = filteredSubs.find((s) => s.name === name);
+    const catName = selectedDept && name ? categoryNameForSubcategory(selectedDept.name, name) : undefined;
+    const cat = catName ? filteredCats.find((c) => c.name === catName) : undefined;
+    setForm((p) => ({
+      ...p,
+      subcategory_id: match?.id || name,
+      sub_subcategory: '',
+      category_id: p.category_id || cat?.id || p.category_id,
+    }));
+  };
+
+  const setSubSubcategory = (name: string) => {
+    const path = name ? pathForSubSub(name) : undefined;
+    const cat = path ? filteredCats.find((c) => c.name === path.category) : undefined;
+    const subMatch = path
+      ? filteredSubs.find((s) => s.name === path.subcategory)
+      : undefined;
+    setForm((p) => ({
+      ...p,
+      sub_subcategory: name,
+      category_id: p.category_id || cat?.id || p.category_id,
+      subcategory_id: p.subcategory_id || subMatch?.id || (path ? path.subcategory : p.subcategory_id),
+    }));
+  };
 
   const setQuantity = (raw: string) => {
     if (raw === '') { set('quantity', ''); return; }
@@ -147,24 +184,20 @@ export function EquipmentAddPage() {
               {filteredCats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
-          {filteredSubs.length > 0 && (
-            <div>
-              <label className="block text-xs font-medium text-surface-400 mb-1">Sub category</label>
-              <select value={form.subcategory_id} onChange={(e) => { set('subcategory_id', e.target.value); set('sub_subcategory', ''); }} className={selectClass}>
-                <option value="">None</option>
-                {filteredSubs.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </div>
-          )}
-          {subSubOptions.length > 0 && (
-            <div>
-              <label className="block text-xs font-medium text-surface-400 mb-1">Sub-sub category</label>
-              <select value={form.sub_subcategory} onChange={(e) => set('sub_subcategory', e.target.value)} className={selectClass}>
-                <option value="">None</option>
-                {subSubOptions.map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
-            </div>
-          )}
+          <CatalogCombobox
+            label="Sub category"
+            value={selectedSub?.name || ''}
+            onChange={setSubcategory}
+            options={filteredSubs.map((s) => s.name)}
+            placeholder="Select or type a sub category"
+          />
+          <CatalogCombobox
+            label="Sub-sub category"
+            value={form.sub_subcategory || ''}
+            onChange={setSubSubcategory}
+            options={subSubOptions}
+            placeholder="Select or type a sub-sub category"
+          />
           <div>
             <label className="block text-xs font-medium text-surface-400 mb-1">Item type</label>
             <select value={form.item_type} onChange={(e) => {

@@ -7,6 +7,7 @@ import { EquipmentCreateSchema, EquipmentUpdateSchema, AssetUpdateSchema, AssetS
 import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { pushOperationalToCloud } from '../sync/operational-sync';
 import { CATEGORY_PREFIXES, opsDepartmentOf } from '../../shared/constants';
+import { seedEquipmentHierarchy } from '../database/migrate';
 import { sessionDepartment, categoriesForDepartment, assertEquipmentInDepartment } from './department';
 import { recomputeAvailability, insertAssetStatusLog, pushStatusLogsToCloud } from './availability';
 import { parseCsvRow } from './utils/csv';
@@ -28,10 +29,58 @@ export function registerEquipmentHandlers(): void {
     }
   };
 
+  const ensureCategoryId = (departmentId: string, categoryIdOrName: string): string => {
+    seedEquipmentHierarchy(db);
+    const byId: any = db.prepare('SELECT id FROM categories WHERE id = ?').get(categoryIdOrName);
+    if (byId) {
+      db.prepare('UPDATE categories SET is_active = 1 WHERE id = ?').run(byId.id);
+      return byId.id as string;
+    }
+    const byName: any = db.prepare(
+      'SELECT id FROM categories WHERE department_id = ? AND name = ? LIMIT 1',
+    ).get(departmentId, categoryIdOrName);
+    if (byName) {
+      db.prepare('UPDATE categories SET is_active = 1 WHERE id = ?').run(byName.id);
+      return byName.id as string;
+    }
+    const id = uuidv4();
+    db.prepare(
+      'INSERT INTO categories (id, department_id, name, display_order, is_active) VALUES (?, ?, ?, 0, 1)',
+    ).run(id, departmentId, categoryIdOrName);
+    return id;
+  };
+
+  const ensureSubcategoryId = (categoryId: string, subcategoryIdOrName: string | null | undefined): string | null => {
+    if (!subcategoryIdOrName) return null;
+    seedEquipmentHierarchy(db);
+    const byId: any = db.prepare('SELECT id FROM subcategories WHERE id = ?').get(subcategoryIdOrName);
+    if (byId) {
+      db.prepare('UPDATE subcategories SET is_active = 1 WHERE id = ?').run(byId.id);
+      return byId.id as string;
+    }
+    const byName: any = db.prepare(
+      'SELECT id FROM subcategories WHERE category_id = ? AND name = ? LIMIT 1',
+    ).get(categoryId, subcategoryIdOrName);
+    if (byName) {
+      db.prepare('UPDATE subcategories SET is_active = 1 WHERE id = ?').run(byName.id);
+      return byName.id as string;
+    }
+    const id = uuidv4();
+    db.prepare(
+      'INSERT INTO subcategories (id, category_id, name, display_order, is_active) VALUES (?, ?, ?, 0, 1)',
+    ).run(id, categoryId, subcategoryIdOrName);
+    return id;
+  };
+
+  // Last sequence this process already allocated per prefix. CSV import (and any
+  // other bulk insert) calls this inside one transaction; we must not re-query a
+  // stale MAX and hand out the same code twice.
+  const issuedSeqByPrefix = new Map<string, number>();
+
   // Generate the next unused equipment code for a category prefix. Orders by the
   // numeric suffix (not lexicographically, so CAM-1000 beats CAM-999) and skips any
   // code that already exists to avoid UNIQUE constraint failures on equipment_code.
-  const nextEquipmentCode = (prefix: string): string => {
+  const nextEquipmentCode = (prefix: string, reserved?: Set<string>): string => {
     const last: any = db.prepare(
       `SELECT equipment_code FROM equipment_items WHERE equipment_code LIKE ?
        ORDER BY CAST(substr(equipment_code, instr(equipment_code, '-') + 1) AS INTEGER) DESC LIMIT 1`,
@@ -41,12 +90,15 @@ export function registerEquipmentHandlers(): void {
       const num = parseInt(last.equipment_code.split('-')[1] || '0', 10);
       seq = (Number.isFinite(num) ? num : 0) + 1;
     }
+    seq = Math.max(seq, issuedSeqByPrefix.get(prefix) ?? 1);
     const exists = db.prepare('SELECT 1 FROM equipment_items WHERE equipment_code = ?');
     let code = `${prefix}-${String(seq).padStart(3, '0')}`;
-    while (exists.get(code)) {
+    while (exists.get(code) || reserved?.has(code)) {
       seq += 1;
       code = `${prefix}-${String(seq).padStart(3, '0')}`;
     }
+    issuedSeqByPrefix.set(prefix, seq + 1);
+    reserved?.add(code);
     return code;
   };
 
@@ -148,7 +200,10 @@ export function registerEquipmentHandlers(): void {
   ipcMain.handle('db:equipment:create', (event: any, data: unknown) => {
     const user = requireInventoryAccess(event);
     const input = EquipmentCreateSchema.parse(data);
-    assertCategoryInDepartment(event, input.category_id);
+    const departmentId = input.department_id;
+    const categoryId = ensureCategoryId(departmentId, input.category_id);
+    const subcategoryId = ensureSubcategoryId(categoryId, input.subcategory_id);
+    assertCategoryInDepartment(event, categoryId);
     // Admin-only pricing: managers create equipment at 0 price; only admins set a price.
     const basePrice = user.role === 'admin' ? input.base_price : 0;
     const equipmentId = uuidv4();
@@ -158,8 +213,7 @@ export function registerEquipmentHandlers(): void {
     const cat: any = db.prepare(`
       SELECT c.department_id, d.name as department_name
       FROM categories c JOIN departments d ON d.id = c.department_id WHERE c.id = ?
-    `).get(input.category_id);
-    const departmentId = input.department_id || cat?.department_id;
+    `).get(categoryId);
     if (!departmentId) throw new Error('Department is required');
     const prefix = cat ? (CATEGORY_PREFIXES[cat.department_name] || 'EQP') : 'EQP';
     const equipmentCode = nextEquipmentCode(prefix);
@@ -189,7 +243,7 @@ export function registerEquipmentHandlers(): void {
       db.prepare(`
         INSERT INTO equipment_items (id, equipment_code, name, department_id, category_id, subcategory_id, sub_subcategory, item_type, brand, model, pricing_type, base_price, notes, quantity, available_qty, is_active, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-      `).run(equipmentId, equipmentCode, input.name, departmentId, input.category_id, input.subcategory_id || null,
+      `).run(equipmentId, equipmentCode, input.name, departmentId, categoryId, subcategoryId,
         input.sub_subcategory || null, input.item_type, input.brand, input.model,
         pricingType, basePrice, input.notes || null, qty, qty, now, now);
 
@@ -268,9 +322,16 @@ export function registerEquipmentHandlers(): void {
     const user = requireInventoryAccess(event);
     assertEquipmentInDepartment(db, event, id);
     const input = EquipmentUpdateSchema.parse(data);
-    // If the item is being moved to a different category, that target must also
-    // belong to the session's department.
-    if (input.category_id !== undefined) assertCategoryInDepartment(event, input.category_id);
+    const existing: any = db.prepare('SELECT department_id, category_id FROM equipment_items WHERE id = ?').get(id);
+    const departmentId = input.department_id || existing?.department_id;
+    if (input.category_id !== undefined) {
+      input.category_id = ensureCategoryId(departmentId, input.category_id);
+      assertCategoryInDepartment(event, input.category_id);
+    }
+    if (input.subcategory_id !== undefined) {
+      const categoryId = input.category_id || existing?.category_id;
+      input.subcategory_id = ensureSubcategoryId(categoryId, input.subcategory_id);
+    }
     // Admin-only pricing: managers may edit every field except base_price, which is
     // dropped from the allow-list so their submission can't change the stored price.
     const allowedFields = ['name', 'department_id', 'category_id', 'subcategory_id', 'sub_subcategory',
@@ -494,7 +555,7 @@ export function registerEquipmentHandlers(): void {
     `).get(...catParams);
 
     const activityQuery = catFilter
-      ? `SELECT asl.* FROM asset_status_log asl JOIN equipment_items e ON e.id = asl.equipment_id JOIN categories c ON c.id = e.category_id WHERE c.name IN (${catPlaceholders}) ORDER BY asl.changed_at DESC LIMIT 10`
+      ? `SELECT asl.* FROM asset_status_log asl JOIN equipment_items e ON e.id = asl.equipment_id JOIN departments d ON d.id = e.department_id WHERE d.name IN (${catPlaceholders}) ORDER BY asl.changed_at DESC LIMIT 10`
       : 'SELECT * FROM asset_status_log ORDER BY changed_at DESC LIMIT 10';
     const recentActivity: any[] = db.prepare(activityQuery).all(...catParams);
 
@@ -532,6 +593,7 @@ export function registerEquipmentHandlers(): void {
     const findCat = db.prepare('SELECT id FROM categories WHERE name = ? AND department_id = ? AND is_active = 1');
     const findSub = db.prepare('SELECT id FROM subcategories WHERE name = ? AND category_id = ? AND is_active = 1');
     const findByCode = db.prepare('SELECT id FROM equipment_items WHERE equipment_code = ?');
+    const reservedCodes = new Set<string>();
 
     const tx = db.transaction(() => {
       for (let i = 1; i < lines.length; i++) {
@@ -542,12 +604,30 @@ export function registerEquipmentHandlers(): void {
 
           const name = row.name;
           const departmentName = row.department || row.department_name;
-          const categoryName = row.category;
-          const subName = row.sub_category || row.subcategory;
-          const subSub = row.sub_sub_category || row.sub_subcategory || '';
+          let categoryName = row.category;
+          let subName = row.sub_category || row.subcategory || '';
+          let subSub = row.sub_sub_category || row.sub_subcategory || '';
           if (!name || !departmentName || !categoryName) {
             errors.push({ row: i + 1, message: 'Missing required fields: name, department, category' });
             continue;
+          }
+
+          // Accept the previous Camera taxonomy in CSVs (Camera Body as a category,
+          // Power as a Peripherals subcategory, 3K–12K as subcategories).
+          if (departmentName === 'Camera') {
+            if (categoryName === 'Camera Body') {
+              subSub = subSub || (subName === 'High Speed Camera' ? 'High Speed Camera' : subName);
+              subName = subName === 'High Speed Camera' ? 'High Speed Camera' : 'Camera Body';
+              categoryName = 'Camera';
+            } else if (categoryName === 'Camera Peripherals' && subName === 'Power') {
+              categoryName = 'Power';
+              if (subSub === 'AC Power Supply') { subName = 'AC Power Supply'; subSub = ''; }
+              else { subName = 'Battery and Charger'; }
+            } else if (categoryName === 'Lens' && subName === 'Special Lens' && subSub === 'Lens Support') {
+              subName = 'Lens Support';
+              subSub = '';
+            }
+            if (subSub === 'Telephoto Prime') subSub = 'Telephoto';
           }
 
           const deptRow: any = findDept.get(departmentName);
@@ -588,7 +668,9 @@ export function registerEquipmentHandlers(): void {
             continue;
           }
 
-          const code = row.equipment_code || nextEquipmentCode(CATEGORY_PREFIXES[deptRow.name] || 'EQP');
+          const prefix = CATEGORY_PREFIXES[deptRow.name] || 'EQP';
+          const code = row.equipment_code || nextEquipmentCode(prefix, reservedCodes);
+          if (row.equipment_code) reservedCodes.add(code);
           const existing: any = findByCode.get(code);
           const price = canPrice ? (parseFloat(row.base_price || '0') || 0) : 0;
 
@@ -598,7 +680,7 @@ export function registerEquipmentHandlers(): void {
               UPDATE equipment_items SET name = ?, department_id = ?, category_id = ?, subcategory_id = ?,
                 sub_subcategory = ?, item_type = ?, brand = ?, model = ?, pricing_type = ?,
                 base_price = CASE WHEN ? = 1 THEN ? ELSE base_price END,
-                notes = ?, updated_at = ?, version = version + 1
+                notes = ?, is_active = 1, updated_at = ?, version = version + 1
               WHERE id = ?
             `).run(name, deptRow.id, cat.id, subId, subSub || null, itemType, row.brand || '', row.model || '',
               pricingType, canPrice ? 1 : 0, price, row.notes || null, now, existing.id);

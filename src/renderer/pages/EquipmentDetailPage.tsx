@@ -8,10 +8,10 @@ import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { EQUIPMENT_STATUS_CONFIG } from '../lib/constants';
-import { latestCategories, latestDepartments, latestSubcategories, latestSubSubs } from '../lib/catalogHierarchy';
+import { latestDepartments, categoryOptionsForDepartment, subcategoryChoices, subSubChoices, categoryNameForSubcategory, pathForSubSub } from '../lib/catalogHierarchy';
+import { CatalogCombobox } from '../components/common/CatalogCombobox';
 import { useToast } from '../hooks';
 import { useAuthStore } from '../stores/auth.store';
-import { opsDepartmentOf } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import type { EquipmentStatus, AssetStatusLogEntry, EquipmentAsset } from '../../shared/types';
 
@@ -165,15 +165,42 @@ export function EquipmentDetailPage() {
     } catch (err: any) { toast.error(err.message); }
   };
 
-  const selectedDept = departments.find((d) => d.id === editForm.department_id);
-  const selectedOpsDept = selectedDept ? opsDepartmentOf(selectedDept.name, null) : userDept;
   const catalogDepts = latestDepartments(departments, userDept);
-  const editCategories = latestCategories(categories, departments, selectedOpsDept)
-    .filter((c) => !editForm.department_id || c.department_id === editForm.department_id);
-  const selectedCat = editCategories.find((c) => c.id === editForm.category_id) || categories.find((c) => c.id === editForm.category_id);
-  const editSubcategories = latestSubcategories(subcategories, departments, selectedCat);
-  const selectedSub = editSubcategories.find((s) => s.id === editForm.subcategory_id) || subcategories.find((s) => s.id === editForm.subcategory_id);
-  const editSubSubs = latestSubSubs(selectedCat, selectedSub);
+  const selectedDept = catalogDepts.find((d) => d.id === editForm.department_id)
+    || departments.find((d) => d.id === editForm.department_id);
+  const editCategories = categoryOptionsForDepartment(categories, departments, editForm.department_id);
+  const selectedCat = editCategories.find((c) => c.id === editForm.category_id);
+  const editSubcategories = subcategoryChoices(
+    subcategories, departments, editForm.department_id, editForm.category_id, categories,
+  );
+  const selectedSub = editSubcategories.find((s) => s.id === editForm.subcategory_id)
+    || subcategories.find((s) => s.id === editForm.subcategory_id)
+    || (editForm.subcategory_id ? { id: editForm.subcategory_id, name: editForm.subcategory_id } : undefined);
+  const editSubSubs = subSubChoices(selectedDept?.name, selectedCat?.name, selectedSub?.name);
+
+  const setEditSubcategory = (name: string) => {
+    const match = editSubcategories.find((s) => s.name === name);
+    const catName = selectedDept && name ? categoryNameForSubcategory(selectedDept.name, name) : undefined;
+    const cat = catName ? editCategories.find((c) => c.name === catName) : undefined;
+    setEditForm((p) => ({
+      ...p,
+      subcategory_id: match?.id || name,
+      sub_subcategory: '',
+      category_id: p.category_id || cat?.id || p.category_id,
+    }));
+  };
+
+  const setEditSubSubcategory = (name: string) => {
+    const path = name ? pathForSubSub(name) : undefined;
+    const cat = path ? editCategories.find((c) => c.name === path.category) : undefined;
+    const subMatch = path ? editSubcategories.find((s) => s.name === path.subcategory) : undefined;
+    setEditForm((p) => ({
+      ...p,
+      sub_subcategory: name,
+      category_id: p.category_id || cat?.id || p.category_id,
+      subcategory_id: p.subcategory_id || subMatch?.id || (path ? path.subcategory : p.subcategory_id),
+    }));
+  };
 
   return (
     <div className="space-y-6">
@@ -280,24 +307,20 @@ export function EquipmentDetailPage() {
                   {editCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
-              {editSubcategories.length > 0 && (
-                <div>
-                  <label className="block text-xs font-medium text-surface-400 mb-1">Sub category</label>
-                  <select value={editForm.subcategory_id} onChange={(e) => { setEdit('subcategory_id', e.target.value); setEdit('sub_subcategory', ''); }} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100">
-                    <option value="">None</option>
-                    {editSubcategories.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
-              )}
-              {editSubSubs.length > 0 && (
-                <div>
-                  <label className="block text-xs font-medium text-surface-400 mb-1">Sub-sub category</label>
-                  <select value={editForm.sub_subcategory || ''} onChange={(e) => setEdit('sub_subcategory', e.target.value)} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100">
-                    <option value="">None</option>
-                    {editSubSubs.map((n) => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </div>
-              )}
+              <CatalogCombobox
+                label="Sub category"
+                value={selectedSub?.name || ''}
+                onChange={setEditSubcategory}
+                options={editSubcategories.map((s) => s.name)}
+                placeholder="Select or type a sub category"
+              />
+              <CatalogCombobox
+                label="Sub-sub category"
+                value={editForm.sub_subcategory || ''}
+                onChange={setEditSubSubcategory}
+                options={editSubSubs}
+                placeholder="Select or type a sub-sub category"
+              />
               <Input label="Brand" value={editForm.brand} onChange={(e) => setEdit('brand', e.target.value)} />
               <Input label="Model" value={editForm.model} onChange={(e) => setEdit('model', e.target.value)} />
               <Input label="Quantity" type="number" value={editForm.quantity} onChange={(e) => setEdit('quantity', e.target.value)} />

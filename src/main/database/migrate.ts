@@ -128,6 +128,101 @@ export function pruneUnusedObsoleteCatalog(db: any): void {
   }
 }
 
+/**
+ * Re-point existing Camera-department equipment to the current taxonomy:
+ *   Camera Body / 3K          → Camera / Camera Body / 3K
+ *   Camera Body / High Speed  → Camera / High Speed Camera / High Speed Camera
+ *   Peripherals / Power / …   → Power / Battery and Charger | AC Power Supply
+ *   Lens / Special / Lens Support → Lens / Lens Support
+ * Idempotent: already-migrated rows are left alone.
+ */
+export function remapCameraDepartmentTaxonomy(db: any): number {
+  if (!tableExists(db, 'departments') || !tableExists(db, 'equipment_items')) return 0;
+  seedEquipmentHierarchy(db);
+
+  const dept = db.prepare("SELECT id FROM departments WHERE name = 'Camera' LIMIT 1").get() as { id: string } | undefined;
+  if (!dept) return 0;
+
+  const catId = (name: string): string | undefined =>
+    (db.prepare('SELECT id FROM categories WHERE department_id = ? AND name = ? LIMIT 1').get(dept.id, name) as { id: string } | undefined)?.id;
+  const subId = (categoryId: string | undefined, name: string): string | undefined => {
+    if (!categoryId) return undefined;
+    return (db.prepare('SELECT id FROM subcategories WHERE category_id = ? AND name = ? LIMIT 1').get(categoryId, name) as { id: string } | undefined)?.id;
+  };
+
+  const cameraCat = catId('Camera');
+  const lensCat = catId('Lens');
+  const powerCat = catId('Power');
+  const cameraBodySub = subId(cameraCat, 'Camera Body');
+  const hscSub = subId(cameraCat, 'High Speed Camera');
+  const lensSupportSub = subId(lensCat, 'Lens Support');
+  const batterySub = subId(powerCat, 'Battery and Charger');
+  const acSub = subId(powerCat, 'AC Power Supply');
+  if (!cameraCat || !cameraBodySub) return 0;
+
+  const items = db.prepare(`
+    SELECT e.id, e.category_id, e.subcategory_id, e.sub_subcategory,
+           c.name AS cat_name, s.name AS sub_name
+    FROM equipment_items e
+    JOIN categories c ON c.id = e.category_id
+    LEFT JOIN subcategories s ON s.id = e.subcategory_id
+    WHERE e.department_id = ?
+  `).all(dept.id) as Array<{
+    id: string; category_id: string; subcategory_id: string | null; sub_subcategory: string | null;
+    cat_name: string; sub_name: string | null;
+  }>;
+
+  const update = db.prepare(
+    `UPDATE equipment_items SET category_id = ?, subcategory_id = ?, sub_subcategory = ?, updated_at = datetime('now') WHERE id = ?`,
+  );
+
+  let changes = 0;
+  for (const item of items) {
+    let newCat = item.category_id;
+    let newSub = item.subcategory_id;
+    let newSubSub = item.sub_subcategory;
+    let changed = false;
+
+    if (item.cat_name === 'Camera Body') {
+      newCat = cameraCat;
+      if (item.sub_name === 'High Speed Camera' && hscSub) {
+        newSub = hscSub;
+        newSubSub = 'High Speed Camera';
+      } else {
+        newSub = cameraBodySub;
+        newSubSub = item.sub_name || item.sub_subcategory;
+      }
+      changed = true;
+    } else if (item.cat_name === 'Lens' && item.sub_name === 'Special Lens' && item.sub_subcategory === 'Lens Support' && lensSupportSub) {
+      newSub = lensSupportSub;
+      newSubSub = null;
+      changed = true;
+    } else if (item.cat_name === 'Camera Peripherals' && item.sub_name === 'Power' && powerCat) {
+      newCat = powerCat;
+      const ss = item.sub_subcategory;
+      if (ss === 'AC Power Supply' && acSub) {
+        newSub = acSub;
+        newSubSub = null;
+      } else if (batterySub) {
+        newSub = batterySub;
+        newSubSub = (ss === 'V Mount' || ss === 'B Mount' || ss === 'Battery Pack') ? ss : null;
+      }
+      changed = true;
+    }
+
+    if (newSubSub === 'Telephoto Prime') {
+      newSubSub = 'Telephoto';
+      changed = true;
+    }
+
+    if (changed && (newCat !== item.category_id || newSub !== item.subcategory_id || (newSubSub || null) !== (item.sub_subcategory || null))) {
+      update.run(newCat, newSub ?? null, newSubSub ?? null, item.id);
+      changes += 1;
+    }
+  }
+  return changes;
+}
+
 const MIGRATIONS: Migration[] = [
   {
     id: '001_initial_eim_setup',
@@ -904,6 +999,16 @@ const MIGRATIONS: Migration[] = [
       db.exec('CREATE INDEX IF NOT EXISTS idx_subcategories_category ON subcategories(category_id)');
 
       seedEquipmentHierarchy(db);
+    },
+  },
+  {
+    // Camera department taxonomy v2: Camera Body/3K become category Camera /
+    // subcategory Camera Body / sub-sub 3K; Power moves out of Peripherals;
+    // High Speed Camera and Lens Support become their own subcategories.
+    id: '025_camera_taxonomy_v2',
+    up: (db: any) => {
+      seedEquipmentHierarchy(db);
+      remapCameraDepartmentTaxonomy(db);
     },
   },
 ];
