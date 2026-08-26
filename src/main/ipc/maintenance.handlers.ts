@@ -6,7 +6,7 @@ import { writeAuditLog } from './audit';
 import { MaintenanceTicketCreateSchema, MaintenanceTicketUpdateSchema, MaintenanceNoteSchema, TicketActionSchema, TicketActionUpdateSchema, AttachmentDataSchema } from '../../shared/schemas';
 import { pushOperationalToCloud } from '../sync/operational-sync';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
-import { sessionDepartment, categoriesForDepartment, departmentForCategory, assertEquipmentInDepartment } from './department';
+import { sessionDepartment, categoriesForDepartment, departmentForCatalogDepartment, assertEquipmentInDepartment } from './department';
 import { recomputeAvailability, pickAvailableAsset } from './availability';
 import { archiveMaintenanceTicket, archiveRepairReleaseForm } from '../sync/archive-eim';
 import { saveBlob, deleteBlob, resolveBlob } from '../blob-store';
@@ -15,6 +15,7 @@ const DEPT_PREFIX: Record<string, string> = {
   'Camera': 'CD',
   'Lights and Grips': 'LG',
   'Dollies Mounts & Cranes': 'LG',
+  'Power & Transport': 'LG',
   'Special Equipment': 'LG',
 };
 
@@ -29,12 +30,12 @@ const MTYPE_CODE: Record<string, string> = {
 
 function generateTicketNumber(db: any, equipmentId: string, maintenanceType: string): string {
   const eq: any = db.prepare(`
-    SELECT c.name as category_name FROM equipment_items e
-    JOIN categories c ON c.id = e.category_id
+    SELECT d.name as department_name FROM equipment_items e
+    JOIN departments d ON d.id = e.department_id
     WHERE e.id = ?
   `).get(equipmentId);
 
-  const deptCode = (eq && DEPT_PREFIX[eq.category_name]) || 'CD';
+  const deptCode = (eq && DEPT_PREFIX[eq.department_name]) || 'CD';
   const typeCode = MTYPE_CODE[maintenanceType] || 'RPR';
   const now = new Date();
   const mm = String(now.getMonth() + 1).padStart(2, '0');
@@ -62,15 +63,16 @@ export function registerMaintenanceHandlers(): void {
   // department) are unrestricted.
   const getTicketInDept = (event: any, id: string): any => {
     const ticket: any = db.prepare(`
-      SELECT mt.*, c.name as category_name
+      SELECT mt.*, d.name as department_name, c.name as category_name
       FROM maintenance_tickets mt
       JOIN equipment_items e ON e.id = mt.equipment_id
+      LEFT JOIN departments d ON d.id = e.department_id
       LEFT JOIN categories c ON c.id = e.category_id
       WHERE mt.id = ?
     `).get(id);
     if (!ticket) throw new Error('Ticket not found');
     const dept = sessionDepartment(event);
-    if (dept && departmentForCategory(ticket.category_name) !== dept) {
+    if (dept && departmentForCatalogDepartment(ticket.department_name) !== dept) {
       throw new Error('This ticket belongs to another department.');
     }
     return ticket;
@@ -78,9 +80,10 @@ export function registerMaintenanceHandlers(): void {
 
   ipcMain.handle('db:maintenance:getAll', (event: any) => {
     const cats = categoriesForDepartment(sessionDepartment(event));
-    const catWhere = cats ? `WHERE c.name IN (${cats.map(() => '?').join(', ')})` : '';
+    const catWhere = cats ? `WHERE d.name IN (${cats.map(() => '?').join(', ')})` : '';
     return db.prepare(`
       SELECT mt.*, e.name as equipment_name, e.equipment_code, e.category_id,
+        d.name as department_name,
         c.name as category_name,
         (SELECT COUNT(*) FROM maintenance_notes mn WHERE mn.ticket_id = mt.id) as notes_count,
         ta.action_date as last_action_date,
@@ -88,6 +91,7 @@ export function registerMaintenanceHandlers(): void {
         ta.personnel as last_action_personnel
       FROM maintenance_tickets mt
       JOIN equipment_items e ON e.id = mt.equipment_id
+      LEFT JOIN departments d ON d.id = e.department_id
       LEFT JOIN categories c ON c.id = e.category_id
       LEFT JOIN ticket_actions ta ON ta.id = (
         SELECT ta2.id FROM ticket_actions ta2
@@ -104,16 +108,18 @@ export function registerMaintenanceHandlers(): void {
   ipcMain.handle('db:maintenance:getById', (event: any, id: string) => {
     const row: any = db.prepare(`
       SELECT mt.*, e.name as equipment_name, e.equipment_code, c.name as category_name,
+        d.name as department_name,
         ea.serial_number as asset_serial, ea.asset_tag as asset_tag
       FROM maintenance_tickets mt
       JOIN equipment_items e ON e.id = mt.equipment_id
+      LEFT JOIN departments d ON d.id = e.department_id
       LEFT JOIN categories c ON c.id = e.category_id
       LEFT JOIN equipment_assets ea ON ea.id = mt.asset_id
       WHERE mt.id = ?
     `).get(id);
     if (!row) return null;
     const dept = sessionDepartment(event);
-    if (dept && departmentForCategory(row.category_name) !== dept) return null;
+    if (dept && departmentForCatalogDepartment(row.department_name) !== dept) return null;
     // Detail view may display/re-upload the service doc, so return a real data URL.
     return { ...row, service_doc_data: resolveBlob(row.service_doc_data) };
   });
@@ -443,10 +449,12 @@ export function registerMaintenanceHandlers(): void {
         mt.issue_description, mt.severity, mt.maintenance_type, mt.document_type, mt.completion_outcome,
         mt.list_archived_at,
         e.name as equipment_name, e.equipment_code,
+        d.name as department_name,
         c.name as category_name,
         (SELECT ta.remarks FROM ticket_actions ta WHERE ta.ticket_id = mt.id ORDER BY ta.action_date DESC, ta.created_at DESC LIMIT 1) as last_remarks
       FROM maintenance_tickets mt
       JOIN equipment_items e ON e.id = mt.equipment_id
+      LEFT JOIN departments d ON d.id = e.department_id
       LEFT JOIN categories c ON c.id = e.category_id
       WHERE mt.repair_status = 'COMPLETED'
       ORDER BY mt.completion_date DESC
@@ -458,10 +466,12 @@ export function registerMaintenanceHandlers(): void {
       SELECT mt.id, mt.ticket_number, mt.equipment_id, mt.reported_date, mt.completion_date,
         mt.issue_description, mt.severity, mt.repair_status, mt.maintenance_type, mt.document_type, mt.completion_outcome,
         e.name as equipment_name, e.equipment_code,
+        d.name as department_name,
         c.name as category_name,
         (SELECT ta.remarks FROM ticket_actions ta WHERE ta.ticket_id = mt.id ORDER BY ta.action_date DESC, ta.created_at DESC LIMIT 1) as last_remarks
       FROM maintenance_tickets mt
       JOIN equipment_items e ON e.id = mt.equipment_id
+      LEFT JOIN departments d ON d.id = e.department_id
       LEFT JOIN categories c ON c.id = e.category_id
       WHERE mt.equipment_id = ? AND mt.repair_status = 'COMPLETED'
       ORDER BY mt.completion_date DESC

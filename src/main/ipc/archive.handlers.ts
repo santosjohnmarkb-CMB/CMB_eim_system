@@ -17,7 +17,7 @@ import { requireAdmin, requireSession } from './session';
 import { renderAndArchiveList, type ArchiveListInput } from '../sync/archive-list';
 import { getLocalArchiveRoot } from '../sync/archive-path';
 import { pushOperationalToCloud } from '../sync/operational-sync';
-import { CATEGORY_TO_DEPARTMENT } from '../../shared/constants';
+import { opsDepartmentOf } from '../../shared/constants';
 
 export interface ClearedArchiveEntry {
   section: 'maintenance' | 'loan' | 'purchase';
@@ -123,9 +123,11 @@ export function registerArchiveHandlers(): void {
       SELECT mt.id, mt.ticket_number, mt.completion_date, mt.list_archived_at,
         mt.issue_description, mt.document_type,
         e.name AS equipment_name, e.equipment_code,
+        d.name AS department_name,
         c.name AS category_name
       FROM maintenance_tickets mt
       JOIN equipment_items e ON e.id = mt.equipment_id
+      LEFT JOIN departments d ON d.id = e.department_id
       LEFT JOIN categories c ON c.id = e.category_id
       WHERE mt.list_archived_at IS NOT NULL
       ORDER BY mt.completion_date DESC
@@ -133,7 +135,7 @@ export function registerArchiveHandlers(): void {
     for (const t of tickets) {
       entries.push({
         section: 'maintenance',
-        department: (t.category_name ? CATEGORY_TO_DEPARTMENT[t.category_name] : null) ?? null,
+        department: opsDepartmentOf(t.department_name, t.category_name),
         closedDate: t.completion_date ?? null,
         archivedAt: t.list_archived_at ?? null,
         id: t.id,

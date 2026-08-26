@@ -7,7 +7,7 @@ import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { CompletedTicketsTab } from '../components/maintenance/CompletedTicketsTab';
 import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG, COMPLETION_OUTCOME_CONFIG } from '../lib/constants';
 import { printHtml, escapeHtml } from '../lib/print';
-import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT } from '../../shared/constants';
+import { DEPARTMENT_CONFIG, opsDepartmentOf } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import type { MaintenanceTicket, RepairStatus, CompletedHistoryEntry } from '../../shared/types';
 
@@ -132,7 +132,7 @@ export function MaintenanceQueuePage() {
     const seen: Record<Department, Set<string>> = { camera: new Set(), lights_grips: new Set() };
 
     for (const entry of completedHistory) {
-      const dept = entry.category_name ? CATEGORY_TO_DEPARTMENT[entry.category_name] : undefined;
+      const dept = opsDepartmentOf(entry.department_name, entry.category_name) ?? undefined;
       if (!dept) continue;
       if (seen[dept].has(entry.equipment_id)) continue;
       if (result[dept].length >= 5) continue;
@@ -151,7 +151,7 @@ export function MaintenanceQueuePage() {
   const ticketsByDept = useMemo(() => {
     const result: Record<Department, MaintenanceTicket[]> = { camera: [], lights_grips: [] };
     for (const t of tickets) {
-      const dept = t.category_name ? CATEGORY_TO_DEPARTMENT[t.category_name] : undefined;
+      const dept = opsDepartmentOf(t.department_name, t.category_name) ?? undefined;
       if (dept) result[dept].push(t);
     }
     return result;

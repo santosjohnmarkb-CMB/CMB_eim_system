@@ -130,7 +130,7 @@ export function DashboardPage() {
     const seen: Record<Department, Set<string>> = { camera: new Set(), lights_grips: new Set() };
 
     for (const entry of completedHistory) {
-      const dept = entry.category_name ? CATEGORY_TO_DEPARTMENT[entry.category_name] : undefined;
+      const dept = opsDepartmentOf((entry as { department_name?: string }).department_name, entry.category_name);
       if (!dept) continue;
       if (seen[dept].has(entry.equipment_id)) continue;
       if (result[dept].length >= 5) continue;
@@ -149,7 +149,7 @@ export function DashboardPage() {
   const openTickets = useMemo(
     () => tickets
       .filter(isOpenTicket)
-      .filter((t) => t.category_name && CATEGORY_TO_DEPARTMENT[t.category_name])
+      .filter((t) => !!opsDepartmentOf((t as { department_name?: string }).department_name, t.category_name))
       .sort((a, b) => {
         const sp = (SEVERITY_CONFIG[a.severity]?.priority ?? 99) - (SEVERITY_CONFIG[b.severity]?.priority ?? 99);
         if (sp !== 0) return sp;
@@ -161,7 +161,7 @@ export function DashboardPage() {
   const openByDept = useMemo(() => {
     const result: Record<Department, MaintenanceTicket[]> = { camera: [], lights_grips: [] };
     for (const t of openTickets) {
-      const dept = t.category_name ? CATEGORY_TO_DEPARTMENT[t.category_name] : undefined;
+      const dept = opsDepartmentOf((t as { department_name?: string }).department_name, t.category_name);
       if (dept) result[dept].push(t);
     }
     return result;
@@ -177,7 +177,7 @@ export function DashboardPage() {
   }, [useCounts]);
 
   const allDeptTickets = useMemo(
-    () => tickets.filter((t) => t.category_name && CATEGORY_TO_DEPARTMENT[t.category_name]),
+    () => tickets.filter((t) => !!opsDepartmentOf((t as { department_name?: string }).department_name, t.category_name)),
     [tickets],
   );
 
@@ -205,7 +205,7 @@ export function DashboardPage() {
       result[dept] = counts;
     }
     for (const t of allDeptTickets) {
-      const dept = t.category_name ? CATEGORY_TO_DEPARTMENT[t.category_name] : undefined;
+      const dept = opsDepartmentOf((t as { department_name?: string }).department_name, t.category_name);
       if (dept && t.repair_status in result[dept]) {
         result[dept][t.repair_status]! += 1;
       }

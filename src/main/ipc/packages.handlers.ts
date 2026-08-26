@@ -31,7 +31,7 @@ import { getDatabase } from '../database/index';
 import { requireInventoryAccess } from './session';
 import { parseCsvRow } from './utils/csv';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
-import { sessionDepartment, departmentForCategory, assertEquipmentInDepartment } from './department';
+import { sessionDepartment, departmentForCatalogDepartment, assertEquipmentInDepartment } from './department';
 import { PackageCreateSchema, PackageUpdateSchema } from '../../shared/schemas';
 
 export function registerPackageHandlers(): void {
@@ -73,11 +73,11 @@ export function registerPackageHandlers(): void {
   // The department a package belongs to, derived from its main item's category.
   const packageDepartment = (mainItemId: string): string | null => {
     const row: any = db.prepare(`
-      SELECT c.name as category_name
-      FROM equipment_items e LEFT JOIN categories c ON c.id = e.category_id
+      SELECT d.name as department_name
+      FROM equipment_items e LEFT JOIN departments d ON d.id = e.department_id
       WHERE e.id = ?
     `).get(mainItemId);
-    return departmentForCategory(row?.category_name);
+    return departmentForCatalogDepartment(row?.department_name);
   };
 
   ipcMain.handle('db:packages:getAll', (event: any) => {
@@ -351,7 +351,7 @@ export function registerPackageHandlers(): void {
       }
 
       // Managers may only import packages whose main item is in their department.
-      if (dept && departmentForCategory(equipCategoryName(db, mainEquip.id)) !== dept) {
+      if (dept && departmentForCatalogDepartment(equipDepartmentName(db, mainEquip.id)) !== dept) {
         errors.push({ row: i + 1, message: `Main equipment "${row.main_equipment_code}" is in another department` });
         continue;
       }
@@ -540,7 +540,6 @@ export function registerPackageHandlers(): void {
     const refSheet = workbook.addWorksheet('Equipment Reference');
     refSheet.columns = [
       { header: 'equipment_code', key: 'equipment_code', width: 20 },
-      { header: 'name', key: 'name', width: 35 },
       { header: 'name', key: 'name', width: 40 },
     ];
     const refHeader = refSheet.getRow(1);
@@ -552,7 +551,6 @@ export function registerPackageHandlers(): void {
     for (const eq of equipment) {
       refSheet.addRow({
         equipment_code: eq.equipment_code,
-        name: eq.name,
         name: eq.name,
       });
     }
@@ -586,11 +584,11 @@ export function registerPackageHandlers(): void {
 }
 
 // Category name for an equipment id (used by the department guard in bulkImport).
-function equipCategoryName(db: any, equipmentId: string): string | null {
+function equipDepartmentName(db: any, equipmentId: string): string | null {
   const row: any = db.prepare(`
-    SELECT c.name as category_name
-    FROM equipment_items e LEFT JOIN categories c ON c.id = e.category_id
+    SELECT d.name as department_name
+    FROM equipment_items e LEFT JOIN departments d ON d.id = e.department_id
     WHERE e.id = ?
   `).get(equipmentId);
-  return row?.category_name ?? null;
+  return row?.department_name ?? null;
 }

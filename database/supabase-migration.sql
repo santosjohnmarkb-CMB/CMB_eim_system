@@ -560,3 +560,36 @@ CREATE POLICY "Allow all for package_definitions" ON package_definitions FOR ALL
 ALTER TABLE package_items ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all for package_items" ON package_items;
 CREATE POLICY "Allow all for package_items" ON package_items FOR ALL USING (true) WITH CHECK (true);
+
+-- ═══════════════════════════════════════════════════
+-- Migration: departments as top inventory level
+-- ═══════════════════════════════════════════════════
+-- Matches 1 Take schema: departments → categories.department_id →
+-- equipment_items.department_id. Drop retired equipment label columns.
+
+CREATE TABLE IF NOT EXISTS departments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE categories ADD COLUMN IF NOT EXISTS department_id UUID REFERENCES departments(id);
+ALTER TABLE equipment_items ADD COLUMN IF NOT EXISTS department_id UUID REFERENCES departments(id);
+ALTER TABLE equipment_items ALTER COLUMN subcategory_id DROP NOT NULL;
+ALTER TABLE equipment_items DROP COLUMN IF EXISTS display_name;
+ALTER TABLE equipment_items DROP COLUMN IF EXISTS description;
+
+ALTER TABLE departments ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all for departments" ON departments;
+CREATE POLICY "Allow all for departments" ON departments FOR ALL USING (true) WITH CHECK (true);
+
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE departments;
+EXCEPTION WHEN duplicate_object THEN
+  NULL;
+END $$;
+

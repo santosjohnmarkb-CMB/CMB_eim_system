@@ -189,6 +189,7 @@ export interface MaintenanceTicket {
   equipment_code?: string;
   category_id?: string;
   category_name?: string;
+  department_name?: string;
   asset_serial?: string | null;
   asset_tag?: string | null;
   notes_count?: number;
@@ -489,6 +490,7 @@ export interface CompletedHistoryEntry {
   completion_outcome?: CompletionOutcome | null;
   equipment_name: string;
   equipment_code: string;
+  department_name?: string;
   category_name: string;
   last_remarks: string | null;
   // Stamped when a completed ticket is captured in an admin "Archive List" snapshot.

@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useDepartmentStore } from '../stores/department.store';
 import { useEquipmentStore } from '../stores/equipment.store';
-import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT } from '../../shared/constants';
+import { DEPARTMENT_CONFIG, opsDepartmentOf } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 
 export function useDepartmentFilter() {
@@ -27,7 +27,11 @@ export function useDepartmentFilter() {
   }, [departmentCategoryIds]);
 
   const getCategoryDepartment = (categoryName: string): Department | null => {
-    return CATEGORY_TO_DEPARTMENT[categoryName] || null;
+    const category = categories.find((c) => c.name === categoryName);
+    const departmentName = category
+      ? departments.find((d) => d.id === category.department_id)?.name
+      : undefined;
+    return opsDepartmentOf(departmentName, categoryName);
   };
 
   return {

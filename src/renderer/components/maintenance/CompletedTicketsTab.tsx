@@ -8,7 +8,7 @@ import { ArchiveListButton } from '../common/ArchiveListButton';
 import { LoadingSpinner } from '../common/LoadingSpinner';
 import { SEVERITY_CONFIG, COMPLETION_OUTCOME_CONFIG } from '../../lib/constants';
 import { printHtml, escapeHtml } from '../../lib/print';
-import { DEPARTMENT_CONFIG, CATEGORY_TO_DEPARTMENT } from '../../../shared/constants';
+import { DEPARTMENT_CONFIG, opsDepartmentOf } from '../../../shared/constants';
 import type { Department } from '../../../shared/constants';
 import type { CompletedHistoryEntry } from '../../../shared/types';
 
@@ -78,7 +78,7 @@ export function CompletedTicketsTab() {
   const deptEntries = useMemo(() => {
     return entries.filter((e) => {
       if (e.list_archived_at) return false;
-      const dept = e.category_name ? CATEGORY_TO_DEPARTMENT[e.category_name] : undefined;
+      const dept = opsDepartmentOf(e.department_name, e.category_name);
       return dept === activeDept;
     });
   }, [entries, activeDept]);
@@ -125,7 +125,7 @@ export function CompletedTicketsTab() {
             const active = activeDept === dept;
             const count = entries.filter((e) => {
               if (e.list_archived_at) return false;
-              return (e.category_name ? CATEGORY_TO_DEPARTMENT[e.category_name] : undefined) === dept;
+              return opsDepartmentOf(e.department_name, e.category_name) === dept;
             }).length;
             return (
               <button
