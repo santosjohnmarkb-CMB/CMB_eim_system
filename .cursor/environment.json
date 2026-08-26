@@ -1,11 +1,14 @@
 {
   "name": "CMB EIM (Electron)",
   "install": "npm ci",
-  "start": "pgrep -x Xvfb >/dev/null 2>&1 || (Xvfb :99 -screen 0 1400x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &); sleep 1",
   "terminals": [
     {
+      "name": "xvfb",
+      "command": "rm -f /tmp/.X99-lock; exec Xvfb :99 -screen 0 1400x900x24 -nolisten tcp"
+    },
+    {
       "name": "app-dev",
-      "command": "DISPLAY=:99 npm run dev"
+      "command": "until [ -S /tmp/.X11-unix/X99 ]; do echo 'waiting for virtual display :99...'; sleep 0.5; done; DISPLAY=:99 npm run dev"
     }
   ],
   "ports": [
