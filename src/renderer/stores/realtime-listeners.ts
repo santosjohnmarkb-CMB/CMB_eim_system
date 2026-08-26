@@ -17,7 +17,8 @@ const dataChangedHandler = (...args: unknown[]) => {
   debounceTimer = setTimeout(() => {
     const { table } = payload;
 
-    if (['categories', 'subcategories', 'equipment_items', 'equipment_assets'].includes(table)) {
+    if (['categories', 'subcategories', 'equipment_items', 'equipment_assets',
+         'maintenance_tickets', 'equipment_loans', 'equipment_loan_items'].includes(table)) {
       useEquipmentStore.getState().fetchAll();
       useEquipmentStore.getState().fetchDashboardStats();
     }
@@ -29,6 +30,9 @@ const dataChangedHandler = (...args: unknown[]) => {
     }
     if (['maintenance_tickets', 'maintenance_notes', 'ticket_actions'].includes(table)) {
       useMaintenanceStore.getState().fetchAll();
+    }
+    if (table === 'preventive_schedules') {
+      useMaintenanceStore.getState().fetchSchedules();
     }
     if (['parts_catalog', 'parts_inventory', 'parts_transactions'].includes(table)) {
       usePartsStore.getState().fetchAll();

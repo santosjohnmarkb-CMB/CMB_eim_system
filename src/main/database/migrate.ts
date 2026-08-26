@@ -25,6 +25,109 @@ function tableExists(db: any, table: string): boolean {
   return row.count > 0;
 }
 
+/** Inserts any missing departments/categories/subcategories from EQUIPMENT_HIERARCHY. */
+export function seedEquipmentHierarchy(db: any): void {
+  if (!tableExists(db, 'departments') || !tableExists(db, 'categories') || !tableExists(db, 'subcategories')) return;
+
+  const insertCat = db.prepare(
+    `INSERT INTO categories (id, department_id, name, display_order, is_active) VALUES (?, ?, ?, ?, 1)`
+  );
+  const findDept = db.prepare('SELECT id FROM departments WHERE name = ? LIMIT 1');
+  const findCat = db.prepare('SELECT id FROM categories WHERE department_id = ? AND name = ? LIMIT 1');
+  const findSub = db.prepare('SELECT id FROM subcategories WHERE category_id = ? AND name = ? LIMIT 1');
+  const insertSub = db.prepare(
+    `INSERT INTO subcategories (id, category_id, name, display_order, is_active) VALUES (?, ?, ?, ?, 1)`
+  );
+  const insertDept = db.prepare(
+    `INSERT INTO departments (id, name, display_order, is_active) VALUES (?, ?, ?, 1)`
+  );
+  const activateDept = db.prepare('UPDATE departments SET is_active = 1, display_order = ? WHERE id = ?');
+  const activateCat = db.prepare('UPDATE categories SET is_active = 1, display_order = ? WHERE id = ?');
+  const activateSub = db.prepare('UPDATE subcategories SET is_active = 1, display_order = ? WHERE id = ?');
+
+  let deptOrder = 0;
+  for (const [deptName, catMap] of Object.entries(EQUIPMENT_HIERARCHY)) {
+    deptOrder += 1;
+    let dept = findDept.get(deptName) as { id: string } | undefined;
+    if (!dept) {
+      const id = randomUUID();
+      insertDept.run(id, deptName, deptOrder);
+      dept = { id };
+    } else {
+      activateDept.run(deptOrder, dept.id);
+    }
+    let catOrder = 0;
+    for (const [catName, subNames] of Object.entries(catMap)) {
+      catOrder += 1;
+      let cat = findCat.get(dept.id, catName) as { id: string } | undefined;
+      if (!cat) {
+        const id = randomUUID();
+        insertCat.run(id, dept.id, catName, catOrder);
+        cat = { id };
+      } else {
+        activateCat.run(catOrder, cat.id);
+      }
+      let subOrder = 0;
+      for (const subName of subNames) {
+        subOrder += 1;
+        const existing = findSub.get(cat.id, subName) as { id: string } | undefined;
+        if (!existing) insertSub.run(randomUUID(), cat.id, subName, subOrder);
+        else activateSub.run(subOrder, existing.id);
+      }
+    }
+  }
+}
+
+/** Hide leftover catalog rows that are no longer in EQUIPMENT_HIERARCHY and unused. */
+export function pruneUnusedObsoleteCatalog(db: any): void {
+  if (!tableExists(db, 'departments') || !tableExists(db, 'categories') || !tableExists(db, 'subcategories')) return;
+
+  const allowedCats = new Set<string>();
+  const allowedSubs = new Set<string>();
+  for (const [deptName, catMap] of Object.entries(EQUIPMENT_HIERARCHY)) {
+    for (const [catName, subNames] of Object.entries(catMap)) {
+      allowedCats.add(`${deptName}::${catName}`);
+      for (const subName of subNames) allowedSubs.add(`${deptName}::${catName}::${subName}`);
+    }
+  }
+
+  const usedCatIds = new Set(
+    (db.prepare('SELECT DISTINCT category_id AS id FROM equipment_items WHERE is_active = 1').all() as { id: string }[])
+      .map((r) => r.id),
+  );
+  const usedSubIds = new Set(
+    (db.prepare(
+      'SELECT DISTINCT subcategory_id AS id FROM equipment_items WHERE is_active = 1 AND subcategory_id IS NOT NULL',
+    ).all() as { id: string }[]).map((r) => r.id),
+  );
+
+  const cats = db.prepare(`
+    SELECT c.id, c.name, d.name AS department_name
+    FROM categories c JOIN departments d ON d.id = c.department_id
+    WHERE c.is_active = 1
+  `).all() as Array<{ id: string; name: string; department_name: string }>;
+  const deactivateCat = db.prepare('UPDATE categories SET is_active = 0 WHERE id = ?');
+  for (const cat of cats) {
+    if (allowedCats.has(`${cat.department_name}::${cat.name}`)) continue;
+    if (usedCatIds.has(cat.id)) continue;
+    deactivateCat.run(cat.id);
+  }
+
+  const subs = db.prepare(`
+    SELECT s.id, s.name, c.name AS category_name, d.name AS department_name
+    FROM subcategories s
+    JOIN categories c ON c.id = s.category_id
+    JOIN departments d ON d.id = c.department_id
+    WHERE s.is_active = 1
+  `).all() as Array<{ id: string; name: string; category_name: string; department_name: string }>;
+  const deactivateSub = db.prepare('UPDATE subcategories SET is_active = 0 WHERE id = ?');
+  for (const sub of subs) {
+    if (allowedSubs.has(`${sub.department_name}::${sub.category_name}::${sub.name}`)) continue;
+    if (usedSubIds.has(sub.id)) continue;
+    deactivateSub.run(sub.id);
+  }
+}
+
 const MIGRATIONS: Migration[] = [
   {
     id: '001_initial_eim_setup',
@@ -660,50 +763,8 @@ const MIGRATIONS: Migration[] = [
   {
     id: '024_equipment_departments',
     up: (db: any) => {
-      const seedHierarchy = () => {
-        const insertCat = db.prepare(
-          `INSERT INTO categories (id, department_id, name, display_order, is_active) VALUES (?, ?, ?, ?, 1)`
-        );
-        const findDept = db.prepare('SELECT id FROM departments WHERE name = ? LIMIT 1');
-        const findCat = db.prepare('SELECT id FROM categories WHERE department_id = ? AND name = ? LIMIT 1');
-        const findSub = db.prepare('SELECT id FROM subcategories WHERE category_id = ? AND name = ? LIMIT 1');
-        const insertSubFinal = db.prepare(
-          `INSERT INTO subcategories (id, category_id, name, display_order, is_active) VALUES (?, ?, ?, ?, 1)`
-        );
-        const insertDept = db.prepare(
-          `INSERT INTO departments (id, name, display_order, is_active) VALUES (?, ?, ?, 1)`
-        );
-
-        let deptOrder = 0;
-        for (const [deptName, catMap] of Object.entries(EQUIPMENT_HIERARCHY)) {
-          deptOrder += 1;
-          let dept = findDept.get(deptName) as { id: string } | undefined;
-          if (!dept) {
-            const id = randomUUID();
-            insertDept.run(id, deptName, deptOrder);
-            dept = { id };
-          }
-          let catOrder = 0;
-          for (const [catName, subNames] of Object.entries(catMap)) {
-            catOrder += 1;
-            let cat = findCat.get(dept.id, catName) as { id: string } | undefined;
-            if (!cat) {
-              const id = randomUUID();
-              insertCat.run(id, dept.id, catName, catOrder);
-              cat = { id };
-            }
-            let subOrder = 0;
-            for (const subName of subNames) {
-              subOrder += 1;
-              const existing = findSub.get(cat.id, subName);
-              if (!existing) insertSubFinal.run(randomUUID(), cat.id, subName, subOrder);
-            }
-          }
-        }
-      };
-
       if (tableExists(db, 'departments') && columnExists(db, 'equipment_items', 'department_id')) {
-        seedHierarchy();
+        seedEquipmentHierarchy(db);
         return;
       }
       if (!tableExists(db, 'categories') || !tableExists(db, 'equipment_items')) return;
@@ -842,7 +903,7 @@ const MIGRATIONS: Migration[] = [
       db.exec('CREATE INDEX IF NOT EXISTS idx_categories_department ON categories(department_id)');
       db.exec('CREATE INDEX IF NOT EXISTS idx_subcategories_category ON subcategories(category_id)');
 
-      seedHierarchy();
+      seedEquipmentHierarchy(db);
     },
   },
 ];

@@ -12,8 +12,8 @@
 --   status logs, audit logs, the offline queue, sync watermarks, and every
 --   non-admin user.
 --
--- It also returns any unit left DEPLOYED / IN_REPAIR by a now-deleted loan or
--- ticket back to AVAILABLE and recomputes per-item availability, so the retained
+-- It also returns any unit left DEPLOYED / IN_REPAIR / FOR_INSPECTION by a now-deleted
+-- loan or ticket back to AVAILABLE and recomputes per-item availability, so the retained
 -- equipment is internally consistent.
 --
 -- Usage (with the app closed):
@@ -58,7 +58,7 @@ DELETE FROM users WHERE username <> 'admin';
 -- or in repair once those records are gone.
 UPDATE equipment_assets
    SET current_status = 'AVAILABLE', updated_at = datetime('now')
- WHERE current_status IN ('DEPLOYED', 'IN_REPAIR');
+ WHERE current_status IN ('DEPLOYED', 'IN_REPAIR', 'FOR_INSPECTION');
 
 -- Recompute availability for every item that tracks per-unit assets.
 UPDATE equipment_items

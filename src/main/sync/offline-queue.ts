@@ -5,11 +5,11 @@ import { recordSchemaError } from './schema-health';
 
 const REFRESHABLE_TABLES = new Set([
   'equipment_assets', 'asset_status_log',
-  'maintenance_tickets', 'maintenance_notes',
+  'maintenance_tickets', 'maintenance_notes', 'ticket_actions',
   'equipment_loans', 'equipment_loan_items',
   'purchase_requests', 'purchase_request_items',
   'parts_catalog', 'parts_inventory', 'parts_transactions',
-  'vendors', 'preventive_schedules',
+  'parts_compatibility', 'vendors', 'preventive_schedules',
 ]);
 
 const MAX_QUEUE_SIZE = 200;

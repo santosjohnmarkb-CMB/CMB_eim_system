@@ -8,8 +8,11 @@ import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { EQUIPMENT_STATUS_CONFIG } from '../lib/constants';
-import { useToast, useDepartmentFilter } from '../hooks';
+import { latestCategories, latestDepartments, latestSubcategories, latestSubSubs } from '../lib/catalogHierarchy';
+import { useToast } from '../hooks';
 import { useAuthStore } from '../stores/auth.store';
+import { opsDepartmentOf } from '../../shared/constants';
+import type { Department } from '../../shared/constants';
 import type { EquipmentStatus, AssetStatusLogEntry, EquipmentAsset } from '../../shared/types';
 
 const statusVariantMap: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'purple' | 'default'> = {
@@ -26,8 +29,8 @@ export function EquipmentDetailPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const role = useAuthStore((s) => s.user?.role);
-  const { items, loading, fetchAll, categories, subcategories, getStatusLog, updateEquipment, updateAsset, updateAssetStatus, fetchCategories, fetchSubcategories } = useEquipmentStore();
-  const { isEquipmentInDepartment } = useDepartmentFilter();
+  const userDept = useAuthStore((s) => s.user?.department) as Department | null;
+  const { items, loading, fetchAll, departments, categories, subcategories, getStatusLog, updateEquipment, updateAsset, updateAssetStatus, fetchDepartments, fetchCategories, fetchSubcategories } = useEquipmentStore();
   const [statusLog, setStatusLog] = useState<AssetStatusLogEntry[]>([]);
   const [showEditModal, setShowEditModal] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
@@ -48,7 +51,7 @@ export function EquipmentDetailPage() {
     if (id) { getStatusLog(id).then(setStatusLog).catch(() => {}); }
   }, [id, getStatusLog]);
 
-  useEffect(() => { fetchCategories(); fetchSubcategories(); }, [fetchCategories, fetchSubcategories]);
+  useEffect(() => { fetchDepartments(); fetchCategories(); fetchSubcategories(); }, [fetchDepartments, fetchCategories, fetchSubcategories]);
 
   // Deep-linking straight to this page (or reloading) can arrive before the
   // equipment list has been fetched; pull it in so we don't hang on the spinner.
@@ -162,7 +165,15 @@ export function EquipmentDetailPage() {
     } catch (err: any) { toast.error(err.message); }
   };
 
-  const editSubcategories = subcategories.filter((s) => s.category_id === editForm.category_id);
+  const selectedDept = departments.find((d) => d.id === editForm.department_id);
+  const selectedOpsDept = selectedDept ? opsDepartmentOf(selectedDept.name, null) : userDept;
+  const catalogDepts = latestDepartments(departments, userDept);
+  const editCategories = latestCategories(categories, departments, selectedOpsDept)
+    .filter((c) => !editForm.department_id || c.department_id === editForm.department_id);
+  const selectedCat = editCategories.find((c) => c.id === editForm.category_id) || categories.find((c) => c.id === editForm.category_id);
+  const editSubcategories = latestSubcategories(subcategories, departments, selectedCat);
+  const selectedSub = editSubcategories.find((s) => s.id === editForm.subcategory_id) || subcategories.find((s) => s.id === editForm.subcategory_id);
+  const editSubSubs = latestSubSubs(selectedCat, selectedSub);
 
   return (
     <div className="space-y-6">
@@ -180,8 +191,10 @@ export function EquipmentDetailPage() {
         <div className="grid grid-cols-2 gap-y-2 text-sm">
           <span className="text-surface-500">Brand</span><span className="text-surface-200">{equipment.brand || '-'}</span>
           <span className="text-surface-500">Model</span><span className="text-surface-200">{equipment.model || '-'}</span>
+          <span className="text-surface-500">Department</span><span className="text-surface-200">{equipment.department_name || '-'}</span>
           <span className="text-surface-500">Category</span><span className="text-surface-200">{equipment.category_name}</span>
-          <span className="text-surface-500">Subcategory</span><span className="text-surface-200">{equipment.subcategory_name}</span>
+          <span className="text-surface-500">Subcategory</span><span className="text-surface-200">{equipment.subcategory_name || '-'}</span>
+          <span className="text-surface-500">Sub-sub category</span><span className="text-surface-200">{equipment.sub_subcategory || '-'}</span>
           <span className="text-surface-500">Quantity</span><span className="text-surface-200">{equipment.quantity ?? units.length}</span>
           <span className="text-surface-500">Available</span><span className={`${(equipment.available_qty ?? 0) === 0 ? 'text-danger-400' : 'text-surface-200'}`}>{equipment.available_qty ?? 0} of {equipment.quantity ?? units.length}</span>
         </div>
@@ -254,19 +267,37 @@ export function EquipmentDetailPage() {
             <div className="grid grid-cols-2 gap-4">
               <Input label="Name *" value={editForm.name} onChange={(e) => setEdit('name', e.target.value)} required />
               <div>
-                <label className="block text-xs font-medium text-surface-400 mb-1">Category *</label>
-                <select value={editForm.category_id} onChange={(e) => { setEdit('category_id', e.target.value); setEdit('subcategory_id', ''); }} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100">
-                  <option value="">Select category</option>
-                  {categories.filter((c) => isEquipmentInDepartment(c.id) || c.id === editForm.category_id).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                <label className="block text-xs font-medium text-surface-400 mb-1">Department *</label>
+                <select value={editForm.department_id} onChange={(e) => { setEdit('department_id', e.target.value); setEdit('category_id', ''); setEdit('subcategory_id', ''); setEdit('sub_subcategory', ''); }} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100" disabled={catalogDepts.length <= 1}>
+                  <option value="">Select department</option>
+                  {catalogDepts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-surface-400 mb-1">Subcategory *</label>
-                <select value={editForm.subcategory_id} onChange={(e) => setEdit('subcategory_id', e.target.value)} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100">
-                  <option value="">Select subcategory</option>
-                  {editSubcategories.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                <label className="block text-xs font-medium text-surface-400 mb-1">Category *</label>
+                <select value={editForm.category_id} onChange={(e) => { setEdit('category_id', e.target.value); setEdit('subcategory_id', ''); setEdit('sub_subcategory', ''); }} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100">
+                  <option value="">Select category</option>
+                  {editCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
+              {editSubcategories.length > 0 && (
+                <div>
+                  <label className="block text-xs font-medium text-surface-400 mb-1">Sub category</label>
+                  <select value={editForm.subcategory_id} onChange={(e) => { setEdit('subcategory_id', e.target.value); setEdit('sub_subcategory', ''); }} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100">
+                    <option value="">None</option>
+                    {editSubcategories.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+              )}
+              {editSubSubs.length > 0 && (
+                <div>
+                  <label className="block text-xs font-medium text-surface-400 mb-1">Sub-sub category</label>
+                  <select value={editForm.sub_subcategory || ''} onChange={(e) => setEdit('sub_subcategory', e.target.value)} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100">
+                    <option value="">None</option>
+                    {editSubSubs.map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </div>
+              )}
               <Input label="Brand" value={editForm.brand} onChange={(e) => setEdit('brand', e.target.value)} />
               <Input label="Model" value={editForm.model} onChange={(e) => setEdit('model', e.target.value)} />
               <Input label="Quantity" type="number" value={editForm.quantity} onChange={(e) => setEdit('quantity', e.target.value)} />

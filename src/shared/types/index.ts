@@ -327,6 +327,8 @@ export interface EquipmentLoanItem {
   equipment_name?: string;
   equipment_code?: string;
   category_name?: string;
+  asset_serial?: string | null;
+  asset_tag?: string | null;
 }
 
 export interface EquipmentLoan {
@@ -493,6 +495,7 @@ export interface CompletedHistoryEntry {
   department_name?: string;
   category_name: string;
   last_remarks: string | null;
+  asset_serial?: string | null;
   // Stamped when a completed ticket is captured in an admin "Archive List" snapshot.
   list_archived_at?: string | null;
 }

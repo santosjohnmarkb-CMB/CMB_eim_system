@@ -179,7 +179,10 @@ export function CompletedTicketsTab() {
                     <td className="px-5 py-3 font-mono text-xs text-primary-400 whitespace-nowrap">{entry.ticket_number}</td>
                     <td className="px-3 py-3">
                       <p className="text-surface-200 font-medium truncate max-w-[220px]">{entry.equipment_name}</p>
-                      <p className="text-2xs text-surface-500">{entry.equipment_code}</p>
+                      <p className="text-2xs text-surface-500">
+                        {entry.equipment_code}
+                        {entry.asset_serial ? ` · SN ${entry.asset_serial}` : ''}
+                      </p>
                     </td>
                     <td className="px-3 py-3 text-xs text-surface-300 whitespace-nowrap capitalize">{docTypeLabel(entry)}</td>
                     <td className="px-3 py-3 text-xs text-surface-300 whitespace-nowrap">{fmtDate(entry.completion_date)}</td>

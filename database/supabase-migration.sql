@@ -296,6 +296,16 @@ ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (
 
 ALTER TABLE maintenance_tickets ADD COLUMN IF NOT EXISTS completion_outcome TEXT;
 
+-- Align cloud CHECKs with the local schema so upserts cannot store values the
+-- app would reject (and so a missing CHECK cannot silently accept bad data).
+ALTER TABLE maintenance_tickets DROP CONSTRAINT IF EXISTS maintenance_tickets_document_type_check;
+ALTER TABLE maintenance_tickets ADD CONSTRAINT maintenance_tickets_document_type_check
+  CHECK (document_type IN ('maintenance', 'repair', 'update', 'loss'));
+
+ALTER TABLE maintenance_tickets DROP CONSTRAINT IF EXISTS maintenance_tickets_completion_outcome_check;
+ALTER TABLE maintenance_tickets ADD CONSTRAINT maintenance_tickets_completion_outcome_check
+  CHECK (completion_outcome IS NULL OR completion_outcome IN ('repaired', 'unrepairable', 'total_loss', 'found', 'not_found'));
+
 -- Refresh the maintenance_type CHECK to the current allowed values. Databases
 -- created before the list was widened still carry the old/narrower constraint,
 -- which rejects rows the app considers valid (error 23514). Mirrors local
@@ -436,7 +446,8 @@ DO $$
 DECLARE t text;
 BEGIN
   FOR t IN SELECT unnest(ARRAY[
-    'equipment_loans', 'equipment_loan_items', 'purchase_requests', 'purchase_request_items'
+    'equipment_loans', 'equipment_loan_items', 'purchase_requests', 'purchase_request_items',
+    'preventive_schedules', 'parts_compatibility'
   ]) LOOP
     BEGIN
       EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE %I', t);

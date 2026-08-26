@@ -203,7 +203,11 @@ export function LoanDetailPage() {
       duration: loan.duration,
       remarks: loan.remarks,
       released_by: loan.created_by,
-      items: loan.items.map((it) => ({ code: it.equipment_code, name: it.equipment_name || '' })),
+      items: loan.items.map((it) => ({
+        code: it.equipment_code,
+        name: it.equipment_name || '',
+        serial: it.asset_serial,
+      })),
     };
     // Inward loans (borrowed from an owner) print a receiving form; outward loans
     // print the release form.
@@ -309,6 +313,7 @@ export function LoanDetailPage() {
             <tr className="text-xs text-surface-500 uppercase tracking-wider border-b border-surface-800">
               {isOutward && <th className="text-left px-5 py-2.5 font-medium">Code</th>}
               <th className="text-left px-3 py-2.5 font-medium">{isOutward ? 'Equipment' : 'Item'}</th>
+              {isOutward && <th className="text-left px-3 py-2.5 font-medium">Serial</th>}
               {!isOutward && <th className="text-left px-3 py-2.5 font-medium">Notes</th>}
               <th className="text-left px-3 py-2.5 font-medium">Status</th>
               <th className="text-right px-5 py-2.5 font-medium">Action</th>
@@ -319,6 +324,7 @@ export function LoanDetailPage() {
               <tr key={it.id}>
                 {isOutward && <td className="px-5 py-3 font-mono text-xs text-primary-400 whitespace-nowrap">{it.equipment_code}</td>}
                 <td className={`${isOutward ? 'px-3' : 'px-5'} py-3 text-surface-200`}>{it.equipment_name}</td>
+                {isOutward && <td className="px-3 py-3 font-mono text-xs text-surface-400 whitespace-nowrap">{it.asset_serial || '—'}</td>}
                 {!isOutward && <td className="px-3 py-3 text-surface-400">{it.notes || '—'}</td>}
                 <td className="px-3 py-3">
                   {it.status === 'RETURNED' ? (

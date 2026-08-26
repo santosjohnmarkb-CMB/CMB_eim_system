@@ -5,6 +5,7 @@ import type { Department } from '../constants';
 export interface ReleaseFormItem {
   code?: string | null;
   name: string;
+  serial?: string | null;
 }
 
 export interface ReleaseFormInput {
@@ -41,7 +42,7 @@ export function buildLoanReleaseForm(input: ReleaseFormInput): string {
     <tr>
       <td style="text-align:center;">${idx + 1}</td>
       <td>${escapeHtml(it.code || '—')}</td>
-      <td>${escapeHtml(it.name || '—')}</td>
+      <td>${escapeHtml(it.name || '—')}${it.serial ? ` <span style="color:#6b7280;">(SN ${escapeHtml(it.serial)})</span>` : ''}</td>
       <td style="text-align:center;">1</td>
       <td></td>
     </tr>`).join('');

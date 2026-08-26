@@ -10,6 +10,7 @@ import { Modal } from '../components/common/Modal';
 import { EQUIPMENT_STATUS_CONFIG } from '../lib/constants';
 import { DEPARTMENT_CONFIG, opsDepartmentOf } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
+import { latestCategories, latestSubcategories, latestSubSubs } from '../lib/catalogHierarchy';
 import type { EquipmentWithAsset, EquipmentStatus, BulkImportResult } from '../../shared/types';
 import { useAuthStore } from '../stores/auth.store';
 import { useToast } from '../hooks';
@@ -71,20 +72,19 @@ function isZeroPricedPackageComponent(item: EquipmentWithAsset): boolean {
 // initial viewing: camera/lens/special for the camera dept, lighting for lights & grips.
 // Lower rank sorts first; items within the same rank keep their existing order.
 function defaultGroupRank(item: EquipmentWithAsset, department: Department | null): number {
-  const sub = (item.subcategory_name ?? '').toLowerCase();
+  const cat = (item.category_name ?? '').toLowerCase();
   if (department === 'camera') {
-    // Rank by subcategory only — the category is "Camera" for every item here, so a
-    // category-name match would lump lens/special rigs in with the camera group.
-    if (sub.includes('camera')) return 0;
-    if (sub.includes('lens')) return 1;
-    if (sub.includes('special')) return 2;
-    return 3;
+    if (cat.includes('camera body')) return 0;
+    if (cat.includes('lens')) return 1;
+    if (cat.includes('filter')) return 2;
+    if (cat.includes('support')) return 3;
+    if (cat.includes('peripheral')) return 4;
+    return 5;
   }
   if (department === 'lights_grips') {
-    // Grip and Lighting share the "Lights and Grips" category, so rank by subcategory
-    // only — otherwise the category name ("Lights and Grips") matches grips too.
-    if (sub.includes('light')) return 0;
-    return 1;
+    if (cat.includes('light')) return 0;
+    if (cat.includes('grip')) return 1;
+    return 2;
   }
   return 0;
 }
@@ -95,7 +95,7 @@ export function EquipmentListPage() {
   const deptConfig = department ? DEPARTMENT_CONFIG[department] : null;
   const DeptIcon = department ? DEPT_ICONS[department] : null;
 
-  const { items, categories, subcategories, loading, fetchAll, fetchCategories, fetchSubcategories, importCsv } = useEquipmentStore();
+  const { items, departments, categories, subcategories, loading, fetchAll, fetchDepartments, fetchCategories, fetchSubcategories, importCsv } = useEquipmentStore();
   const navigate = useNavigate();
   const toast = useToast();
   const role = useAuthStore((s) => s.user?.role);
@@ -105,6 +105,7 @@ export function EquipmentListPage() {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [subcategoryFilter, setSubcategoryFilter] = useState('');
+  const [subSubFilter, setSubSubFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [printMenuOpen, setPrintMenuOpen] = useState(false);
   const printMenuRef = useRef<HTMLDivElement>(null);
@@ -120,46 +121,48 @@ export function EquipmentListPage() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  useEffect(() => { fetchAll(); fetchCategories(); fetchSubcategories(); }, [fetchAll, fetchCategories, fetchSubcategories]);
-
-  const deptCategoryNames = useMemo(() => {
-    if (!deptConfig) return null;
-    return new Set(deptConfig.categories);
-  }, [deptConfig]);
+  useEffect(() => { fetchAll(); fetchDepartments(); fetchCategories(); fetchSubcategories(); }, [fetchAll, fetchDepartments, fetchCategories, fetchSubcategories]);
 
   const deptItems = useMemo(() => {
     const visible = items.filter((i) => !isZeroPricedPackageComponent(i));
-    if (!deptCategoryNames) return visible;
-    return visible.filter((i) => {
-      const ops = opsDepartmentOf(i.department_name, i.category_name);
-      return department ? ops === department : true;
-    });
-  }, [items, categories, deptCategoryNames]);
+    if (!department) return visible;
+    return visible.filter((i) => opsDepartmentOf(i.department_name, i.category_name) === department);
+  }, [items, department]);
 
-  const usedCategoryIds = useMemo(() => new Set(deptItems.map((i) => i.category_id)), [deptItems]);
+  const hierarchyCategories = useMemo(
+    () => latestCategories(categories, departments, department),
+    [categories, departments, department],
+  );
 
-  const deduplicatedCategories = useMemo(() => {
-    const seen = new Map<string, typeof categories[0]>();
-    for (const cat of categories) {
-      if (deptCategoryNames && !deptCategoryNames.has(cat.name)) continue;
-      const existing = seen.get(cat.name);
-      if (!existing) {
-        seen.set(cat.name, cat);
-      } else if (usedCategoryIds.has(cat.id) && !usedCategoryIds.has(existing.id)) {
-        seen.set(cat.name, cat);
-      }
-    }
-    return Array.from(seen.values());
-  }, [categories, usedCategoryIds, deptCategoryNames]);
+  const selectedCategory = useMemo(
+    () => hierarchyCategories.find((c) => c.id === categoryFilter),
+    [hierarchyCategories, categoryFilter],
+  );
 
-  const filteredSubcategories = useMemo(() => {
-    if (!categoryFilter) return [];
-    return subcategories.filter((s) => s.category_id === categoryFilter);
-  }, [subcategories, categoryFilter]);
+  const hierarchySubcategories = useMemo(
+    () => latestSubcategories(subcategories, departments, selectedCategory),
+    [subcategories, departments, selectedCategory],
+  );
+
+  const selectedSubcategory = useMemo(
+    () => hierarchySubcategories.find((s) => s.id === subcategoryFilter),
+    [hierarchySubcategories, subcategoryFilter],
+  );
+
+  const hierarchySubSubs = useMemo(
+    () => latestSubSubs(selectedCategory, selectedSubcategory),
+    [selectedCategory, selectedSubcategory],
+  );
 
   const handleCategoryChange = (catId: string) => {
     setCategoryFilter(catId);
     setSubcategoryFilter('');
+    setSubSubFilter('');
+  };
+
+  const handleSubcategoryChange = (subId: string) => {
+    setSubcategoryFilter(subId);
+    setSubSubFilter('');
   };
 
   // Shared predicate for the active search/category/subcategory/status filters, so the
@@ -168,10 +171,20 @@ export function EquipmentListPage() {
     if (isZeroPricedPackageComponent(item)) return false;
     if (search) {
       const q = search.toLowerCase();
-      if (!item.name.toLowerCase().includes(q) && !item.equipment_code.toLowerCase().includes(q) && !item.brand.toLowerCase().includes(q)) return false;
+      const haystack = [
+        item.name,
+        item.equipment_code,
+        item.brand,
+        item.model,
+        item.category_name,
+        item.subcategory_name,
+        item.sub_subcategory,
+      ].filter(Boolean).join(' ').toLowerCase();
+      if (!haystack.includes(q)) return false;
     }
     if (categoryFilter && item.category_id !== categoryFilter) return false;
     if (subcategoryFilter && item.subcategory_id !== subcategoryFilter) return false;
+    if (subSubFilter && (item.sub_subcategory || '') !== subSubFilter) return false;
     if (statusFilter) {
       const units = unitsOf(item);
       const matches = units.length > 0
@@ -180,7 +193,7 @@ export function EquipmentListPage() {
       if (!matches) return false;
     }
     return true;
-  }, [search, categoryFilter, subcategoryFilter, statusFilter]);
+  }, [search, categoryFilter, subcategoryFilter, subSubFilter, statusFilter]);
 
   const filtered = useMemo(() => {
     const list = deptItems.filter(matchesFilters);
@@ -217,7 +230,7 @@ export function EquipmentListPage() {
       return `<tr>
         <td>${escapeHtml(i.equipment_code)}</td>
         <td>${escapeHtml(i.name)}${sub ? `<br/><span style="color:#888;font-size:10px">${escapeHtml(sub)}</span>` : ''}</td>
-        <td>${escapeHtml(i.category_name || '—')}</td>
+        <td>${escapeHtml([i.category_name, i.subcategory_name, i.sub_subcategory].filter(Boolean).join(' · ') || '—')}</td>
         <td>${escapeHtml(summarizeField(i, (a) => a.vendor_name))}</td>
         <td>${escapeHtml(deliveredLabel)}</td>
         <td>${i.quantity ?? 1}</td>
@@ -250,7 +263,11 @@ export function EquipmentListPage() {
   const columns: Column<EquipmentWithAsset>[] = [
     { key: 'equipment_code', header: 'Code', className: 'w-24' },
     { key: 'name', header: 'Name', render: (item) => (<div><p className="font-medium text-surface-100">{item.name}</p><p className="text-xs text-surface-500">{item.brand} {item.model}</p></div>) },
-    { key: 'category_name', header: 'Category', render: (item) => (<span className="text-surface-400">{item.category_name}</span>) },
+    { key: 'category_name', header: 'Category', render: (item) => (
+      <span className="text-surface-400">
+        {[item.category_name, item.subcategory_name, item.sub_subcategory].filter(Boolean).join(' · ') || '—'}
+      </span>
+    ) },
     { key: 'supplier', header: 'Supplier', render: (item) => (<span className="text-surface-400">{summarizeField(item, (a) => a.vendor_name)}</span>) },
     { key: 'delivered_date', header: 'Delivered', render: (item) => {
       const units = unitsOf(item);
@@ -331,15 +348,21 @@ export function EquipmentListPage() {
 
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
-        <SearchBox value={search} onChange={setSearch} placeholder="Search equipment..." className="w-64" />
+        <SearchBox value={search} onChange={setSearch} placeholder="Search name, code, category..." className="w-64" />
         <select value={categoryFilter} onChange={(e) => handleCategoryChange(e.target.value)} className="px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-200">
           <option value="">All Categories</option>
-          {deduplicatedCategories.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
+          {hierarchyCategories.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
         </select>
-        {categoryFilter && filteredSubcategories.length > 0 && (
-          <select value={subcategoryFilter} onChange={(e) => setSubcategoryFilter(e.target.value)} className="px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-200">
+        {categoryFilter && hierarchySubcategories.length > 0 && (
+          <select value={subcategoryFilter} onChange={(e) => handleSubcategoryChange(e.target.value)} className="px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-200">
             <option value="">All Subcategories</option>
-            {filteredSubcategories.map((s) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+            {hierarchySubcategories.map((s) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+          </select>
+        )}
+        {subcategoryFilter && hierarchySubSubs.length > 0 && (
+          <select value={subSubFilter} onChange={(e) => setSubSubFilter(e.target.value)} className="px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-200">
+            <option value="">All Sub-sub categories</option>
+            {hierarchySubSubs.map((n) => (<option key={n} value={n}>{n}</option>))}
           </select>
         )}
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-200">

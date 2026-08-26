@@ -338,7 +338,10 @@ export function MaintenanceQueuePage() {
                                   </span>
                                 )}
                               </p>
-                              <p className="text-2xs text-surface-500">{ticket.equipment_code}</p>
+                              <p className="text-2xs text-surface-500">
+                                {ticket.equipment_code}
+                                {ticket.asset_serial ? ` · SN ${ticket.asset_serial}` : ''}
+                              </p>
                             </td>
                             <td className="px-3 py-3 whitespace-nowrap">
                               <span className={`text-xs font-medium ${statusCfg?.color ?? 'text-surface-400'}`}>

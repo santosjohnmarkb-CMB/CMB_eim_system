@@ -57,7 +57,9 @@ export function EquipmentUseCountPage() {
       if (q && !(
         c.name.toLowerCase().includes(q) ||
         c.equipment_code.toLowerCase().includes(q) ||
-        (c.brand || '').toLowerCase().includes(q)
+        (c.brand || '').toLowerCase().includes(q) ||
+        (c.category_name || '').toLowerCase().includes(q) ||
+        (c.subcategory_name || '').toLowerCase().includes(q)
       )) continue;
       const dept = opsDepartmentOf((c as any).department_name, c.category_name);
       if (dept) result[dept].push(c);
@@ -93,7 +95,7 @@ export function EquipmentUseCountPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full pl-9 pr-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500"
-          placeholder="Search by name, code, or brand..."
+          placeholder="Search by name, code, brand, or category..."
         />
       </div>
 

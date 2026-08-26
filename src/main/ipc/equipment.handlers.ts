@@ -8,7 +8,7 @@ import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { pushOperationalToCloud } from '../sync/operational-sync';
 import { CATEGORY_PREFIXES, opsDepartmentOf } from '../../shared/constants';
 import { sessionDepartment, categoriesForDepartment, assertEquipmentInDepartment } from './department';
-import { recomputeAvailability } from './availability';
+import { recomputeAvailability, insertAssetStatusLog, pushStatusLogsToCloud } from './availability';
 import { parseCsvRow } from './utils/csv';
 
 export function registerEquipmentHandlers(): void {
@@ -328,6 +328,7 @@ export function registerEquipmentHandlers(): void {
     if (!asset) throw new Error('Asset not found');
     const previousStatus = asset.current_status;
 
+    const statusLogIds: string[] = [];
     const tx = db.transaction(() => {
       if (input.status === 'RETIRED') {
         db.prepare("UPDATE equipment_assets SET current_status = 'RETIRED', retirement_date = ?, retirement_reason = ?, updated_at = datetime('now') WHERE id = ?")
@@ -336,16 +337,21 @@ export function registerEquipmentHandlers(): void {
         db.prepare("UPDATE equipment_assets SET current_status = ?, updated_at = datetime('now') WHERE id = ?")
           .run(input.status, input.asset_id);
       }
-      db.prepare(`
-        INSERT INTO asset_status_log (id, asset_id, equipment_id, previous_status, new_status, changed_by, reason)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(uuidv4(), input.asset_id, asset.equipment_id, previousStatus, input.status, user.full_name, input.reason || '');
+      statusLogIds.push(insertAssetStatusLog(db, {
+        assetId: input.asset_id,
+        equipmentId: asset.equipment_id,
+        previousStatus,
+        newStatus: input.status,
+        changedBy: user.full_name,
+        reason: input.reason || '',
+      }));
       recomputeAvailability(db, asset.equipment_id);
     });
     tx();
 
     const updatedAsset: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(input.asset_id);
     if (updatedAsset) void pushOperationalToCloud('equipment_assets', 'UPDATE', updatedAsset);
+    pushStatusLogsToCloud(db, statusLogIds);
     return { success: true };
   });
 
@@ -370,10 +376,11 @@ export function registerEquipmentHandlers(): void {
 
   // Apply a status to every live unit of an equipment (bulk). Per-unit changes use
   // db:equipment:updateAssetStatus instead. Availability is recomputed from the units.
-  const setStatusForAllUnits = (equipmentId: string, newStatus: string, reason: string, changedBy: string): string[] => {
+  const setStatusForAllUnits = (equipmentId: string, newStatus: string, reason: string, changedBy: string): { assetIds: string[]; logIds: string[] } => {
     const assets: any[] = db.prepare(
       "SELECT * FROM equipment_assets WHERE equipment_id = ? AND current_status NOT IN ('RETIRED', 'MISSING')",
     ).all(equipmentId);
+    const logIds: string[] = [];
     for (const asset of assets) {
       if (newStatus === 'RETIRED') {
         db.prepare("UPDATE equipment_assets SET current_status = 'RETIRED', retirement_date = ?, retirement_reason = ?, updated_at = datetime('now') WHERE id = ?")
@@ -382,30 +389,39 @@ export function registerEquipmentHandlers(): void {
         db.prepare("UPDATE equipment_assets SET current_status = ?, updated_at = datetime('now') WHERE id = ?")
           .run(newStatus, asset.id);
       }
-      db.prepare(`
-        INSERT INTO asset_status_log (id, asset_id, equipment_id, previous_status, new_status, changed_by, reason)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(uuidv4(), asset.id, equipmentId, asset.current_status, newStatus, changedBy, reason || '');
+      logIds.push(insertAssetStatusLog(db, {
+        assetId: asset.id,
+        equipmentId,
+        previousStatus: asset.current_status,
+        newStatus,
+        changedBy,
+        reason: reason || '',
+      }));
     }
     recomputeAvailability(db, equipmentId);
-    return assets.map((a) => a.id);
+    return { assetIds: assets.map((a) => a.id), logIds };
   };
 
   ipcMain.handle('db:equipment:updateStatus', (event: any, equipmentId: string, newStatus: string, reason: string) => {
     const user = requireInventoryAccess(event);
     assertEquipmentInDepartment(db, event, equipmentId);
-    let assetIds: string[] = [];
+    let result = { assetIds: [] as string[], logIds: [] as string[] };
     const tx = db.transaction(() => {
-      assetIds = setStatusForAllUnits(equipmentId, newStatus, reason, user.full_name);
+      result = setStatusForAllUnits(equipmentId, newStatus, reason, user.full_name);
       if (newStatus === 'RETIRED') {
         db.prepare("UPDATE equipment_items SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(equipmentId);
       }
     });
     tx();
 
-    for (const aid of assetIds) {
+    for (const aid of result.assetIds) {
       const updatedAsset: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(aid);
       if (updatedAsset) void pushOperationalToCloud('equipment_assets', 'UPDATE', updatedAsset);
+    }
+    pushStatusLogsToCloud(db, result.logIds);
+    if (newStatus === 'RETIRED') {
+      const row: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(equipmentId);
+      if (row) void pushCatalogToCloud('equipment_items', 'UPDATE', row);
     }
     return { success: true };
   });
@@ -413,15 +429,30 @@ export function registerEquipmentHandlers(): void {
   ipcMain.handle('db:equipment:batchUpdateStatus', (event: any, ids: string[], newStatus: string, reason: string) => {
     const user = requireInventoryAccess(event);
     for (const equipmentId of ids) assertEquipmentInDepartment(db, event, equipmentId);
+    const allAssetIds: string[] = [];
+    const allLogIds: string[] = [];
     const tx = db.transaction(() => {
       for (const equipmentId of ids) {
-        setStatusForAllUnits(equipmentId, newStatus, reason, user.full_name);
+        const result = setStatusForAllUnits(equipmentId, newStatus, reason, user.full_name);
+        allAssetIds.push(...result.assetIds);
+        allLogIds.push(...result.logIds);
         if (newStatus === 'RETIRED') {
           db.prepare("UPDATE equipment_items SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(equipmentId);
         }
       }
     });
     tx();
+    for (const aid of allAssetIds) {
+      const updatedAsset: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(aid);
+      if (updatedAsset) void pushOperationalToCloud('equipment_assets', 'UPDATE', updatedAsset);
+    }
+    pushStatusLogsToCloud(db, allLogIds);
+    if (newStatus === 'RETIRED') {
+      for (const equipmentId of ids) {
+        const row: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(equipmentId);
+        if (row) void pushCatalogToCloud('equipment_items', 'UPDATE', row);
+      }
+    }
     return { success: true, count: ids.length };
   });
 

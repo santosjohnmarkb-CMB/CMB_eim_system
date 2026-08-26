@@ -134,7 +134,11 @@ export function ArchivesPage() {
           duration: loan.duration,
           remarks: loan.remarks,
           released_by: loan.created_by,
-          items: loan.items.map((it) => ({ code: it.equipment_code, name: it.equipment_name || '' })),
+          items: loan.items.map((it) => ({
+            code: it.equipment_code,
+            name: it.equipment_name || '',
+            serial: it.asset_serial,
+          })),
         };
         if ((loan.direction ?? 'OUTWARD') === 'INWARD') printInwardLoanForm(loanInput);
         else printLoanReleaseForm(loanInput);

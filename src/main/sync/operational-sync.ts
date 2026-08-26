@@ -19,6 +19,7 @@ const EIM_TABLES = [
 // foreign keys; we mirror that locally when a parent tombstone is applied so an
 // orphaned child on another machine can't be re-pushed after its parent is gone.
 const CHILD_TABLES: Record<string, { table: string; fk: string }[]> = {
+  equipment_assets: [{ table: 'asset_status_log', fk: 'asset_id' }],
   maintenance_tickets: [
     { table: 'maintenance_notes', fk: 'ticket_id' },
     { table: 'ticket_actions', fk: 'ticket_id' },

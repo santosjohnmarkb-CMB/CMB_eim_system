@@ -25,6 +25,7 @@ export interface MaintenanceFormTicket {
   document_type: string;
   equipment_name?: string | null;
   equipment_code?: string | null;
+  asset_serial?: string | null;
   project_name?: string | null;
   production_name?: string | null;
   project_date?: string | null;
@@ -92,6 +93,7 @@ export function buildMaintenanceForm(
       <div class="grid">
         ${field('Equipment Name', ticket.equipment_name)}
         ${field('Equipment Code', ticket.equipment_code)}
+        ${field('Serial Number', ticket.asset_serial)}
         ${field('Maintenance Type', mtLabel)}
         ${field('Document Type', docTypeLabel)}
       </div>

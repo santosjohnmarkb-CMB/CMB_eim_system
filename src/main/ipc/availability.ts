@@ -1,4 +1,6 @@
+import { v4 as uuidv4 } from 'uuid';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
+import { pushOperationalToCloud } from '../sync/operational-sync';
 
 // Statuses that take a unit out of the owned fleet entirely (written off / lost).
 // These do not count toward an item's total quantity.
@@ -33,4 +35,43 @@ export function pickAvailableAsset(db: any, equipmentId: string, excludeIds: str
   return db.prepare(
     `SELECT * FROM equipment_assets WHERE equipment_id = ? AND current_status = 'AVAILABLE' ${exclude} ORDER BY created_at LIMIT 1`,
   ).get(equipmentId, ...excludeIds);
+}
+
+// Write a per-unit status-history row. Callers must push the returned id to the
+// cloud after the surrounding transaction commits (see pushStatusLogsToCloud).
+export function insertAssetStatusLog(
+  db: any,
+  params: {
+    assetId: string;
+    equipmentId: string;
+    previousStatus: string;
+    newStatus: string;
+    changedBy: string;
+    reason: string;
+    relatedTicketId?: string | null;
+  },
+): string {
+  const id = uuidv4();
+  db.prepare(`
+    INSERT INTO asset_status_log
+      (id, asset_id, equipment_id, previous_status, new_status, changed_by, reason, related_ticket_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    params.assetId,
+    params.equipmentId,
+    params.previousStatus,
+    params.newStatus,
+    params.changedBy,
+    params.reason,
+    params.relatedTicketId ?? null,
+  );
+  return id;
+}
+
+export function pushStatusLogsToCloud(db: any, ids: string[]): void {
+  for (const id of ids) {
+    const row: any = db.prepare('SELECT * FROM asset_status_log WHERE id = ?').get(id);
+    if (row) void pushOperationalToCloud('asset_status_log', 'INSERT', row);
+  }
 }

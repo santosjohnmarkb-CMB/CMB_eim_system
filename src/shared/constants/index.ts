@@ -27,7 +27,7 @@ export const EQUIPMENT_HIERARCHY: Record<string, Record<string, string[]>> = {
   },
 };
 
-/** Third-level labels keyed by `category::subcategory`. Stored on equipment_items.sub_subcategory. */
+/** Fourth-level labels keyed by `category::subcategory`. Stored on equipment_items.sub_subcategory. */
 export const EQUIPMENT_SUB_SUBS: Record<string, string[]> = {
   'Lens::Prime Lens': ['Prime Lens Set', 'Wide Lens', 'Telephoto Prime'],
   'Lens::Zoom Lens': ['Short Zoom Lens', 'Long Zoom Lens'],
@@ -184,6 +184,27 @@ export const DEPARTMENT_CONFIG: Record<Department, { label: string; shortLabel: 
   },
 };
 
+export function catalogDepartmentNames(opsDept?: Department | null): string[] {
+  if (!opsDept) return Object.keys(EQUIPMENT_HIERARCHY);
+  return DEPARTMENT_CONFIG[opsDept].categories;
+}
+
+export function categoriesInCatalogDept(catalogDeptName: string): string[] {
+  return Object.keys(EQUIPMENT_HIERARCHY[catalogDeptName] ?? {});
+}
+
+export function subcategoriesInCategory(catalogDeptName: string, categoryName: string): string[] {
+  return EQUIPMENT_HIERARCHY[catalogDeptName]?.[categoryName] ?? [];
+}
+
+export function isLatestCategory(catalogDeptName: string, categoryName: string): boolean {
+  return Boolean(EQUIPMENT_HIERARCHY[catalogDeptName]?.[categoryName]);
+}
+
+export function isLatestSubcategory(catalogDeptName: string, categoryName: string, subcategoryName: string): boolean {
+  return (EQUIPMENT_HIERARCHY[catalogDeptName]?.[categoryName] ?? []).includes(subcategoryName);
+}
+
 /** Maps catalog department names (and legacy top-level category names) to EIM ops departments. */
 export const CATEGORY_TO_DEPARTMENT: Record<string, Department> = {
   'Camera': 'camera',
@@ -198,6 +219,10 @@ export function opsDepartmentOf(departmentName?: string | null, categoryName?: s
   if (categoryName && CATEGORY_TO_DEPARTMENT[categoryName]) return CATEGORY_TO_DEPARTMENT[categoryName];
   return null;
 }
+
+export const catalogDeptNamesForOps = catalogDepartmentNames;
+export const latestCategoryNamesFor = categoriesInCatalogDept;
+export const latestSubcategoryNamesFor = subcategoriesInCategory;
 
 export const USE_COUNT_SUBCATEGORIES: Record<Department, { label: string; subcategoryNames: string[] }[]> = {
   camera: [

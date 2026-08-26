@@ -7,7 +7,7 @@ import { LOAN_DEPT_PREFIX, LOAN_DIRECTION_CONFIG } from '../../shared/constants'
 import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { pushOperationalToCloud } from '../sync/operational-sync';
 import { sessionDepartment, assertEquipmentInDepartment } from './department';
-import { recomputeAvailability, pickAvailableAsset } from './availability';
+import { recomputeAvailability, pickAvailableAsset, insertAssetStatusLog, pushStatusLogsToCloud } from './availability';
 import { archiveLoan } from '../sync/archive-eim';
 import { saveBlob, deleteBlob, resolveBlob } from '../blob-store';
 
@@ -56,21 +56,29 @@ function recomputeLoanStatus(db: any, loanId: string): void {
 // Mark a single loan item returned. For OUTWARD items (which reference our catalog) this
 // also restores availability and asset status; INWARD items have no equipment_id and only
 // flip to RETURNED (the item belonged to an external party, never our inventory).
-function returnSingleItem(db: any, item: any, changedBy: string): void {
+function returnSingleItem(db: any, item: any, changedBy: string): string | null {
   db.prepare("UPDATE equipment_loan_items SET status = 'RETURNED', returned_date = ? WHERE id = ?")
     .run(new Date().toISOString().slice(0, 10), item.id);
 
-  if (!item.equipment_id) return;
+  if (!item.equipment_id) return null;
 
+  let logId: string | null = null;
   if (item.asset_id) {
     const prev: any = db.prepare('SELECT current_status FROM equipment_assets WHERE id = ?').get(item.asset_id);
     db.prepare("UPDATE equipment_assets SET current_status = 'AVAILABLE', updated_at = datetime('now') WHERE id = ?")
       .run(item.asset_id);
-    db.prepare(`INSERT INTO asset_status_log (id, asset_id, equipment_id, previous_status, new_status, changed_by, reason, related_ticket_id) VALUES (?, ?, ?, ?, 'AVAILABLE', ?, ?, ?)`)
-      .run(uuidv4(), item.asset_id, item.equipment_id, prev?.current_status || '', changedBy, 'Returned from loan', null);
+    logId = insertAssetStatusLog(db, {
+      assetId: item.asset_id,
+      equipmentId: item.equipment_id,
+      previousStatus: prev?.current_status || '',
+      newStatus: 'AVAILABLE',
+      changedBy,
+      reason: 'Returned from loan',
+    });
   }
   // Availability is derived from the per-unit statuses of this equipment.
   recomputeAvailability(db, item.equipment_id);
+  return logId;
 }
 
 // Push the post-mutation equipment_items/equipment_assets rows to the cloud so the
@@ -114,7 +122,7 @@ export function registerLoanHandlers(): void {
       SELECT l.*,
         (SELECT COUNT(*) FROM equipment_loan_items li WHERE li.loan_id = l.id) as item_count,
         (SELECT COUNT(*) FROM equipment_loan_items li WHERE li.loan_id = l.id AND li.status = 'OUT') as out_count,
-        (SELECT GROUP_CONCAT(COALESCE(e.name, li.item_name), ', ')
+        (SELECT GROUP_CONCAT(COALESCE(e.name, li.item_name, 'Unknown equipment'), ', ')
            FROM equipment_loan_items li
            LEFT JOIN equipment_items e ON e.id = li.equipment_id
            WHERE li.loan_id = l.id) as equipment_names
@@ -133,12 +141,15 @@ export function registerLoanHandlers(): void {
     if (dept && loan.department !== dept) return null;
     const items: any[] = db.prepare(`
       SELECT li.*,
-        COALESCE(e.name, li.item_name) as equipment_name,
+        COALESCE(e.name, li.item_name, 'Unknown equipment') as equipment_name,
         e.equipment_code,
-        c.name as category_name
+        c.name as category_name,
+        ea.serial_number as asset_serial,
+        ea.asset_tag as asset_tag
       FROM equipment_loan_items li
       LEFT JOIN equipment_items e ON e.id = li.equipment_id
       LEFT JOIN categories c ON c.id = e.category_id
+      LEFT JOIN equipment_assets ea ON ea.id = li.asset_id
       WHERE li.loan_id = ?
       ORDER BY li.created_at ASC
     `).all(id);
@@ -163,6 +174,7 @@ export function registerLoanHandlers(): void {
     const now = new Date().toISOString();
 
     const affected: { equipment_id: string; asset_id: string | null }[] = [];
+    const statusLogIds: string[] = [];
     const tx = db.transaction(() => {
       db.prepare(`
         INSERT INTO equipment_loans (id, loan_number, direction, department, person_or_org, purpose, location, loaned_date, duration, tentative_return_date, remarks, internal_notes, status, created_by, created_at, updated_at)
@@ -185,18 +197,25 @@ export function registerLoanHandlers(): void {
         }
 
         const asset: any = pickAvailableAsset(db, item.equipment_id as string, claimed);
-        if (asset) claimed.push(asset.id);
-        db.prepare(`INSERT INTO equipment_loan_items (id, loan_id, equipment_id, asset_id, item_name, status, notes, created_at) VALUES (?, ?, ?, ?, NULL, 'OUT', ?, ?)`)
-          .run(itemId, id, item.equipment_id, asset?.id || null, item.notes || null, now);
-
-        if (asset) {
-          db.prepare("UPDATE equipment_assets SET current_status = 'DEPLOYED', updated_at = datetime('now') WHERE id = ?").run(asset.id);
-          db.prepare(`INSERT INTO asset_status_log (id, asset_id, equipment_id, previous_status, new_status, changed_by, reason, related_ticket_id) VALUES (?, ?, ?, ?, 'DEPLOYED', ?, ?, ?)`)
-            .run(uuidv4(), asset.id, item.equipment_id, asset.current_status || '', user.full_name, `Loaned out (${loanNumber})`, null);
+        if (!asset) {
+          throw new Error('No available unit for this equipment. An outward loan can only include units that are currently available.');
         }
+        claimed.push(asset.id);
+        db.prepare(`INSERT INTO equipment_loan_items (id, loan_id, equipment_id, asset_id, item_name, status, notes, created_at) VALUES (?, ?, ?, ?, NULL, 'OUT', ?, ?)`)
+          .run(itemId, id, item.equipment_id, asset.id, item.notes || null, now);
+
+        db.prepare("UPDATE equipment_assets SET current_status = 'DEPLOYED', updated_at = datetime('now') WHERE id = ?").run(asset.id);
+        statusLogIds.push(insertAssetStatusLog(db, {
+          assetId: asset.id,
+          equipmentId: item.equipment_id as string,
+          previousStatus: asset.current_status || '',
+          newStatus: 'DEPLOYED',
+          changedBy: user.full_name,
+          reason: `Loaned out (${loanNumber})`,
+        }));
         // Each loaned unit reduces availability by one (derived from per-unit statuses).
         recomputeAvailability(db, item.equipment_id as string);
-        affected.push({ equipment_id: item.equipment_id as string, asset_id: asset?.id || null });
+        affected.push({ equipment_id: item.equipment_id as string, asset_id: asset.id });
       }
     });
     tx();
@@ -204,6 +223,7 @@ export function registerLoanHandlers(): void {
     // Propagate availability/asset changes to the shared catalog after the transaction commits.
     // Inward loans never touch inventory, so there is nothing to sync.
     for (const a of affected) pushItemAvailabilityToCloud(db, a.equipment_id, a.asset_id);
+    pushStatusLogsToCloud(db, statusLogIds);
     pushLoanToCloud(db, id);
 
     return db.prepare('SELECT * FROM equipment_loans WHERE id = ?').get(id);
@@ -281,11 +301,13 @@ export function registerLoanHandlers(): void {
     if (wouldCloseLoan(loanId, input.item_ids)) assertSignedFormBeforeClose(loan);
 
     const affected: { equipment_id: string; asset_id: string | null }[] = [];
+    const statusLogIds: string[] = [];
     const tx = db.transaction(() => {
       for (const itemId of input.item_ids) {
         const item: any = db.prepare("SELECT * FROM equipment_loan_items WHERE id = ? AND loan_id = ? AND status = 'OUT'").get(itemId, loanId);
         if (!item) continue;
-        returnSingleItem(db, item, user.full_name);
+        const logId = returnSingleItem(db, item, user.full_name);
+        if (logId) statusLogIds.push(logId);
         affected.push({ equipment_id: item.equipment_id, asset_id: item.asset_id });
       }
       recomputeLoanStatus(db, loanId);
@@ -293,6 +315,7 @@ export function registerLoanHandlers(): void {
     tx();
 
     for (const a of affected) pushItemAvailabilityToCloud(db, a.equipment_id, a.asset_id);
+    pushStatusLogsToCloud(db, statusLogIds);
     pushLoanToCloud(db, loanId);
     maybeArchiveReturnedLoan(db, loanId);
     return { success: true };
@@ -309,10 +332,12 @@ export function registerLoanHandlers(): void {
     if ((outCount?.c || 0) > 0) assertSignedFormBeforeClose(loan);
 
     const affected: { equipment_id: string; asset_id: string | null }[] = [];
+    const statusLogIds: string[] = [];
     const tx = db.transaction(() => {
       const outItems: any[] = db.prepare("SELECT * FROM equipment_loan_items WHERE loan_id = ? AND status = 'OUT'").all(loanId);
       for (const item of outItems) {
-        returnSingleItem(db, item, user.full_name);
+        const logId = returnSingleItem(db, item, user.full_name);
+        if (logId) statusLogIds.push(logId);
         affected.push({ equipment_id: item.equipment_id, asset_id: item.asset_id });
       }
       recomputeLoanStatus(db, loanId);
@@ -320,6 +345,7 @@ export function registerLoanHandlers(): void {
     tx();
 
     for (const a of affected) pushItemAvailabilityToCloud(db, a.equipment_id, a.asset_id);
+    pushStatusLogsToCloud(db, statusLogIds);
     pushLoanToCloud(db, loanId);
     maybeArchiveReturnedLoan(db, loanId);
     return { success: true };
@@ -331,11 +357,13 @@ export function registerLoanHandlers(): void {
     const existing = getLoanInDept(event, id);
 
     const affected: { equipment_id: string; asset_id: string | null }[] = [];
+    const statusLogIds: string[] = [];
     const tx = db.transaction(() => {
       // Restore availability for any units still out before removing the record.
       const outItems: any[] = db.prepare("SELECT * FROM equipment_loan_items WHERE loan_id = ? AND status = 'OUT'").all(id);
       for (const item of outItems) {
-        returnSingleItem(db, item, user.full_name);
+        const logId = returnSingleItem(db, item, user.full_name);
+        if (logId) statusLogIds.push(logId);
         affected.push({ equipment_id: item.equipment_id, asset_id: item.asset_id });
       }
       db.prepare('DELETE FROM equipment_loan_items WHERE loan_id = ?').run(id);
@@ -345,6 +373,7 @@ export function registerLoanHandlers(): void {
 
     deleteBlob(existing?.signed_form_data);
     for (const a of affected) pushItemAvailabilityToCloud(db, a.equipment_id, a.asset_id);
+    pushStatusLogsToCloud(db, statusLogIds);
     // Propagate the delete; item rows cascade-delete via the Supabase foreign key.
     void pushOperationalToCloud('equipment_loans', 'DELETE', { id });
     return { success: true };

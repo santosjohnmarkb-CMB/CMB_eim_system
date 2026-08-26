@@ -691,7 +691,7 @@ export function MaintenanceDetailPage() {
           <h2 className="text-[10px] uppercase tracking-[0.15em] text-amber-800/70 font-bold mb-2">
             Equipment
           </h2>
-          <div className="flex items-baseline gap-6">
+          <div className="flex items-baseline gap-6 flex-wrap">
             <div>
               <span className="text-xs text-amber-800/50 mr-1">Name:</span>
               <span className="text-sm font-medium text-gray-900">{ticket.equipment_name || '—'}</span>
@@ -700,6 +700,16 @@ export function MaintenanceDetailPage() {
               <span className="text-xs text-amber-800/50 mr-1">Code:</span>
               <span className="text-sm font-mono font-medium text-gray-700">{ticket.equipment_code || '—'}</span>
             </div>
+            <div>
+              <span className="text-xs text-amber-800/50 mr-1">Serial:</span>
+              <span className="text-sm font-mono font-medium text-gray-700">{ticket.asset_serial || '—'}</span>
+            </div>
+            {ticket.asset_tag ? (
+              <div>
+                <span className="text-xs text-amber-800/50 mr-1">Tag:</span>
+                <span className="text-sm font-mono font-medium text-gray-700">{ticket.asset_tag}</span>
+              </div>
+            ) : null}
           </div>
         </div>
 
