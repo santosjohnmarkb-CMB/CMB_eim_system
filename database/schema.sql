@@ -127,7 +127,8 @@ CREATE TABLE IF NOT EXISTS equipment_assets (
 
 -- One asset row per unit of quantity, so equipment_id is intentionally NOT unique.
 CREATE INDEX IF NOT EXISTS idx_equipment_assets_equipment_id ON equipment_assets(equipment_id);
-CREATE INDEX IF NOT EXISTS idx_asset_equipment_code ON equipment_assets(equipment_code);
+-- idx_asset_equipment_code is created in migration 026 after the column is added
+-- on existing databases. CREATE INDEX here would abort schema.sql on those DBs.
 
 -- Audit trail of every status change
 CREATE TABLE IF NOT EXISTS asset_status_log (

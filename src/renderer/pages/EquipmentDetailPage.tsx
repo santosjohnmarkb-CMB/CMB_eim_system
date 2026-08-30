@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Edit2, RefreshCw, Pencil } from 'lucide-react';
+import { ArrowLeft, Edit2, Plus } from 'lucide-react';
 import { useEquipmentStore } from '../stores/equipment.store';
 import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
@@ -14,14 +14,54 @@ import { useToast } from '../hooks';
 import { useAuthStore } from '../stores/auth.store';
 import type { Department } from '../../shared/constants';
 import type { EquipmentStatus, AssetStatusLogEntry, EquipmentAsset } from '../../shared/types';
+import { buildSkuPrefix, formatUnitCode, nextUnitCounts, trailingUnitCount } from '../../shared/equipment-code';
+import { isLiveUnitStatus, isUnitLocked, unitActionLabel } from '../../shared/equipment-unit';
 
 const statusVariantMap: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'purple' | 'default'> = {
   AVAILABLE: 'success', DEPLOYED: 'info', IN_REPAIR: 'warning', ON_HOLD: 'default',
   IN_TRANSIT: 'info', RETIRED: 'default', MISSING: 'danger', FOR_INSPECTION: 'purple',
 };
 
+const unitInputClass = 'w-full px-2.5 py-1.5 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100';
+
 function fmtDate(d: string | null | undefined) {
   return d ? new Date(d).toLocaleDateString() : '—';
+}
+
+interface EditUnitRow {
+  key: string;
+  id?: string;
+  equipment_code?: string | null;
+  serial_number: string;
+  vendor_name: string;
+  delivered_date: string;
+  current_status?: string;
+  open_loan_number?: string | null;
+  open_ticket_number?: string | null;
+  open_ticket_type?: string | null;
+}
+
+const emptyEditUnit = (): EditUnitRow => ({
+  key: `new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  serial_number: '',
+  vendor_name: '',
+  delivered_date: '',
+  current_status: 'AVAILABLE',
+});
+
+function toEditUnit(asset: EquipmentAsset): EditUnitRow {
+  return {
+    key: asset.id,
+    id: asset.id,
+    equipment_code: asset.equipment_code,
+    serial_number: asset.serial_number || '',
+    vendor_name: asset.vendor_name || '',
+    delivered_date: (asset.delivered_date || '').slice(0, 10),
+    current_status: asset.current_status || 'AVAILABLE',
+    open_loan_number: asset.open_loan_number,
+    open_ticket_number: asset.open_ticket_number,
+    open_ticket_type: asset.open_ticket_type,
+  };
 }
 
 export function EquipmentDetailPage() {
@@ -30,20 +70,12 @@ export function EquipmentDetailPage() {
   const toast = useToast();
   const role = useAuthStore((s) => s.user?.role);
   const userDept = useAuthStore((s) => s.user?.department) as Department | null;
-  const { items, loading, fetchAll, departments, categories, subcategories, getStatusLog, updateEquipment, updateAsset, updateAssetStatus, fetchDepartments, fetchCategories, fetchSubcategories } = useEquipmentStore();
+  const { items, loading, fetchAll, departments, categories, subcategories, getStatusLog, updateEquipment, fetchDepartments, fetchCategories, fetchSubcategories } = useEquipmentStore();
   const [statusLog, setStatusLog] = useState<AssetStatusLogEntry[]>([]);
   const [showEditModal, setShowEditModal] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, any>>({});
-
-  // Per-unit detail edit (serial number, supplier, delivery date).
-  const [unitForm, setUnitForm] = useState<{ asset_id: string; serial_number: string; vendor_name: string; delivered_date: string } | null>(null);
-  const [savingUnit, setSavingUnit] = useState(false);
-
-  // Per-unit status change.
-  const [statusAsset, setStatusAsset] = useState<EquipmentAsset | null>(null);
-  const [newStatus, setNewStatus] = useState('');
-  const [reason, setReason] = useState('');
+  const [editUnits, setEditUnits] = useState<EditUnitRow[]>([]);
 
   const equipment = items.find((i) => i.id === id);
 
@@ -75,6 +107,7 @@ export function EquipmentDetailPage() {
   const canEdit = role === 'admin' || role === 'equipment_manager';
 
   const openEdit = () => {
+    const current = equipment.assets ?? (equipment.asset ? [equipment.asset] : []);
     setEditForm({
       name: equipment.name || '',
       department_id: equipment.department_id || '',
@@ -84,15 +117,51 @@ export function EquipmentDetailPage() {
       item_type: equipment.item_type || 'standalone',
       brand: equipment.brand || '',
       model: equipment.model || '',
-      quantity: equipment.quantity ?? 1,
+      quantity: equipment.quantity ?? current.filter((a) => isLiveUnitStatus(a.current_status)).length,
       notes: equipment.notes || '',
       base_price: equipment.base_price ?? 0,
       pricing_type: equipment.pricing_type || 'per_day',
     });
+    setEditUnits(current.map(toEditUnit));
     setShowEditModal(true);
   };
 
   const setEdit = (field: string, value: any) => setEditForm((p) => ({ ...p, [field]: value }));
+
+  const applyEditUnits = (next: EditUnitRow[]) => {
+    setEditUnits(next);
+    setEditForm((p) => ({ ...p, quantity: next.filter((u) => isLiveUnitStatus(u.current_status)).length }));
+  };
+
+  const setEditUnit = (key: string, field: keyof EditUnitRow, value: string) => {
+    setEditUnits((prev) => prev.map((u) => (u.key === key ? { ...u, [field]: value } : u)));
+  };
+
+  const addEditUnit = () => applyEditUnits([...editUnits, emptyEditUnit()]);
+
+  const setEditQuantity = (raw: string) => {
+    if (raw === '') { setEdit('quantity', ''); return; }
+    const parsed = parseInt(raw, 10);
+    if (Number.isNaN(parsed)) return;
+    const q = Math.max(0, parsed);
+    const live = editUnits.filter((u) => isLiveUnitStatus(u.current_status));
+    const dead = editUnits.filter((u) => !isLiveUnitStatus(u.current_status));
+    if (q === live.length) {
+      setEdit('quantity', q);
+      return;
+    }
+    if (q > live.length) {
+      applyEditUnits([...live, ...Array.from({ length: q - live.length }, emptyEditUnit), ...dead]);
+      return;
+    }
+    const nextLive = [...live];
+    while (nextLive.length > q) {
+      const idx = [...nextLive].reverse().findIndex((u) => !isUnitLocked(u));
+      if (idx < 0) break;
+      nextLive.splice(nextLive.length - 1 - idx, 1);
+    }
+    applyEditUnits([...nextLive, ...dead]);
+  };
 
   const handleEditSave = async () => {
     if (!editForm.name || !editForm.category_id) {
@@ -110,8 +179,13 @@ export function EquipmentDetailPage() {
         item_type: editForm.item_type,
         brand: editForm.brand,
         model: editForm.model,
-        quantity: Math.max(0, parseInt(editForm.quantity, 10) || 0),
         notes: editForm.notes,
+        units: editUnits.map((u) => ({
+          ...(u.id ? { id: u.id } : {}),
+          serial_number: u.serial_number,
+          vendor_name: u.vendor_name || null,
+          delivered_date: u.delivered_date || null,
+        })),
         // Admin-only pricing: managers omit these so the stored price is preserved.
         ...(role === 'admin' ? { base_price: Number(editForm.base_price) || 0, pricing_type: editForm.pricing_type } : {}),
       });
@@ -121,62 +195,30 @@ export function EquipmentDetailPage() {
     setSavingEdit(false);
   };
 
-  const openUnitEdit = (asset: EquipmentAsset) => {
-    setUnitForm({
-      asset_id: asset.id,
-      serial_number: asset.serial_number || '',
-      vendor_name: asset.vendor_name || '',
-      delivered_date: (asset.delivered_date || '').slice(0, 10),
-    });
-  };
-
-  const handleUnitSave = async () => {
-    if (!unitForm) return;
-    setSavingUnit(true);
-    try {
-      await updateAsset({
-        asset_id: unitForm.asset_id,
-        serial_number: unitForm.serial_number,
-        vendor_name: unitForm.vendor_name || null,
-        delivered_date: unitForm.delivered_date || null,
-      });
-      setUnitForm(null);
-      toast.success('Unit updated');
-    } catch (err: any) { toast.error(err.message || 'Failed to update unit'); }
-    setSavingUnit(false);
-  };
-
-  const openStatus = (asset: EquipmentAsset) => {
-    setStatusAsset(asset);
-    setNewStatus('');
-    setReason('');
-  };
-
-  const handleStatusChange = async () => {
-    if (!statusAsset) return;
-    if (!newStatus || !reason) { toast.error('Status and reason are required'); return; }
-    try {
-      await updateAssetStatus({ asset_id: statusAsset.id, status: newStatus, reason });
-      setStatusAsset(null);
-      setNewStatus('');
-      setReason('');
-      toast.success('Unit status updated');
-      if (id) getStatusLog(id).then(setStatusLog);
-    } catch (err: any) { toast.error(err.message); }
-  };
-
-  const catalogDepts = latestDepartments(departments, userDept);
+  const catalogDepts = latestDepartments(departments, userDept, categories);
   const selectedDept = catalogDepts.find((d) => d.id === editForm.department_id)
     || departments.find((d) => d.id === editForm.department_id);
   const editCategories = categoryOptionsForDepartment(categories, departments, editForm.department_id);
-  const selectedCat = editCategories.find((c) => c.id === editForm.category_id);
+  const selectedCat = editCategories.find((c) => c.id === editForm.category_id)
+    || editCategories.find((c) => c.name === editForm.category_id);
   const editSubcategories = subcategoryChoices(
     subcategories, departments, editForm.department_id, editForm.category_id, categories,
   );
   const selectedSub = editSubcategories.find((s) => s.id === editForm.subcategory_id)
     || subcategories.find((s) => s.id === editForm.subcategory_id)
     || (editForm.subcategory_id ? { id: editForm.subcategory_id, name: editForm.subcategory_id } : undefined);
-  const editSubSubs = subSubChoices(selectedDept?.name, selectedCat?.name, selectedSub?.name);
+  const editSubSubs = subSubChoices(selectedDept?.name, selectedCat?.name, selectedSub?.name, items, selectedCat?.id, selectedSub?.id);
+
+  const editPrefix = buildSkuPrefix({
+    departmentName: selectedDept?.name || equipment.department_name,
+    categoryName: selectedCat?.name || equipment.category_name,
+    brand: editForm.brand,
+    model: editForm.model,
+  });
+  const newUnitCounts = nextUnitCounts(
+    editUnits.map((u) => trailingUnitCount(u.equipment_code) ?? 0).filter((n) => n > 0),
+    editUnits.filter((u) => !u.id).length,
+  );
 
   const setEditSubcategory = (name: string) => {
     const match = editSubcategories.find((s) => s.name === name);
@@ -201,6 +243,8 @@ export function EquipmentDetailPage() {
       subcategory_id: p.subcategory_id || subMatch?.id || (path ? path.subcategory : p.subcategory_id),
     }));
   };
+
+  let newUnitPreviewIdx = 0;
 
   return (
     <div className="space-y-6">
@@ -239,12 +283,12 @@ export function EquipmentDetailPage() {
                 <th className="py-2 pr-4 font-medium">Supplier</th>
                 <th className="py-2 pr-4 font-medium">Delivered</th>
                 <th className="py-2 pr-4 font-medium">Status</th>
-                {canEdit && <th className="py-2 pr-4 font-medium text-right">Actions</th>}
+                <th className="py-2 pr-4 font-medium">Action</th>
               </tr>
             </thead>
             <tbody>
               {units.length === 0 ? (
-                <tr><td colSpan={canEdit ? 7 : 6} className="py-4 text-surface-500">No units recorded</td></tr>
+                <tr><td colSpan={7} className="py-4 text-surface-500">No units recorded</td></tr>
               ) : units.map((a, idx) => {
                 const status = a.current_status || 'AVAILABLE';
                 const config = EQUIPMENT_STATUS_CONFIG[status as EquipmentStatus];
@@ -256,20 +300,16 @@ export function EquipmentDetailPage() {
                     <td className="py-2.5 pr-4 text-surface-300">{a.vendor_name || '—'}</td>
                     <td className="py-2.5 pr-4 text-surface-300">{fmtDate(a.delivered_date)}</td>
                     <td className="py-2.5 pr-4"><Badge variant={statusVariantMap[status] || 'default'}>{config?.label || status}</Badge></td>
-                    {canEdit && (
-                      <td className="py-2.5 pr-4">
-                        <div className="flex items-center gap-2 justify-end">
-                          <Button variant="ghost" size="sm" onClick={() => openUnitEdit(a)}><Pencil size={13} /> Edit</Button>
-                          <Button variant="ghost" size="sm" onClick={() => openStatus(a)}><RefreshCw size={13} /> Status</Button>
-                        </div>
-                      </td>
-                    )}
+                    <td className="py-2.5 pr-4 text-surface-300">{unitActionLabel(a)}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
         </div>
+        {canEdit && (
+          <p className="text-xs text-surface-500 mt-3">Serial number, supplier, and delivered date are edited from Edit Details. Status and action follow Maintenance and Loaned Equipment.</p>
+        )}
       </div>
 
       <div className="glass-panel rounded-xl p-5">
@@ -317,6 +357,7 @@ export function EquipmentDetailPage() {
                 onChange={setEditSubcategory}
                 options={editSubcategories.map((s) => s.name)}
                 placeholder="Select or type a sub category"
+                allowCreate
               />
               <CatalogCombobox
                 label="Sub-sub category"
@@ -324,10 +365,11 @@ export function EquipmentDetailPage() {
                 onChange={setEditSubSubcategory}
                 options={editSubSubs}
                 placeholder="Select or type a sub-sub category"
+                allowCreate
               />
               <Input label="Brand" value={editForm.brand} onChange={(e) => setEdit('brand', e.target.value)} />
               <Input label="Model" value={editForm.model} onChange={(e) => setEdit('model', e.target.value)} />
-              <Input label="Quantity" type="number" value={editForm.quantity} onChange={(e) => setEdit('quantity', e.target.value)} />
+              <Input label="Quantity" type="number" min={0} value={editForm.quantity} onChange={(e) => setEditQuantity(e.target.value)} />
               {role === 'admin' && (
                 <>
                   <Input label="Price (₱)" type="number" min={0} step="0.01" value={editForm.base_price} onChange={(e) => setEdit('base_price', e.target.value === '' ? '' : parseFloat(e.target.value))} placeholder="0.00" />
@@ -343,7 +385,59 @@ export function EquipmentDetailPage() {
               )}
             </div>
             <Input label="Notes" value={editForm.notes} onChange={(e) => setEdit('notes', e.target.value)} />
-            <p className="text-xs text-surface-500">Changing quantity adds or removes units. Brand or model changes rewrite every unit code and keep the same count suffix. Per-unit serial number, supplier, and delivery date are edited in the Units table.</p>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h4 className="text-xs font-semibold text-surface-400 uppercase tracking-wide">Units ({editUnits.length})</h4>
+                <p className="text-xs text-surface-500 mt-0.5">Add or edit serial number, supplier, and delivered date for each unit. Status and action come from Maintenance and Loaned Equipment.</p>
+              </div>
+              <Button type="button" variant="secondary" size="sm" onClick={addEditUnit}><Plus size={14} /> Add unit</Button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-surface-500 border-b border-surface-700/60">
+                    <th className="py-2 pr-3 font-medium w-10">#</th>
+                    <th className="py-2 pr-3 font-medium">Code</th>
+                    <th className="py-2 pr-3 font-medium">Serial Number</th>
+                    <th className="py-2 pr-3 font-medium">Supplier</th>
+                    <th className="py-2 pr-3 font-medium">Delivered</th>
+                    <th className="py-2 pr-3 font-medium">Status</th>
+                    <th className="py-2 pr-3 font-medium">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {editUnits.length === 0 ? (
+                    <tr><td colSpan={7} className="py-4 text-surface-500">No units. Add a unit or increase quantity.</td></tr>
+                  ) : editUnits.map((u, idx) => {
+                    const status = u.current_status || 'AVAILABLE';
+                    const config = EQUIPMENT_STATUS_CONFIG[status as EquipmentStatus];
+                    const code = u.id
+                      ? (u.equipment_code || '—')
+                      : formatUnitCode(editPrefix, newUnitCounts[newUnitPreviewIdx++] || idx + 1);
+                    return (
+                      <tr key={u.key} className="border-b border-surface-800/60">
+                        <td className="py-2 pr-3 text-surface-500">{idx + 1}</td>
+                        <td className="py-2 pr-3 font-mono text-xs text-surface-300 whitespace-nowrap">{code}</td>
+                        <td className="py-2 pr-3">
+                          <input value={u.serial_number} onChange={(e) => setEditUnit(u.key, 'serial_number', e.target.value)} className={unitInputClass} placeholder="Serial" />
+                        </td>
+                        <td className="py-2 pr-3">
+                          <input value={u.vendor_name} onChange={(e) => setEditUnit(u.key, 'vendor_name', e.target.value)} className={unitInputClass} placeholder="Supplier" />
+                        </td>
+                        <td className="py-2 pr-3">
+                          <input type="date" value={u.delivered_date} onChange={(e) => setEditUnit(u.key, 'delivered_date', e.target.value)} className={unitInputClass} />
+                        </td>
+                        <td className="py-2 pr-3"><Badge variant={statusVariantMap[status] || 'default'}>{config?.label || status}</Badge></td>
+                        <td className="py-2 pr-3 text-surface-400 whitespace-nowrap">{unitActionLabel(u)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <div className="flex gap-3 justify-end pt-2">
@@ -351,46 +445,6 @@ export function EquipmentDetailPage() {
             <Button onClick={handleEditSave} loading={savingEdit}>Save Changes</Button>
           </div>
         </div>
-      </Modal>
-
-      <Modal isOpen={!!unitForm} onClose={() => setUnitForm(null)} title="Edit Unit Details">
-        {unitForm && (
-          <div className="space-y-4">
-            <Input label="Serial Number" value={unitForm.serial_number} onChange={(e) => setUnitForm({ ...unitForm, serial_number: e.target.value })} />
-            <Input label="Supplier" value={unitForm.vendor_name} onChange={(e) => setUnitForm({ ...unitForm, vendor_name: e.target.value })} placeholder="Optional" />
-            <Input label="Delivered Date" type="date" value={unitForm.delivered_date} onChange={(e) => setUnitForm({ ...unitForm, delivered_date: e.target.value })} />
-            <div className="flex gap-3 justify-end">
-              <Button variant="secondary" onClick={() => setUnitForm(null)}>Cancel</Button>
-              <Button onClick={handleUnitSave} loading={savingUnit}>Save</Button>
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      <Modal isOpen={!!statusAsset} onClose={() => setStatusAsset(null)} title="Change Unit Status">
-        {statusAsset && (
-          <div className="space-y-4">
-            <p className="text-sm text-surface-400">
-              Unit: <span className="text-surface-200 font-mono text-xs">{statusAsset.equipment_code || statusAsset.serial_number || 'No serial'}</span>
-              {' · '}Current: <span className="text-surface-200">{EQUIPMENT_STATUS_CONFIG[(statusAsset.current_status || 'AVAILABLE') as EquipmentStatus]?.label}</span>
-            </p>
-            <div>
-              <label className="block text-xs font-medium text-surface-400 mb-1">New Status</label>
-              <select value={newStatus} onChange={(e) => setNewStatus(e.target.value)} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100">
-                <option value="">Select status</option>
-                {Object.entries(EQUIPMENT_STATUS_CONFIG).filter(([k]) => k !== statusAsset.current_status).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-surface-400 mb-1">Reason *</label>
-              <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500" placeholder="Reason for status change..." />
-            </div>
-            <div className="flex gap-3 justify-end">
-              <Button variant="secondary" onClick={() => setStatusAsset(null)}>Cancel</Button>
-              <Button onClick={handleStatusChange}>Update Status</Button>
-            </div>
-          </div>
-        )}
       </Modal>
     </div>
   );

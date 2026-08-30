@@ -4,8 +4,11 @@
 -- Widen users role constraint to include EIM roles
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (
-  role IN ('admin', 'accounts_manager', 'billing_user', 'payroll_user',
-           'inventory_manager', 'maintenance_lead', 'technician', 'parts_clerk', 'viewer')
+  role IN (
+    'admin', 'accounts_manager', 'billing_user', 'payroll_user',
+    'equipment_manager', 'inventory_manager', 'maintenance_lead', 'technician',
+    'parts_clerk', 'camera_personnel', 'lighting_personnel', 'viewer'
+  )
 );
 
 -- Extended asset data
@@ -587,8 +590,42 @@ CREATE TABLE IF NOT EXISTS departments (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Add nullable first: existing catalog rows cannot satisfy NOT NULL until backfill.
 ALTER TABLE categories ADD COLUMN IF NOT EXISTS department_id UUID REFERENCES departments(id);
 ALTER TABLE equipment_items ADD COLUMN IF NOT EXISTS department_id UUID REFERENCES departments(id);
+
+-- Mirror local 024 for pre-department clouds: leftover top-level categories
+-- become departments (same ids). Prefer an existing same-name department (1 Take).
+INSERT INTO departments (id, name, display_order, is_active)
+SELECT c.id, c.name, COALESCE(c.display_order, 0), COALESCE(c.is_active::boolean, true)
+FROM categories c
+WHERE c.department_id IS NULL
+  AND NOT EXISTS (SELECT 1 FROM departments d WHERE d.id = c.id)
+  AND NOT EXISTS (SELECT 1 FROM departments d WHERE d.name = c.name);
+
+UPDATE categories c
+SET department_id = COALESCE(
+  (SELECT d.id FROM departments d WHERE d.name = c.name ORDER BY d.display_order, d.id LIMIT 1),
+  (SELECT d.id FROM departments d WHERE d.id = c.id)
+)
+WHERE c.department_id IS NULL;
+
+UPDATE equipment_items e
+SET department_id = c.department_id
+FROM categories c
+WHERE e.category_id = c.id
+  AND e.department_id IS NULL
+  AND c.department_id IS NOT NULL;
+
+UPDATE equipment_items e
+SET department_id = d.id
+FROM departments d
+WHERE e.department_id IS NULL
+  AND e.category_id = d.id;
+
+ALTER TABLE categories ALTER COLUMN department_id SET NOT NULL;
+ALTER TABLE equipment_items ALTER COLUMN department_id SET NOT NULL;
+
 ALTER TABLE equipment_items ALTER COLUMN subcategory_id DROP NOT NULL;
 ALTER TABLE equipment_items DROP COLUMN IF EXISTS display_name;
 ALTER TABLE equipment_items DROP COLUMN IF EXISTS description;
@@ -605,7 +642,21 @@ EXCEPTION WHEN duplicate_object THEN
 END $$;
 
 -- Per-unit structured equipment codes (the list row stores the prefix on equipment_items).
+-- 1 Take pulls equipment_assets independently and requires a unique NOT NULL code
+-- per unit (asUnitCode falls back to id only locally). Match that contract here.
 ALTER TABLE equipment_assets ADD COLUMN IF NOT EXISTS equipment_code TEXT;
+UPDATE equipment_assets
+   SET equipment_code = id::text
+ WHERE equipment_code IS NULL OR btrim(equipment_code) = '';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_asset_equipment_code ON equipment_assets(equipment_code);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM equipment_assets
+    WHERE equipment_code IS NULL OR btrim(equipment_code) = ''
+  ) THEN
+    ALTER TABLE equipment_assets ALTER COLUMN equipment_code SET NOT NULL;
+  END IF;
+END $$;
 
 

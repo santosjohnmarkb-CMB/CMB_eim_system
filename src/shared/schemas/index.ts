@@ -78,6 +78,14 @@ export const EquipmentUpdateSchema = z.object({
   base_price: z.number().min(0).max(9999999).optional(),
   notes: z.string().max(2000).nullable().optional(),
   quantity: z.number().int().min(0).optional(),
+  // Per-unit serial/supplier/delivered. Status is not accepted here — it follows
+  // Maintenance tickets and Loaned Equipment. New rows (no `id`) are added as AVAILABLE.
+  units: z.array(z.object({
+    id: z.string().uuid().optional(),
+    serial_number: z.string().max(100).default(''),
+    vendor_name: z.string().max(200).nullable().optional(),
+    delivered_date: optionalDate,
+  })).optional(),
 });
 
 // Per-unit asset detail edit (serial number, supplier, delivery date).

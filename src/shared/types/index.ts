@@ -117,6 +117,10 @@ export interface EquipmentAsset {
   warranty_expiry: string | null;
   current_location: string;
   current_status: EquipmentStatus;
+  // Open operational records that drive status/action (not editable on the unit).
+  open_loan_number?: string | null;
+  open_ticket_number?: string | null;
+  open_ticket_type?: string | null;
   last_inspection_date: string | null;
   retirement_date: string | null;
   retirement_reason: string | null;

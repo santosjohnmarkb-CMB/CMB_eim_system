@@ -161,11 +161,29 @@ export function nextUnitCounts(used: Iterable<number>, howMany: number): number[
   return out;
 }
 
-/** Parse `Qty Available: N` from CSV notes. Returns null when the phrase is absent. */
+/** Parse `Qty Available: N` (or `Quantity Available: N`) from CSV notes. */
 export function parseQtyAvailable(notes: string | null | undefined): number | null {
   if (!notes) return null;
-  const m = notes.match(/qty\s*available\s*:\s*(\d+)/i);
+  const m = notes.match(/(?:qty|quantity)\s*available\s*:\s*(\d+)/i);
   if (!m) return null;
   const n = parseInt(m[1]!, 10);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function parsePositiveInt(raw: string | null | undefined): number | null {
+  if (raw == null || String(raw).trim() === '') return null;
+  const n = parseInt(String(raw).replace(/,/g, '').trim(), 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+const MAX_IMPORT_UNITS = 999;
+
+/** How many blank numbered units a CSV row should create. */
+export function unitQtyFromCsvRow(row: Record<string, string | undefined>): number {
+  const fromCol = parsePositiveInt(row.qty_available)
+    ?? parsePositiveInt(row.qtyavailable)
+    ?? parsePositiveInt(row.quantity)
+    ?? parsePositiveInt(row.qty);
+  const n = fromCol ?? parseQtyAvailable(row.notes) ?? 1;
+  return Math.min(n, MAX_IMPORT_UNITS);
 }

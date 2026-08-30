@@ -33,9 +33,15 @@ export function seedEquipmentHierarchy(db: any): void {
   const insertCat = db.prepare(
     `INSERT INTO categories (id, department_id, name, display_order, is_active) VALUES (?, ?, ?, ?, 1)`
   );
-  const findDept = db.prepare('SELECT id FROM departments WHERE name = ? LIMIT 1');
-  const findCat = db.prepare('SELECT id FROM categories WHERE department_id = ? AND name = ? LIMIT 1');
-  const findSub = db.prepare('SELECT id FROM subcategories WHERE category_id = ? AND name = ? LIMIT 1');
+  const findDept = db.prepare(
+    'SELECT id FROM departments WHERE name = ? ORDER BY is_active DESC, display_order, id LIMIT 1',
+  );
+  const findCat = db.prepare(
+    'SELECT id FROM categories WHERE department_id = ? AND name = ? ORDER BY is_active DESC, display_order, id LIMIT 1',
+  );
+  const findSub = db.prepare(
+    'SELECT id FROM subcategories WHERE category_id = ? AND name = ? ORDER BY is_active DESC, display_order, id LIMIT 1',
+  );
   const insertSub = db.prepare(
     `INSERT INTO subcategories (id, category_id, name, display_order, is_active) VALUES (?, ?, ?, ?, 1)`
   );
@@ -212,20 +218,17 @@ export function regenerateEquipmentCodes(db: any): void {
   if (!columnExists(db, 'equipment_assets', 'equipment_code')) return;
 
   const items = db.prepare(`
-    SELECT e.id, e.brand, e.model, d.name AS department_name, c.name AS category_name
+    SELECT e.id, e.equipment_code, e.brand, e.model, d.name AS department_name, c.name AS category_name
     FROM equipment_items e
     LEFT JOIN departments d ON d.id = e.department_id
     LEFT JOIN categories c ON c.id = e.category_id
   `).all() as Array<{
-    id: string; brand: string; model: string; department_name: string | null; category_name: string | null;
+    id: string; equipment_code: string; brand: string; model: string;
+    department_name: string | null; category_name: string | null;
   }>;
 
   const prefixByItem = new Map<string, string>();
-  const updateItem = db.prepare('UPDATE equipment_items SET equipment_code = ?, updated_at = datetime(\'now\') WHERE id = ?');
-  // Park current codes so UNIQUE swaps cannot collide with a prefix we are about to write.
-  for (const item of items) {
-    updateItem.run(`__tmp__${item.id}`, item.id);
-  }
+  let itemNeedsRewrite = false;
   for (const item of items) {
     const prefix = buildSkuPrefix({
       departmentName: item.department_name,
@@ -234,25 +237,40 @@ export function regenerateEquipmentCodes(db: any): void {
       model: item.model,
     });
     prefixByItem.set(item.id, prefix);
-    try {
-      updateItem.run(prefix, item.id);
-    } catch {
-      // Two SKUs abbreviate to the same prefix. Units still share that prefix and
-      // stay unique via the count suffix; the list row keeps a unique placeholder.
+    if (item.equipment_code !== prefix) itemNeedsRewrite = true;
+  }
+
+  const updateItem = db.prepare('UPDATE equipment_items SET equipment_code = ?, updated_at = datetime(\'now\') WHERE id = ?');
+  if (itemNeedsRewrite) {
+    // Park current codes so UNIQUE swaps cannot collide with a prefix we are about to write.
+    for (const item of items) {
+      updateItem.run(`__tmp__${item.id}`, item.id);
+    }
+    for (const item of items) {
+      const prefix = prefixByItem.get(item.id);
+      if (!prefix) continue;
+      try {
+        updateItem.run(prefix, item.id);
+      } catch {
+        // Two SKUs abbreviate to the same prefix. Units still share that prefix and
+        // stay unique via the count suffix; the list row keeps a unique placeholder.
+      }
     }
   }
 
   const countsByPrefix = new Map<string, number>();
   const assets = db.prepare(
-    'SELECT id, equipment_id FROM equipment_assets ORDER BY created_at, id',
-  ).all() as Array<{ id: string; equipment_id: string }>;
+    'SELECT id, equipment_id, equipment_code FROM equipment_assets ORDER BY created_at, id',
+  ).all() as Array<{ id: string; equipment_id: string; equipment_code: string | null }>;
   const updateAsset = db.prepare('UPDATE equipment_assets SET equipment_code = ?, updated_at = datetime(\'now\') WHERE id = ?');
   for (const asset of assets) {
     const prefix = prefixByItem.get(asset.equipment_id);
     if (!prefix) continue;
     const next = (countsByPrefix.get(prefix) || 0) + 1;
     countsByPrefix.set(prefix, next);
-    updateAsset.run(formatUnitCode(prefix, next), asset.id);
+    const nextCode = formatUnitCode(prefix, next);
+    if (asset.equipment_code === nextCode) continue;
+    updateAsset.run(nextCode, asset.id);
   }
 }
 
@@ -963,10 +981,45 @@ const MIGRATIONS: Migration[] = [
       const hasVersion = columnExists(db, 'equipment_items', 'version');
       const hasDisplay = columnExists(db, 'equipment_items', 'display_name');
 
+      const insertFallbackCat = db.prepare(
+        `INSERT INTO categories_new (id, department_id, name, display_order, is_active) VALUES (?, ?, 'Uncategorized', 9999, 1)`,
+      );
+      const ensureCategoryForDept = (deptId: string): void => {
+        const existing = db.prepare(
+          'SELECT id FROM categories_new WHERE department_id = ? ORDER BY display_order, id LIMIT 1',
+        ).get(deptId) as { id: string } | undefined;
+        if (existing) return;
+        insertFallbackCat.run(randomUUID(), deptId);
+      };
+
+      let fallbackDept = db.prepare(
+        'SELECT id FROM departments ORDER BY display_order, id LIMIT 1',
+      ).get() as { id: string } | undefined;
+      if (!fallbackDept) {
+        const id = randomUUID();
+        db.prepare(
+          `INSERT INTO departments (id, name, display_order, is_active) VALUES (?, 'Uncategorized', 9999, 1)`,
+        ).run(id);
+        fallbackDept = { id };
+      }
+      ensureCategoryForDept(fallbackDept.id);
+      const unresolvedDepts = db.prepare(`
+        SELECT DISTINCT COALESCE(cn.department_id, ei.category_id) AS dept_id
+        FROM equipment_items ei
+        LEFT JOIN categories_new cn ON cn.id = ei.subcategory_id
+      `).all() as Array<{ dept_id: string | null }>;
+      for (const row of unresolvedDepts) {
+        if (!row.dept_id) continue;
+        const dept = db.prepare('SELECT id FROM departments WHERE id = ?').get(row.dept_id) as { id: string } | undefined;
+        if (dept) ensureCategoryForDept(dept.id);
+      }
+      const fallbackDeptId = fallbackDept.id.replace(/'/g, "''");
+
+      // UNIQUE is applied after insert so duplicate legacy codes cannot abort the copy.
       db.exec(`
         CREATE TABLE equipment_items_new (
           id TEXT PRIMARY KEY,
-          equipment_code TEXT UNIQUE NOT NULL,
+          equipment_code TEXT NOT NULL,
           name TEXT NOT NULL,
           department_id TEXT NOT NULL,
           category_id TEXT NOT NULL,
@@ -994,6 +1047,9 @@ const MIGRATIONS: Migration[] = [
       const availExpr = hasAvail ? 'ei.available_qty' : qtyExpr;
       const versionExpr = hasVersion ? 'ei.version' : '1';
 
+      // Old categories → departments, old subcategories → categories_new.
+      // LEFT JOIN keeps rows with NULL/orphaned subcategory_id; department falls back
+      // to the old category_id (now a department id) or a catch-all department.
       db.exec(`
         INSERT INTO equipment_items_new (
           id, equipment_code, name, department_id, category_id, subcategory_id, sub_subcategory,
@@ -1001,20 +1057,67 @@ const MIGRATIONS: Migration[] = [
           is_active, version, created_at, updated_at
         )
         SELECT
-          ei.id, ei.equipment_code, ${nameExpr},
-          ei.category_id,
-          ei.subcategory_id,
-          sn.id,
+          src.id, src.equipment_code, src.name,
+          src.department_id,
+          COALESCE(src.matched_category_id, (
+            SELECT c3.id FROM categories_new c3
+            WHERE c3.department_id = src.department_id
+            ORDER BY c3.display_order, c3.id LIMIT 1
+          )),
+          src.subcategory_id,
           '',
-          ei.item_type, ei.brand, ei.model, ei.pricing_type, ei.base_price, ei.notes,
-          ${qtyExpr}, ${availExpr},
-          ei.is_active, ${versionExpr}, ei.created_at, ei.updated_at
-        FROM equipment_items ei
-        INNER JOIN categories_new cn ON cn.id = ei.subcategory_id
-        LEFT JOIN subcategories_new sn
-          ON sn.category_id = ei.subcategory_id
-         AND sn.name = TRIM(COALESCE(ei.sub_subcategory, ''))
+          src.item_type, src.brand, src.model, src.pricing_type, src.base_price, src.notes,
+          src.quantity, src.available_qty,
+          src.is_active, src.version, src.created_at, src.updated_at
+        FROM (
+          SELECT
+            ei.id, ei.equipment_code, ${nameExpr} AS name,
+            COALESCE(
+              (SELECT d.id FROM departments d WHERE d.id = cn.department_id),
+              (SELECT d.id FROM departments d WHERE d.id = ei.category_id),
+              '${fallbackDeptId}'
+            ) AS department_id,
+            cn.id AS matched_category_id,
+            sn.id AS subcategory_id,
+            ei.item_type, ei.brand, ei.model, ei.pricing_type, ei.base_price, ei.notes,
+            ${qtyExpr} AS quantity, ${availExpr} AS available_qty,
+            ei.is_active, ${versionExpr} AS version, ei.created_at, ei.updated_at
+          FROM equipment_items ei
+          LEFT JOIN categories_new cn ON cn.id = ei.subcategory_id
+          LEFT JOIN subcategories_new sn
+            ON sn.category_id = cn.id
+           AND sn.name = TRIM(COALESCE(ei.sub_subcategory, ''))
+        ) src
       `);
+
+      const usedCodes = new Set(
+        (db.prepare('SELECT equipment_code FROM equipment_items_new').all() as Array<{ equipment_code: string }>)
+          .map((r) => r.equipment_code),
+      );
+      const duplicateCodes = db.prepare(`
+        SELECT equipment_code FROM equipment_items_new
+        GROUP BY equipment_code HAVING COUNT(*) > 1
+      `).all() as Array<{ equipment_code: string }>;
+      const updateCode = db.prepare('UPDATE equipment_items_new SET equipment_code = ? WHERE id = ?');
+      for (const { equipment_code } of duplicateCodes) {
+        const rows = db.prepare(
+          'SELECT id FROM equipment_items_new WHERE equipment_code = ? ORDER BY created_at, id',
+        ).all(equipment_code) as Array<{ id: string }>;
+        for (let i = 1; i < rows.length; i++) {
+          const dup = rows[i];
+          if (!dup) continue;
+          let next = `${equipment_code}-${dup.id.replace(/-/g, '').slice(0, 8)}`;
+          let n = 2;
+          while (usedCodes.has(next)) {
+            next = `${equipment_code}-${n}`;
+            n += 1;
+          }
+          usedCodes.add(next);
+          updateCode.run(next, dup.id);
+        }
+      }
+
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_equipment_code ON equipment_items_new(equipment_code)');
 
       db.exec('DROP TABLE equipment_items');
       db.exec('ALTER TABLE equipment_items_new RENAME TO equipment_items');

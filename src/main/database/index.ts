@@ -60,7 +60,15 @@ function initializeDatabase(): void {
 
   const schemaPath = getSchemaPath();
   const schema = fs.readFileSync(schemaPath, 'utf-8');
-  db.exec(schema);
+  try {
+    db.exec(schema);
+  } catch (err: any) {
+    // Existing DBs already have the tables; a new CREATE INDEX on a column
+    // that only migrations add must not prevent those migrations from running.
+    const msg = String(err?.message ?? err);
+    if (!msg.includes('no such column')) throw err;
+    console.warn('[DB] schema.sql skipped a missing-column index; continuing to migrations:', msg);
+  }
 
   runMigrations(db);
   seedEquipmentHierarchy(db);

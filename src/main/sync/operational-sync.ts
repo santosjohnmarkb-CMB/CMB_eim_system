@@ -206,8 +206,50 @@ export async function syncOperationalWithCloud(): Promise<void> {
       }
 
       const localRows: any[] = db.prepare(`SELECT * FROM ${table}`).all();
-      const cloudIds = new Set(cloudRows.map((r: any) => r.id));
-      const toPush = localRows.filter((r) => !cloudIds.has(r.id) && !tombstoned.has(r.id));
+      const cloudById = new Map(cloudRows.map((r: any) => [r.id, r]));
+      let toPush = localRows.filter((r) => !tombstoned.has(r.id));
+
+      // Skip rows whose parent is missing locally — a bulk upsert of orphans
+      // (e.g. 13k units left after a catalog rebuild) 23503-aborts the whole table.
+      if (table === 'equipment_assets') {
+        const itemIds = new Set(
+          (db.prepare('SELECT id FROM equipment_items').all() as { id: string }[]).map((r) => r.id),
+        );
+        toPush = toPush.filter((r) => {
+          if (!itemIds.has(r.equipment_id)) return false;
+          const code = typeof r.equipment_code === 'string' ? r.equipment_code.trim() : '';
+          if (!code) return false;
+          const cloud = cloudById.get(r.id);
+          if (!cloud) return true;
+          return cloud.equipment_code !== code
+            || String(cloud.current_status ?? '') !== String(r.current_status ?? '')
+            || String(cloud.updated_at ?? '') < String(r.updated_at ?? '');
+        });
+      } else {
+        toPush = toPush.filter((r) => !cloudById.has(r.id));
+      }
+      if (table === 'asset_status_log') {
+        const assetIds = new Set(
+          (db.prepare(`
+            SELECT a.id FROM equipment_assets a
+            JOIN equipment_items e ON e.id = a.equipment_id
+          `).all() as { id: string }[]).map((r) => r.id),
+        );
+        toPush = toPush.filter((r) => assetIds.has(r.asset_id));
+      } else if (table === 'maintenance_tickets') {
+        const itemIds = new Set(
+          (db.prepare('SELECT id FROM equipment_items').all() as { id: string }[]).map((r) => r.id),
+        );
+        toPush = toPush.filter((r) => itemIds.has(r.equipment_id));
+      } else if (table === 'maintenance_notes' || table === 'ticket_actions') {
+        const ticketIds = new Set(
+          (db.prepare(`
+            SELECT t.id FROM maintenance_tickets t
+            JOIN equipment_items e ON e.id = t.equipment_id
+          `).all() as { id: string }[]).map((r) => r.id),
+        );
+        toPush = toPush.filter((r) => ticketIds.has(r.ticket_id));
+      }
 
       if (toPush.length > 0) {
         await cloudService.upsertMany(table, toPush.map(r => coerceForCloud(r)));
@@ -250,7 +292,16 @@ export async function pushOperationalToCloud(table: string, action: string, reco
         /* reconcile will retry the tombstone push */
       }
     } else {
-      await cloudService.upsert(table as any, coerceForCloud(record));
+      const payload = coerceForCloud(record);
+      if (table === 'equipment_assets') {
+        const code = typeof payload.equipment_code === 'string' ? payload.equipment_code.trim() : '';
+        if (!code) {
+          console.warn(`[OperationalSync] Skip ${table}/${recordId}: missing equipment_code (1 Take requires unique unit codes)`);
+          return;
+        }
+        payload.equipment_code = code;
+      }
+      await cloudService.upsert(table as any, payload);
     }
   } catch {
     offlineQueue.enqueue(action === 'DELETE' ? 'DELETE' : 'UPDATE', table, recordId, record);

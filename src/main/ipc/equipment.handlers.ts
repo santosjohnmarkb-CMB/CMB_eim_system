@@ -12,8 +12,8 @@ import { sessionDepartment, categoriesForDepartment, assertEquipmentInDepartment
 import { recomputeAvailability, insertAssetStatusLog, pushStatusLogsToCloud } from './availability';
 import { parseCsvRow } from './utils/csv';
 import {
-  buildSkuPrefix, formatUnitCode, nextUnitCounts, parseQtyAvailable,
-  parseUnitCount, trailingUnitCount,
+  buildSkuPrefix, formatUnitCode, nextUnitCounts,
+  parseUnitCount, trailingUnitCount, unitQtyFromCsvRow,
 } from '../../shared/equipment-code';
 
 export function registerEquipmentHandlers(): void {
@@ -166,6 +166,37 @@ export function registerEquipmentHandlers(): void {
     return db.prepare('SELECT * FROM subcategories WHERE category_id = ? AND is_active = 1 ORDER BY display_order').all(categoryId);
   });
 
+  // Status/action on a unit come from open loans and maintenance tickets.
+  const attachUnitActions = (rows: any[]): void => {
+    if (rows.length === 0) return;
+    const ticketByAsset = new Map<string, { ticket_number: string; document_type: string }>();
+    const loanByAsset = new Map<string, { loan_number: string }>();
+    const chunkSize = 400;
+    for (let i = 0; i < rows.length; i += chunkSize) {
+      const chunk = rows.slice(i, i + chunkSize);
+      const ids = chunk.map((r) => r.id);
+      const placeholders = ids.map(() => '?').join(', ');
+      const tickets: Array<{ asset_id: string; ticket_number: string; document_type: string }> = db.prepare(`
+        SELECT asset_id, ticket_number, document_type FROM maintenance_tickets
+        WHERE repair_status NOT IN ('COMPLETED', 'CANCELLED') AND asset_id IN (${placeholders})
+      `).all(...ids);
+      const loans: Array<{ asset_id: string; loan_number: string }> = db.prepare(`
+        SELECT li.asset_id, l.loan_number
+        FROM equipment_loan_items li
+        JOIN equipment_loans l ON l.id = li.loan_id
+        WHERE li.status = 'OUT' AND li.asset_id IN (${placeholders})
+      `).all(...ids);
+      for (const t of tickets) ticketByAsset.set(t.asset_id, t);
+      for (const l of loans) loanByAsset.set(l.asset_id, l);
+    }
+    for (const a of rows) {
+      a.open_loan_number = loanByAsset.get(a.id)?.loan_number ?? null;
+      const ticket = ticketByAsset.get(a.id);
+      a.open_ticket_number = ticket?.ticket_number ?? null;
+      a.open_ticket_type = ticket?.document_type ?? null;
+    }
+  };
+
   // Load every unit (asset) for the given equipment ids, grouped by equipment_id.
   // Each unit of quantity has its own equipment_assets row, so an item can have many.
   const loadAssetsByEquipment = (equipmentIds: string[]): Map<string, any[]> => {
@@ -178,6 +209,7 @@ export function registerEquipmentHandlers(): void {
     rows.sort((a, b) => (trailingUnitCount(a.equipment_code) ?? 0) - (trailingUnitCount(b.equipment_code) ?? 0)
       || String(a.created_at).localeCompare(String(b.created_at))
       || String(a.id).localeCompare(String(b.id)));
+    attachUnitActions(rows);
     for (const a of rows) {
       const list = grouped.get(a.equipment_id) || [];
       list.push(a);
@@ -361,13 +393,89 @@ export function registerEquipmentHandlers(): void {
     } else if (desired < liveUnits.length) {
       const removable = liveUnits
         .filter((u) => u.current_status === 'AVAILABLE' && !hasAssetReferences(u.id))
-        .sort((a, b) => (trailingUnitCount(b.equipment_code) ?? 0) - (trailingUnitCount(a.equipment_code) ?? 0));
+        .sort((a, b) => {
+          const ac = trailingUnitCount(a.equipment_code);
+          const bc = trailingUnitCount(b.equipment_code);
+          // Incomplete rows (null/malformed codes) must be dropped before numbered units.
+          if (ac == null && bc == null) return 0;
+          if (ac == null) return -1;
+          if (bc == null) return 1;
+          return bc - ac;
+        });
       const toRemove = Math.min(liveUnits.length - desired, removable.length);
       for (let i = 0; i < toRemove; i++) {
         const unit = removable[i]!;
         db.prepare('DELETE FROM equipment_assets WHERE id = ?').run(unit.id);
         void pushOperationalToCloud('equipment_assets', 'DELETE', { id: unit.id });
       }
+    }
+  };
+
+  // Apply serial/supplier/delivered edits, insert new units, and drop spare AVAILABLE
+  // units the user removed. Status is never written here.
+  const applyUnitEdits = (
+    equipmentId: string,
+    units: Array<{
+      id?: string;
+      serial_number?: string;
+      vendor_name?: string | null;
+      delivered_date?: string;
+    }>,
+    prefix: string,
+  ): void => {
+    const live: any[] = db.prepare(
+      "SELECT * FROM equipment_assets WHERE equipment_id = ? AND current_status NOT IN ('RETIRED', 'MISSING')",
+    ).all(equipmentId);
+    const keepIds = new Set(units.map((u) => u.id).filter((id): id is string => Boolean(id)));
+
+    for (const u of units) {
+      if (!u.id) continue;
+      const existing: any = db.prepare(
+        'SELECT id FROM equipment_assets WHERE id = ? AND equipment_id = ?',
+      ).get(u.id, equipmentId);
+      if (!existing) throw new Error('Unit not found on this equipment.');
+      db.prepare(`
+        UPDATE equipment_assets
+           SET serial_number = ?, vendor_name = ?, delivered_date = ?, updated_at = datetime('now')
+         WHERE id = ?
+      `).run(u.serial_number || '', u.vendor_name || null, u.delivered_date || null, u.id);
+      const updated: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(u.id);
+      if (updated) void pushOperationalToCloud('equipment_assets', 'UPDATE', updated);
+    }
+
+    const newUnits = units.filter((u) => !u.id);
+    if (newUnits.length > 0) {
+      const template = live[0];
+      const now = new Date().toISOString();
+      const counts = nextUnitCounts(usedCountsForPrefix(prefix), newUnits.length);
+      for (let i = 0; i < newUnits.length; i++) {
+        const unit = newUnits[i]!;
+        const newId = uuidv4();
+        insertAsset({
+          id: newId,
+          equipmentId,
+          unitCode: formatUnitCode(prefix, counts[i]!),
+          serial_number: unit.serial_number || '',
+          purchase_date: template?.purchase_date ?? null,
+          delivered_date: unit.delivered_date || null,
+          purchase_price: template?.purchase_price ?? 0,
+          vendor_name: unit.vendor_name || null,
+          warranty_expiry: template?.warranty_expiry ?? null,
+          current_location: template?.current_location ?? 'Warehouse',
+          now,
+        });
+        const created: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(newId);
+        if (created) void pushOperationalToCloud('equipment_assets', 'INSERT', created);
+      }
+    }
+
+    for (const unit of live) {
+      if (keepIds.has(unit.id)) continue;
+      if (unit.current_status !== 'AVAILABLE' || hasAssetReferences(unit.id)) {
+        throw new Error('Cannot remove a unit that is on loan, in maintenance, or has history.');
+      }
+      db.prepare('DELETE FROM equipment_assets WHERE id = ?').run(unit.id);
+      void pushOperationalToCloud('equipment_assets', 'DELETE', { id: unit.id });
     }
   };
 
@@ -413,7 +521,9 @@ export function registerEquipmentHandlers(): void {
       }
     }
 
-    if (input.quantity !== undefined) {
+    if (input.units !== undefined) {
+      applyUnitEdits(id, input.units, prefix);
+    } else if (input.quantity !== undefined) {
       reconcileUnits(id, input.quantity, prefix);
     }
     recomputeAvailability(db, id);
@@ -610,7 +720,7 @@ export function registerEquipmentHandlers(): void {
     const activeTickets: any = db.prepare(ticketQuery).get(...catParams);
 
     const lowStockQuery = catFilter
-      ? `SELECT COUNT(*) as count FROM parts_inventory pi JOIN parts_catalog pc ON pc.id = pi.part_id WHERE pc.is_active = 1 AND pi.qty_on_hand <= pi.reorder_point AND (pc.department IS NULL OR pc.department IN (SELECT CASE WHEN c2.name = 'Camera' THEN 'camera' ELSE 'lights_grips' END FROM categories c2 WHERE c2.name IN (${catPlaceholders})))`
+      ? `SELECT COUNT(*) as count FROM parts_inventory pi JOIN parts_catalog pc ON pc.id = pi.part_id WHERE pc.is_active = 1 AND pi.qty_on_hand <= pi.reorder_point AND (pc.department IS NULL OR pc.department IN (SELECT CASE WHEN d2.name = 'Camera' THEN 'camera' ELSE 'lights_grips' END FROM departments d2 WHERE d2.name IN (${catPlaceholders})))`
       : `SELECT COUNT(*) as count FROM parts_inventory pi JOIN parts_catalog pc ON pc.id = pi.part_id WHERE pc.is_active = 1 AND pi.qty_on_hand <= pi.reorder_point`;
     const lowStock: any = db.prepare(lowStockQuery).get(...catParams);
 
@@ -649,12 +759,14 @@ export function registerEquipmentHandlers(): void {
     const user = requireInventoryAccess(event);
     const canPrice = user.role === 'admin';
     const sessionDept = sessionDepartment(event);
-    const lines = csvContent.trim().split(/\r?\n/).filter((l) => l.trim());
+    const lines = csvContent.replace(/^\uFEFF/, '').trim().split(/\r?\n/).filter((l) => l.trim());
     if (lines.length < 2) throw new Error('CSV must have a header row and at least one data row');
-    const headers = parseCsvRow(lines[0]!).map((h) => h.trim().toLowerCase().replace(/\s+/g, '_'));
+    const headers = parseCsvRow(lines[0]!).map((h) => h.trim().replace(/^\uFEFF/, '').toLowerCase().replace(/\s+/g, '_'));
     const errors: { row: number; message: string }[] = [];
     let imported = 0;
     const now = new Date().toISOString();
+    const createdAssetIds: string[] = [];
+    const touchedItemIds = new Set<string>();
 
     const findDept = db.prepare('SELECT id, name FROM departments WHERE name = ? AND is_active = 1');
     const findCat = db.prepare('SELECT id FROM categories WHERE name = ? AND department_id = ? AND is_active = 1');
@@ -736,7 +848,7 @@ export function registerEquipmentHandlers(): void {
           const skuPrefix = skuPrefixFor(deptRow.id, cat.id, row.brand || '', row.model || '');
           const existing = findSku(deptRow.id, cat.id, row.brand || '', row.model || '');
           const price = canPrice ? (parseFloat(row.base_price || '0') || 0) : 0;
-          const unitQty = parseQtyAvailable(row.notes) || 1;
+          const unitQty = unitQtyFromCsvRow(row);
 
           let eqId = existing?.id as string | undefined;
           if (existing) {
@@ -758,23 +870,24 @@ export function registerEquipmentHandlers(): void {
               pricingType, price, row.notes || null, unitQty, unitQty, now, now);
           }
 
+          // N blank units with numbered codes (…-001, …-002). Serial, supplier, and
+          // delivered date stay empty so they can be filled later from Edit Details.
           const counts = nextUnitCounts(usedCountsForPrefix(skuPrefix), unitQty);
           for (let u = 0; u < unitQty; u++) {
+            const assetId = uuidv4();
+            createdAssetIds.push(assetId);
             insertAsset({
-              id: uuidv4(),
+              id: assetId,
               equipmentId: eqId!,
               unitCode: formatUnitCode(skuPrefix, counts[u]!),
-              serial_number: u === 0 ? (row.serial_number || '') : '',
-              asset_tag: u === 0 ? (row.asset_tag || null) : null,
-              purchase_date: row.purchase_date || null,
-              delivered_date: row.delivered_date || row.delivery_date || null,
-              purchase_price: parseFloat(row.purchase_price || '0') || 0,
-              vendor_name: row.vendor_name || row.supplier || null,
-              warranty_expiry: row.warranty_expiry || null,
+              serial_number: '',
               now,
             });
           }
-          if (eqId) recomputeAvailability(db, eqId);
+          if (eqId) {
+            recomputeAvailability(db, eqId);
+            touchedItemIds.add(eqId);
+          }
           imported++;
         } catch (err: any) {
           errors.push({ row: i + 1, message: err.message || 'Unknown error' });
@@ -782,6 +895,16 @@ export function registerEquipmentHandlers(): void {
       }
     });
     tx();
+    // SKUs must land before units (cloud FK). Create() already does this; import
+    // used to push only assets, so a populated cloud never saw the new items.
+    for (const itemId of touchedItemIds) {
+      const equipmentRow: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(itemId);
+      if (equipmentRow) void pushCatalogToCloud('equipment_items', 'UPDATE', equipmentRow);
+    }
+    for (const aid of createdAssetIds) {
+      const assetRow: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(aid);
+      if (assetRow) void pushOperationalToCloud('equipment_assets', 'INSERT', assetRow);
+    }
     return { imported, errors };
   });
 

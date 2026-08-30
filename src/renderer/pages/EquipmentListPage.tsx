@@ -17,11 +17,12 @@ import { useToast } from '../hooks';
 import { printHtml, escapeHtml } from '../lib/print';
 
 // Columns the equipment CSV importer understands (see db:equipment:importCsv).
-// Codes are always auto-generated. Put `Qty Available: N` in notes to create N units.
+// Codes are always auto-generated. `qty_available` (or `Qty Available: N` in notes)
+// creates N numbered units with blank serial/supplier/delivered for later edit.
 // base_price is honored only for admins; a manager's import always lands at 0.
 const EQUIPMENT_CSV_HEADERS = [
   'name', 'department', 'category', 'sub_category', 'sub_sub_category',
-  'item_type', 'brand', 'model', 'pricing_type', 'base_price', 'notes',
+  'item_type', 'brand', 'model', 'qty_available', 'pricing_type', 'base_price', 'notes',
 ];
 
 const statusVariantMap: Record<string, 'success' | 'info' | 'warning' | 'danger' | 'purple' | 'default'> = {
@@ -136,7 +137,8 @@ export function EquipmentListPage() {
   );
 
   const selectedCategory = useMemo(
-    () => hierarchyCategories.find((c) => c.id === categoryFilter),
+    () => hierarchyCategories.find((c) => c.id === categoryFilter)
+      || hierarchyCategories.find((c) => c.name === categoryFilter),
     [hierarchyCategories, categoryFilter],
   );
 
@@ -158,14 +160,29 @@ export function EquipmentListPage() {
   );
 
   const selectedSubcategory = useMemo(
-    () => hierarchySubcategories.find((s) => s.id === subcategoryFilter),
+    () => hierarchySubcategories.find((s) => s.id === subcategoryFilter)
+      || hierarchySubcategories.find((s) => s.name === subcategoryFilter),
     [hierarchySubcategories, subcategoryFilter],
   );
 
-  const hierarchySubSubs = useMemo(
-    () => subSubOptionsFor(selectedCategory?.name, selectedSubcategory?.name),
-    [selectedCategory, selectedSubcategory],
-  );
+  const hierarchySubSubs = useMemo(() => {
+    const fromTaxonomy = subSubOptionsFor(selectedCategory?.name, selectedSubcategory?.name);
+    const fromItems = new Set<string>();
+    for (const item of deptItems) {
+      if (categoryFilter && item.category_id !== categoryFilter && item.category_name !== categoryFilter) continue;
+      if (subcategoryFilter && item.subcategory_id !== subcategoryFilter && item.subcategory_name !== subcategoryFilter) continue;
+      const label = (item.sub_subcategory || '').trim();
+      if (label) fromItems.add(label);
+    }
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const name of [...fromTaxonomy, ...fromItems]) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      out.push(name);
+    }
+    return out;
+  }, [selectedCategory, selectedSubcategory, deptItems, categoryFilter, subcategoryFilter]);
 
   const handleCategoryChange = (catId: string) => {
     setCategoryFilter(catId);
@@ -199,7 +216,12 @@ export function EquipmentListPage() {
     }
     if (categoryFilter && item.category_id !== categoryFilter && item.category_name !== categoryFilter) return false;
     if (subcategoryFilter && item.subcategory_id !== subcategoryFilter && item.subcategory_name !== subcategoryFilter) return false;
-    if (subSubFilter && (item.sub_subcategory || '') !== subSubFilter) return false;
+    if (subSubFilter) {
+      const wanted = subSubFilter.trim();
+      const stored = (item.sub_subcategory || '').trim();
+      const subName = (item.subcategory_name || '').trim();
+      if (stored !== wanted && subName !== wanted) return false;
+    }
     if (statusFilter) {
       const units = unitsOf(item);
       const matches = units.length > 0
@@ -315,7 +337,7 @@ export function EquipmentListPage() {
     const sample: Record<string, string> = {
       name: 'ARRI Alexa Mini LF', department: 'Camera', category: 'Camera',
       sub_category: 'Camera Body', sub_sub_category: '4K', item_type: 'standalone', brand: 'ARRI', model: 'Alexa Mini LF',
-      pricing_type: 'per_day', base_price: isAdmin ? '15000' : '', notes: 'Qty Available: 2',
+      qty_available: '2', pricing_type: 'per_day', base_price: isAdmin ? '15000' : '', notes: '',
     };
     const csv = EQUIPMENT_CSV_HEADERS.join(',') + '\n' + EQUIPMENT_CSV_HEADERS.map((h) => sample[h] ?? '').join(',') + '\n';
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });

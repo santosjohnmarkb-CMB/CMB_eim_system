@@ -34,7 +34,14 @@ export interface QueuedAction {
 // NOTE: `photo_data` (the requested-equipment photo on purchase requests/items) is
 // deliberately NOT in this list — it is core request documentation that every user
 // should see on screen and in the generated PDF, so it syncs like any other column.
-const LOCAL_ONLY_COLUMNS = new Set(['signed_form_data', 'invoice_data', 'service_doc_data']);
+const LOCAL_ONLY_COLUMNS = new Set([
+  'signed_form_data', 'invoice_data', 'service_doc_data',
+  // Retired equipment_items.display_name. 1 Take (and current cloud) dropped it;
+  // sending it makes PostgREST reject the whole upsert (PGRST204).
+  'display_name',
+  // 1 Take-only users column; the shared cloud table has no such field.
+  'must_change_password',
+]);
 
 export function coerceForCloud(payload: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};

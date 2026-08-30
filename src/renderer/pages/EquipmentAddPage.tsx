@@ -16,7 +16,9 @@ import {
   pathForSubSub,
 } from '../lib/catalogHierarchy';
 import { CatalogCombobox } from '../components/common/CatalogCombobox';
+import { Badge } from '../components/common/Badge';
 import { buildSkuPrefix, formatUnitCode, nextUnitCounts, trailingUnitCount } from '../../shared/equipment-code';
+import { unitActionLabel } from '../../shared/equipment-unit';
 
 const PRICING_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'per_day', label: 'Per Day' },
@@ -46,7 +48,10 @@ export function EquipmentAddPage() {
   const isAdmin = user?.role === 'admin';
   const userDept = user?.department as Department | null;
 
-  const catalogDepts = useMemo(() => latestDepartments(departments, userDept), [departments, userDept]);
+  const catalogDepts = useMemo(
+    () => latestDepartments(departments, userDept, categories),
+    [departments, userDept, categories],
+  );
 
   const defaultDeptId = useMemo(() => {
     const preferred = userDept ? DEPARTMENT_CONFIG[userDept].categories[0] : catalogDepts[0]?.name;
@@ -71,15 +76,26 @@ export function EquipmentAddPage() {
   const selectedDept = catalogDepts.find((d) => d.id === form.department_id)
     || departments.find((d) => d.id === form.department_id);
   const filteredCats = categoryOptionsForDepartment(categories, departments, form.department_id);
-  const selectedCat = filteredCats.find((c) => c.id === form.category_id);
+  const selectedCat = filteredCats.find((c) => c.id === form.category_id)
+    || filteredCats.find((c) => c.name === form.category_id);
   const filteredSubs = subcategoryChoices(
     subcategories, departments, form.department_id, form.category_id, categories,
   );
   const selectedSub = filteredSubs.find((s) => s.id === form.subcategory_id)
     || subcategories.find((s) => s.id === form.subcategory_id)
     || (form.subcategory_id ? { id: form.subcategory_id, name: form.subcategory_id } : undefined);
-  const subSubOptions = subSubChoices(selectedDept?.name, selectedCat?.name, selectedSub?.name);
+  const subSubOptions = subSubChoices(selectedDept?.name, selectedCat?.name, selectedSub?.name, items, selectedCat?.id, selectedSub?.id);
   const set = (field: string, value: any) => setForm((p) => ({ ...p, [field]: value }));
+
+  const setCategory = (name: string) => {
+    const match = filteredCats.find((c) => c.name === name);
+    setForm((p) => ({
+      ...p,
+      category_id: match?.id || name,
+      subcategory_id: '',
+      sub_subcategory: '',
+    }));
+  };
 
   const setSubcategory = (name: string) => {
     const match = filteredSubs.find((s) => s.name === name);
@@ -196,19 +212,21 @@ export function EquipmentAddPage() {
               {catalogDepts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-surface-400 mb-1">Category *</label>
-            <select value={form.category_id} onChange={(e) => { set('category_id', e.target.value); set('subcategory_id', ''); set('sub_subcategory', ''); }} className={selectClass} required>
-              <option value="">Select category</option>
-              {filteredCats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
+          <CatalogCombobox
+            label="Category *"
+            value={selectedCat?.name || form.category_id}
+            onChange={setCategory}
+            options={filteredCats.map((c) => c.name)}
+            placeholder="Select or type a category"
+            allowCreate
+          />
           <CatalogCombobox
             label="Sub category"
             value={selectedSub?.name || ''}
             onChange={setSubcategory}
             options={filteredSubs.map((s) => s.name)}
             placeholder="Select or type a sub category"
+            allowCreate
           />
           <CatalogCombobox
             label="Sub-sub category"
@@ -216,6 +234,7 @@ export function EquipmentAddPage() {
             onChange={setSubSubcategory}
             options={subSubOptions}
             placeholder="Select or type a sub-sub category"
+            allowCreate
           />
           <div>
             <label className="block text-xs font-medium text-surface-400 mb-1">Item type</label>
@@ -255,7 +274,7 @@ export function EquipmentAddPage() {
       <div className="glass-panel rounded-xl p-6 space-y-4">
         <div>
           <h3 className="text-sm font-semibold text-surface-300">Units ({units.length})</h3>
-          <p className="text-xs text-surface-500 mt-0.5">Each unit of quantity has its own serial number, supplier, and delivery date. Leave blank to fill in later.</p>
+          <p className="text-xs text-surface-500 mt-0.5">Each unit of quantity has its own serial number, supplier, and delivery date. Status and action are set later by Maintenance and Loaned Equipment. Leave blank to fill in later.</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -266,6 +285,8 @@ export function EquipmentAddPage() {
                 <th className="py-2 pr-3 font-medium">Serial Number</th>
                 <th className="py-2 pr-3 font-medium">Supplier</th>
                 <th className="py-2 pr-3 font-medium">Delivered Date</th>
+                <th className="py-2 pr-3 font-medium">Status</th>
+                <th className="py-2 pr-3 font-medium">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -281,9 +302,11 @@ export function EquipmentAddPage() {
                   <td className="py-2 pr-3">
                     <input value={u.vendor_name} onChange={(e) => setUnit(idx, 'vendor_name', e.target.value)} className="w-full px-2.5 py-1.5 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100" placeholder="Supplier" />
                   </td>
-                  <td className="py-2 pr-3">
-                    <input type="date" value={u.delivered_date} onChange={(e) => setUnit(idx, 'delivered_date', e.target.value)} className="w-full px-2.5 py-1.5 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100" />
-                  </td>
+                    <td className="py-2 pr-3">
+                      <input type="date" value={u.delivered_date} onChange={(e) => setUnit(idx, 'delivered_date', e.target.value)} className="w-full px-2.5 py-1.5 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100" />
+                    </td>
+                    <td className="py-2 pr-3"><Badge variant="success">Available</Badge></td>
+                    <td className="py-2 pr-3 text-surface-400">{unitActionLabel({ current_status: 'AVAILABLE' })}</td>
                 </tr>
               ))}
             </tbody>
