@@ -6,11 +6,15 @@ import { writeAuditLog } from './audit';
 import { EquipmentCreateSchema, EquipmentUpdateSchema, AssetUpdateSchema, AssetStatusUpdateSchema } from '../../shared/schemas';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { pushOperationalToCloud } from '../sync/operational-sync';
-import { CATEGORY_PREFIXES, opsDepartmentOf } from '../../shared/constants';
+import { opsDepartmentOf } from '../../shared/constants';
 import { seedEquipmentHierarchy } from '../database/migrate';
 import { sessionDepartment, categoriesForDepartment, assertEquipmentInDepartment } from './department';
 import { recomputeAvailability, insertAssetStatusLog, pushStatusLogsToCloud } from './availability';
 import { parseCsvRow } from './utils/csv';
+import {
+  buildSkuPrefix, formatUnitCode, nextUnitCounts, parseQtyAvailable,
+  parseUnitCount, trailingUnitCount,
+} from '../../shared/equipment-code';
 
 export function registerEquipmentHandlers(): void {
   const db = getDatabase();
@@ -72,34 +76,62 @@ export function registerEquipmentHandlers(): void {
     return id;
   };
 
-  // Last sequence this process already allocated per prefix. CSV import (and any
-  // other bulk insert) calls this inside one transaction; we must not re-query a
-  // stale MAX and hand out the same code twice.
-  const issuedSeqByPrefix = new Map<string, number>();
+  const skuPrefixFor = (departmentId: string, categoryId: string, brand: string, model: string): string => {
+    const row: any = db.prepare(`
+      SELECT d.name as department_name, c.name as category_name
+      FROM categories c JOIN departments d ON d.id = c.department_id
+      WHERE c.id = ?
+    `).get(categoryId);
+    return buildSkuPrefix({
+      departmentName: row?.department_name,
+      categoryName: row?.category_name,
+      brand,
+      model,
+    });
+  };
 
-  // Generate the next unused equipment code for a category prefix. Orders by the
-  // numeric suffix (not lexicographically, so CAM-1000 beats CAM-999) and skips any
-  // code that already exists to avoid UNIQUE constraint failures on equipment_code.
-  const nextEquipmentCode = (prefix: string, reserved?: Set<string>): string => {
-    const last: any = db.prepare(
-      `SELECT equipment_code FROM equipment_items WHERE equipment_code LIKE ?
-       ORDER BY CAST(substr(equipment_code, instr(equipment_code, '-') + 1) AS INTEGER) DESC LIMIT 1`,
-    ).get(`${prefix}-%`);
-    let seq = 1;
-    if (last) {
-      const num = parseInt(last.equipment_code.split('-')[1] || '0', 10);
-      seq = (Number.isFinite(num) ? num : 0) + 1;
-    }
-    seq = Math.max(seq, issuedSeqByPrefix.get(prefix) ?? 1);
-    const exists = db.prepare('SELECT 1 FROM equipment_items WHERE equipment_code = ?');
-    let code = `${prefix}-${String(seq).padStart(3, '0')}`;
-    while (exists.get(code) || reserved?.has(code)) {
-      seq += 1;
-      code = `${prefix}-${String(seq).padStart(3, '0')}`;
-    }
-    issuedSeqByPrefix.set(prefix, seq + 1);
-    reserved?.add(code);
-    return code;
+  const usedCountsForPrefix = (prefix: string): number[] => {
+    const rows: any[] = db.prepare(
+      'SELECT equipment_code FROM equipment_assets WHERE equipment_code LIKE ?',
+    ).all(`${prefix}-%`);
+    return rows
+      .map((r) => parseUnitCount(r.equipment_code, prefix))
+      .filter((n: number | null): n is number => n != null);
+  };
+
+  const findSku = (departmentId: string, categoryId: string, brand: string, model: string): any => {
+    return db.prepare(`
+      SELECT * FROM equipment_items
+      WHERE is_active = 1 AND department_id = ? AND category_id = ?
+        AND LOWER(TRIM(COALESCE(brand, ''))) = LOWER(TRIM(?))
+        AND LOWER(TRIM(COALESCE(model, ''))) = LOWER(TRIM(?))
+      LIMIT 1
+    `).get(departmentId, categoryId, brand || '', model || '');
+  };
+
+  const insertAsset = (params: {
+    id: string;
+    equipmentId: string;
+    unitCode: string;
+    serial_number: string;
+    asset_tag?: string | null;
+    purchase_date?: string | null;
+    delivered_date?: string | null;
+    purchase_price?: number;
+    vendor_name?: string | null;
+    warranty_expiry?: string | null;
+    current_location?: string;
+    now: string;
+  }): void => {
+    db.prepare(`
+      INSERT INTO equipment_assets (id, equipment_id, equipment_code, serial_number, asset_tag, purchase_date, delivered_date, purchase_price, vendor_name, warranty_expiry, current_location, current_status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'AVAILABLE', ?, ?)
+    `).run(
+      params.id, params.equipmentId, params.unitCode, params.serial_number, params.asset_tag ?? null,
+      params.purchase_date ?? null, params.delivered_date ?? null, params.purchase_price ?? 0,
+      params.vendor_name ?? null, params.warranty_expiry ?? null,
+      params.current_location ?? 'Warehouse', params.now, params.now,
+    );
   };
 
   // Reject touching an asset (by asset_id) that belongs to another department.
@@ -141,8 +173,11 @@ export function registerEquipmentHandlers(): void {
     if (equipmentIds.length === 0) return grouped;
     const placeholders = equipmentIds.map(() => '?').join(', ');
     const rows: any[] = db.prepare(
-      `SELECT * FROM equipment_assets WHERE equipment_id IN (${placeholders}) ORDER BY created_at, id`,
+      `SELECT * FROM equipment_assets WHERE equipment_id IN (${placeholders})`,
     ).all(...equipmentIds);
+    rows.sort((a, b) => (trailingUnitCount(a.equipment_code) ?? 0) - (trailingUnitCount(b.equipment_code) ?? 0)
+      || String(a.created_at).localeCompare(String(b.created_at))
+      || String(a.id).localeCompare(String(b.id)));
     for (const a of rows) {
       const list = grouped.get(a.equipment_id) || [];
       list.push(a);
@@ -187,14 +222,13 @@ export function registerEquipmentHandlers(): void {
     return { ...row, is_active: !!row.is_active, assets, asset: assets[0] };
   });
 
-  ipcMain.handle('db:equipment:generateCode', (_e: any, categoryId: string) => {
-    const cat: any = db.prepare(`
-      SELECT d.name as department_name FROM categories c
-      JOIN departments d ON d.id = c.department_id WHERE c.id = ?
-    `).get(categoryId);
-    if (!cat) throw new Error('Category not found');
-    const prefix = CATEGORY_PREFIXES[cat.department_name] || 'EQP';
-    return nextEquipmentCode(prefix);
+  ipcMain.handle('db:equipment:generateCode', (_e: any, payload: {
+    departmentName?: string;
+    categoryName?: string;
+    brand?: string;
+    model?: string;
+  }) => {
+    return buildSkuPrefix(payload || {});
   });
 
   ipcMain.handle('db:equipment:create', (event: any, data: unknown) => {
@@ -204,24 +238,12 @@ export function registerEquipmentHandlers(): void {
     const categoryId = ensureCategoryId(departmentId, input.category_id);
     const subcategoryId = ensureSubcategoryId(categoryId, input.subcategory_id);
     assertCategoryInDepartment(event, categoryId);
-    // Admin-only pricing: managers create equipment at 0 price; only admins set a price.
     const basePrice = user.role === 'admin' ? input.base_price : 0;
-    const equipmentId = uuidv4();
-    const assetId = uuidv4();
     const now = new Date().toISOString();
-
-    const cat: any = db.prepare(`
-      SELECT c.department_id, d.name as department_name
-      FROM categories c JOIN departments d ON d.id = c.department_id WHERE c.id = ?
-    `).get(categoryId);
     if (!departmentId) throw new Error('Department is required');
-    const prefix = cat ? (CATEGORY_PREFIXES[cat.department_name] || 'EQP') : 'EQP';
-    const equipmentCode = nextEquipmentCode(prefix);
+    const skuPrefix = skuPrefixFor(departmentId, categoryId, input.brand, input.model);
     const pricingType = input.item_type === 'package_main' ? 'package_rate' : input.pricing_type;
 
-    // Build the per-unit list. When explicit `units` are provided, one asset row is
-    // created per entry; otherwise `quantity` units are created with the first unit
-    // carrying the form's serial/asset tag and the rest sharing supplier/dates.
     const units: { serial_number: string; vendor_name: string | null; delivered_date: string | null; asset_tag: string | null }[] =
       input.units && input.units.length > 0
         ? input.units.map((u) => ({
@@ -238,31 +260,52 @@ export function registerEquipmentHandlers(): void {
           }));
     const qty = units.length;
 
+    const existingSku = findSku(departmentId, categoryId, input.brand, input.model);
     const assetIds: string[] = [];
-    const tx = db.transaction(() => {
-      db.prepare(`
-        INSERT INTO equipment_items (id, equipment_code, name, department_id, category_id, subcategory_id, sub_subcategory, item_type, brand, model, pricing_type, base_price, notes, quantity, available_qty, is_active, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-      `).run(equipmentId, equipmentCode, input.name, departmentId, categoryId, subcategoryId,
-        input.sub_subcategory || null, input.item_type, input.brand, input.model,
-        pricingType, basePrice, input.notes || null, qty, qty, now, now);
+    const targetId = existingSku?.id || uuidv4();
 
+    const tx = db.transaction(() => {
+      if (existingSku) {
+        db.prepare(`
+          UPDATE equipment_items SET
+            equipment_code = ?, quantity = quantity + ?, notes = COALESCE(?, notes),
+            updated_at = ?, version = version + 1
+          WHERE id = ?
+        `).run(skuPrefix, qty, input.notes || null, now, existingSku.id);
+      } else {
+        db.prepare(`
+          INSERT INTO equipment_items (id, equipment_code, name, department_id, category_id, subcategory_id, sub_subcategory, item_type, brand, model, pricing_type, base_price, notes, quantity, available_qty, is_active, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+        `).run(targetId, skuPrefix, input.name, departmentId, categoryId, subcategoryId,
+          input.sub_subcategory || null, input.item_type, input.brand, input.model,
+          pricingType, basePrice, input.notes || null, qty, qty, now, now);
+      }
+
+      const counts = nextUnitCounts(usedCountsForPrefix(skuPrefix), qty);
       for (let i = 0; i < units.length; i++) {
         const unit = units[i]!;
-        const unitId = i === 0 ? assetId : uuidv4();
+        const unitId = uuidv4();
         assetIds.push(unitId);
-        db.prepare(`
-          INSERT INTO equipment_assets (id, equipment_id, serial_number, asset_tag, purchase_date, delivered_date, purchase_price, vendor_name, warranty_expiry, current_location, current_status, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Warehouse', 'AVAILABLE', ?, ?)
-        `).run(unitId, equipmentId, unit.serial_number, unit.asset_tag,
-          input.purchase_date || null, unit.delivered_date, input.purchase_price || 0, unit.vendor_name,
-          input.warranty_expiry || null, now, now);
+        insertAsset({
+          id: unitId,
+          equipmentId: targetId,
+          unitCode: formatUnitCode(skuPrefix, counts[i]!),
+          serial_number: unit.serial_number,
+          asset_tag: unit.asset_tag,
+          purchase_date: input.purchase_date || null,
+          delivered_date: unit.delivered_date,
+          purchase_price: input.purchase_price || 0,
+          vendor_name: unit.vendor_name,
+          warranty_expiry: input.warranty_expiry || null,
+          now,
+        });
       }
     });
     tx();
 
-    const equipmentRow: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(equipmentId);
-    void pushCatalogToCloud('equipment_items', 'INSERT', equipmentRow);
+    recomputeAvailability(db, targetId);
+    const equipmentRow: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(targetId);
+    void pushCatalogToCloud('equipment_items', existingSku ? 'UPDATE' : 'INSERT', equipmentRow);
 
     for (const aid of assetIds) {
       const assetRow: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(aid);
@@ -286,29 +329,39 @@ export function registerEquipmentHandlers(): void {
   // Reconcile the number of unit (asset) rows to match a desired quantity.
   // Growing adds blank AVAILABLE units (inheriting supplier/dates from an existing one).
   // Shrinking removes spare AVAILABLE units that have no maintenance/loan history.
-  const reconcileUnits = (equipmentId: string, desiredQty: number): void => {
+  const reconcileUnits = (equipmentId: string, desiredQty: number, prefix: string): void => {
     const desired = Math.max(0, Math.floor(desiredQty));
     const liveUnits: any[] = db.prepare(
-      "SELECT * FROM equipment_assets WHERE equipment_id = ? AND current_status NOT IN ('RETIRED', 'MISSING') ORDER BY created_at, id",
+      "SELECT * FROM equipment_assets WHERE equipment_id = ? AND current_status NOT IN ('RETIRED', 'MISSING')",
     ).all(equipmentId);
+    liveUnits.sort((a, b) => (trailingUnitCount(a.equipment_code) ?? 0) - (trailingUnitCount(b.equipment_code) ?? 0));
 
     if (desired > liveUnits.length) {
       const template = liveUnits[0];
       const now = new Date().toISOString();
-      for (let i = 0; i < desired - liveUnits.length; i++) {
+      const counts = nextUnitCounts(usedCountsForPrefix(prefix), desired - liveUnits.length);
+      for (let i = 0; i < counts.length; i++) {
         const newId = uuidv4();
-        db.prepare(`
-          INSERT INTO equipment_assets (id, equipment_id, serial_number, asset_tag, purchase_date, delivered_date, purchase_price, vendor_name, warranty_expiry, current_location, current_status, created_at, updated_at)
-          VALUES (?, ?, '', NULL, ?, ?, ?, ?, ?, ?, 'AVAILABLE', ?, ?)
-        `).run(newId, equipmentId,
-          template?.purchase_date ?? null, template?.delivered_date ?? null, template?.purchase_price ?? 0,
-          template?.vendor_name ?? null, template?.warranty_expiry ?? null, template?.current_location ?? 'Warehouse', now, now);
+        insertAsset({
+          id: newId,
+          equipmentId,
+          unitCode: formatUnitCode(prefix, counts[i]!),
+          serial_number: '',
+          purchase_date: template?.purchase_date ?? null,
+          delivered_date: template?.delivered_date ?? null,
+          purchase_price: template?.purchase_price ?? 0,
+          vendor_name: template?.vendor_name ?? null,
+          warranty_expiry: template?.warranty_expiry ?? null,
+          current_location: template?.current_location ?? 'Warehouse',
+          now,
+        });
         const created: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(newId);
         if (created) void pushOperationalToCloud('equipment_assets', 'INSERT', created);
       }
     } else if (desired < liveUnits.length) {
-      // Only remove spare AVAILABLE units with no references, to preserve history/availability.
-      const removable = liveUnits.filter((u) => u.current_status === 'AVAILABLE' && !hasAssetReferences(u.id));
+      const removable = liveUnits
+        .filter((u) => u.current_status === 'AVAILABLE' && !hasAssetReferences(u.id))
+        .sort((a, b) => (trailingUnitCount(b.equipment_code) ?? 0) - (trailingUnitCount(a.equipment_code) ?? 0));
       const toRemove = Math.min(liveUnits.length - desired, removable.length);
       for (let i = 0; i < toRemove; i++) {
         const unit = removable[i]!;
@@ -322,19 +375,14 @@ export function registerEquipmentHandlers(): void {
     const user = requireInventoryAccess(event);
     assertEquipmentInDepartment(db, event, id);
     const input = EquipmentUpdateSchema.parse(data);
-    const existing: any = db.prepare('SELECT department_id, category_id FROM equipment_items WHERE id = ?').get(id);
-    const departmentId = input.department_id || existing?.department_id;
-    if (input.category_id !== undefined) {
-      input.category_id = ensureCategoryId(departmentId, input.category_id);
-      assertCategoryInDepartment(event, input.category_id);
-    }
+    const existing: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(id);
+    if (!existing) throw new Error('Equipment not found');
+    const departmentId = existing.department_id;
+    const categoryId = existing.category_id;
     if (input.subcategory_id !== undefined) {
-      const categoryId = input.category_id || existing?.category_id;
       input.subcategory_id = ensureSubcategoryId(categoryId, input.subcategory_id);
     }
-    // Admin-only pricing: managers may edit every field except base_price, which is
-    // dropped from the allow-list so their submission can't change the stored price.
-    const allowedFields = ['name', 'department_id', 'category_id', 'subcategory_id', 'sub_subcategory',
+    const allowedFields = ['name', 'subcategory_id', 'sub_subcategory',
       'item_type', 'brand', 'model', 'pricing_type', 'notes',
       ...(user.role === 'admin' ? ['base_price'] : [])];
     const updates: string[] = [];
@@ -350,13 +398,29 @@ export function registerEquipmentHandlers(): void {
       db.prepare(`UPDATE equipment_items SET ${updates.join(', ')} WHERE id = ?`).run(...values);
     }
 
-    // Quantity changes add/remove unit rows; availability is then derived from units.
+    const after: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(id);
+    const prefix = skuPrefixFor(departmentId, categoryId, after.brand, after.model);
+    if (prefix !== after.equipment_code) {
+      db.prepare('UPDATE equipment_items SET equipment_code = ?, updated_at = datetime(\'now\') WHERE id = ?').run(prefix, id);
+      const assets: any[] = db.prepare('SELECT id, equipment_code FROM equipment_assets WHERE equipment_id = ?').all(id);
+      for (const a of assets) {
+        const n = trailingUnitCount(a.equipment_code);
+        if (n == null) continue;
+        db.prepare('UPDATE equipment_assets SET equipment_code = ?, updated_at = datetime(\'now\') WHERE id = ?')
+          .run(formatUnitCode(prefix, n), a.id);
+        const updated: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(a.id);
+        if (updated) void pushOperationalToCloud('equipment_assets', 'UPDATE', updated);
+      }
+    }
+
     if (input.quantity !== undefined) {
-      reconcileUnits(id, input.quantity);
+      reconcileUnits(id, input.quantity, prefix);
     }
     recomputeAvailability(db, id);
 
-    return db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(id);
+    const row: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(id);
+    void pushCatalogToCloud('equipment_items', 'UPDATE', row);
+    return row;
   });
 
   ipcMain.handle('db:equipment:updateAsset', (event: any, data: unknown) => {
@@ -429,10 +493,13 @@ export function registerEquipmentHandlers(): void {
   ipcMain.handle('db:equipment:search', (_e: any, query: string) => {
     const pattern = `%${query}%`;
     return db.prepare(`
-      SELECT * FROM equipment_items WHERE is_active = 1 AND (
-        name LIKE ? OR equipment_code LIKE ? OR brand LIKE ? OR model LIKE ?
-      ) ORDER BY equipment_code LIMIT 50
-    `).all(pattern, pattern, pattern, pattern);
+      SELECT DISTINCT e.* FROM equipment_items e
+      LEFT JOIN equipment_assets a ON a.equipment_id = e.id
+      WHERE e.is_active = 1 AND (
+        e.name LIKE ? OR e.equipment_code LIKE ? OR e.brand LIKE ? OR e.model LIKE ?
+        OR a.equipment_code LIKE ? OR a.serial_number LIKE ?
+      ) ORDER BY e.equipment_code LIMIT 50
+    `).all(pattern, pattern, pattern, pattern, pattern, pattern);
   });
 
   // Apply a status to every live unit of an equipment (bulk). Per-unit changes use
@@ -592,8 +659,6 @@ export function registerEquipmentHandlers(): void {
     const findDept = db.prepare('SELECT id, name FROM departments WHERE name = ? AND is_active = 1');
     const findCat = db.prepare('SELECT id FROM categories WHERE name = ? AND department_id = ? AND is_active = 1');
     const findSub = db.prepare('SELECT id FROM subcategories WHERE name = ? AND category_id = ? AND is_active = 1');
-    const findByCode = db.prepare('SELECT id FROM equipment_items WHERE equipment_code = ?');
-    const reservedCodes = new Set<string>();
 
     const tx = db.transaction(() => {
       for (let i = 1; i < lines.length; i++) {
@@ -668,38 +733,48 @@ export function registerEquipmentHandlers(): void {
             continue;
           }
 
-          const prefix = CATEGORY_PREFIXES[deptRow.name] || 'EQP';
-          const code = row.equipment_code || nextEquipmentCode(prefix, reservedCodes);
-          if (row.equipment_code) reservedCodes.add(code);
-          const existing: any = findByCode.get(code);
+          const skuPrefix = skuPrefixFor(deptRow.id, cat.id, row.brand || '', row.model || '');
+          const existing = findSku(deptRow.id, cat.id, row.brand || '', row.model || '');
           const price = canPrice ? (parseFloat(row.base_price || '0') || 0) : 0;
+          const unitQty = parseQtyAvailable(row.notes) || 1;
 
           let eqId = existing?.id as string | undefined;
           if (existing) {
             db.prepare(`
-              UPDATE equipment_items SET name = ?, department_id = ?, category_id = ?, subcategory_id = ?,
-                sub_subcategory = ?, item_type = ?, brand = ?, model = ?, pricing_type = ?,
+              UPDATE equipment_items SET
+                equipment_code = ?, quantity = quantity + ?,
+                notes = COALESCE(?, notes),
                 base_price = CASE WHEN ? = 1 THEN ? ELSE base_price END,
-                notes = ?, is_active = 1, updated_at = ?, version = version + 1
+                is_active = 1, updated_at = ?, version = version + 1
               WHERE id = ?
-            `).run(name, deptRow.id, cat.id, subId, subSub || null, itemType, row.brand || '', row.model || '',
-              pricingType, canPrice ? 1 : 0, price, row.notes || null, now, existing.id);
+            `).run(skuPrefix, unitQty, row.notes || null, canPrice ? 1 : 0, price, now, existing.id);
             eqId = existing.id;
           } else {
             eqId = uuidv4();
             db.prepare(`
               INSERT INTO equipment_items (id, equipment_code, name, department_id, category_id, subcategory_id, sub_subcategory, item_type, brand, model, pricing_type, base_price, notes, quantity, available_qty, is_active, created_at, updated_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1, ?, ?)
-            `).run(eqId, code, name, deptRow.id, cat.id, subId, subSub || null, itemType, row.brand || '', row.model || '',
-              pricingType, price, row.notes || null, now, now);
-            db.prepare(`
-              INSERT INTO equipment_assets (id, equipment_id, serial_number, asset_tag, purchase_date, delivered_date, purchase_price, vendor_name, warranty_expiry, current_location, current_status, created_at, updated_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Warehouse', 'AVAILABLE', ?, ?)
-            `).run(uuidv4(), eqId, row.serial_number || '', row.asset_tag || null,
-              row.purchase_date || null, row.delivered_date || row.delivery_date || null,
-              parseFloat(row.purchase_price || '0') || 0,
-              row.vendor_name || row.supplier || null, row.warranty_expiry || null, now, now);
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            `).run(eqId, skuPrefix, name, deptRow.id, cat.id, subId, subSub || null, itemType, row.brand || '', row.model || '',
+              pricingType, price, row.notes || null, unitQty, unitQty, now, now);
           }
+
+          const counts = nextUnitCounts(usedCountsForPrefix(skuPrefix), unitQty);
+          for (let u = 0; u < unitQty; u++) {
+            insertAsset({
+              id: uuidv4(),
+              equipmentId: eqId!,
+              unitCode: formatUnitCode(skuPrefix, counts[u]!),
+              serial_number: u === 0 ? (row.serial_number || '') : '',
+              asset_tag: u === 0 ? (row.asset_tag || null) : null,
+              purchase_date: row.purchase_date || null,
+              delivered_date: row.delivered_date || row.delivery_date || null,
+              purchase_price: parseFloat(row.purchase_price || '0') || 0,
+              vendor_name: row.vendor_name || row.supplier || null,
+              warranty_expiry: row.warranty_expiry || null,
+              now,
+            });
+          }
+          if (eqId) recomputeAvailability(db, eqId);
           imported++;
         } catch (err: any) {
           errors.push({ row: i + 1, message: err.message || 'Unknown error' });
@@ -729,10 +804,8 @@ export function registerEquipmentHandlers(): void {
       LEFT JOIN asset_status_log asl
         ON asl.equipment_id = e.id AND asl.new_status = 'DEPLOYED'
       WHERE e.is_active = 1
-        -- Exclude zero-priced "CAM-CAMPKG" package components: they are only billed as part
-        -- of the camera package, so only the priced package main should appear in use counts
-        -- (mirrors the equipment list's isZeroPricedPackageComponent filter).
-        AND NOT (LOWER(e.equipment_code) LIKE '%campkg%' AND e.base_price = 0)
+        -- Exclude zero-priced package components (billed only as part of a package).
+        AND NOT (e.item_type = 'package_component' AND e.base_price = 0)
       GROUP BY e.id
       ORDER BY use_count DESC, e.name ASC
     `).all();

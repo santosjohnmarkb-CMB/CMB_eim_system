@@ -16,6 +16,7 @@ import {
   pathForSubSub,
 } from '../lib/catalogHierarchy';
 import { CatalogCombobox } from '../components/common/CatalogCombobox';
+import { buildSkuPrefix, formatUnitCode, nextUnitCounts, trailingUnitCount } from '../../shared/equipment-code';
 
 const PRICING_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'per_day', label: 'Per Day' },
@@ -36,8 +37,8 @@ const emptyUnit = (): UnitRow => ({ serial_number: '', vendor_name: '', delivere
 
 export function EquipmentAddPage() {
   const {
-    departments, categories, subcategories,
-    fetchDepartments, fetchCategories, fetchSubcategories, createEquipment,
+    departments, categories, subcategories, items,
+    fetchAll, fetchDepartments, fetchCategories, fetchSubcategories, createEquipment,
   } = useEquipmentStore();
   const navigate = useNavigate();
   const toast = useToast();
@@ -60,7 +61,7 @@ export function EquipmentAddPage() {
   const [units, setUnits] = useState<UnitRow[]>([emptyUnit()]);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { fetchDepartments(); fetchCategories(); fetchSubcategories(); }, [fetchDepartments, fetchCategories, fetchSubcategories]);
+  useEffect(() => { fetchAll(); fetchDepartments(); fetchCategories(); fetchSubcategories(); }, [fetchAll, fetchDepartments, fetchCategories, fetchSubcategories]);
 
   useEffect(() => {
     if (!form.department_id && defaultDeptId) setForm((p) => ({ ...p, department_id: defaultDeptId }));
@@ -127,6 +128,24 @@ export function EquipmentAddPage() {
   const setUnit = (idx: number, field: keyof UnitRow, value: string) => {
     setUnits((prev) => prev.map((u, i) => (i === idx ? { ...u, [field]: value } : u)));
   };
+
+  const codePreview = useMemo(() => {
+    const prefix = buildSkuPrefix({
+      departmentName: selectedDept?.name,
+      categoryName: selectedCat?.name,
+      brand: form.brand,
+      model: form.model,
+    });
+    const existing = items.find((i) =>
+      i.department_id === form.department_id
+      && i.category_id === form.category_id
+      && (i.brand || '').trim().toLowerCase() === (form.brand || '').trim().toLowerCase()
+      && (i.model || '').trim().toLowerCase() === (form.model || '').trim().toLowerCase(),
+    );
+    const used = (existing?.assets || []).map((a) => trailingUnitCount(a.equipment_code) ?? 0).filter((n) => n > 0);
+    const counts = nextUnitCounts(used, units.length);
+    return { prefix, counts, appending: Boolean(existing) };
+  }, [selectedDept?.name, selectedCat?.name, form.brand, form.model, form.department_id, form.category_id, items, units.length]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -209,6 +228,15 @@ export function EquipmentAddPage() {
           </div>
           <Input label="Brand" value={form.brand} onChange={(e) => set('brand', e.target.value)} />
           <Input label="Model" value={form.model} onChange={(e) => set('model', e.target.value)} />
+          <div className="col-span-2">
+            <p className="text-xs font-medium text-surface-400 mb-1">Equipment code</p>
+            <p className="font-mono text-sm text-surface-200">{codePreview.prefix}</p>
+            <p className="text-xs text-surface-500 mt-0.5">
+              {codePreview.appending
+                ? `This brand/model already exists — new units continue the count (${formatUnitCode(codePreview.prefix, codePreview.counts[0] || 1)} …).`
+                : 'Generated from department, category, brand, and model. Each unit gets a count suffix.'}
+            </p>
+          </div>
           <Input label="Quantity" type="number" min={1} value={form.quantity} onChange={(e) => setQuantity(e.target.value)} onBlur={normalizeQuantity} />
           {isAdmin && (
             <>
@@ -234,6 +262,7 @@ export function EquipmentAddPage() {
             <thead>
               <tr className="text-left text-surface-500 border-b border-surface-700/60">
                 <th className="py-2 pr-3 font-medium w-10">#</th>
+                <th className="py-2 pr-3 font-medium">Code</th>
                 <th className="py-2 pr-3 font-medium">Serial Number</th>
                 <th className="py-2 pr-3 font-medium">Supplier</th>
                 <th className="py-2 pr-3 font-medium">Delivered Date</th>
@@ -243,6 +272,9 @@ export function EquipmentAddPage() {
               {units.map((u, idx) => (
                 <tr key={idx} className="border-b border-surface-800/60">
                   <td className="py-2 pr-3 text-surface-500">{idx + 1}</td>
+                  <td className="py-2 pr-3 font-mono text-xs text-surface-300 whitespace-nowrap">
+                    {formatUnitCode(codePreview.prefix, codePreview.counts[idx] || idx + 1)}
+                  </td>
                   <td className="py-2 pr-3">
                     <input value={u.serial_number} onChange={(e) => setUnit(idx, 'serial_number', e.target.value)} className="w-full px-2.5 py-1.5 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100" placeholder="Serial" />
                   </td>

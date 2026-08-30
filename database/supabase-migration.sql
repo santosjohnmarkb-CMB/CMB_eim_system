@@ -604,3 +604,8 @@ EXCEPTION WHEN duplicate_object THEN
   NULL;
 END $$;
 
+-- Per-unit structured equipment codes (the list row stores the prefix on equipment_items).
+ALTER TABLE equipment_assets ADD COLUMN IF NOT EXISTS equipment_code TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_asset_equipment_code ON equipment_assets(equipment_code);
+
+

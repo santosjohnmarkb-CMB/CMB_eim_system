@@ -23,7 +23,7 @@ interface EquipmentState {
   updateAsset: (data: { asset_id: string; serial_number?: string; vendor_name?: string | null; delivered_date?: string | null }) => Promise<void>;
   updateAssetStatus: (data: { asset_id: string; status: string; reason?: string }) => Promise<void>;
   getStatusLog: (equipmentId: string) => Promise<AssetStatusLogEntry[]>;
-  generateCode: (categoryId: string) => Promise<string>;
+  generateCode: (payload: { departmentName?: string; categoryName?: string; brand?: string; model?: string }) => Promise<string>;
   importCsv: (csvContent: string) => Promise<any>;
 }
 
@@ -118,8 +118,8 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
     return await ipcInvoke<AssetStatusLogEntry[]>('db:equipment:getStatusLog', equipmentId);
   },
 
-  generateCode: async (categoryId: string) => {
-    return await ipcInvoke<string>('db:equipment:generateCode', categoryId);
+  generateCode: async (payload: { departmentName?: string; categoryName?: string; brand?: string; model?: string }) => {
+    return await ipcInvoke<string>('db:equipment:generateCode', payload);
   },
 
   importCsv: async (csvContent: string) => {

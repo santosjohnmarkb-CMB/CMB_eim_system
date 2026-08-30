@@ -208,7 +208,7 @@ export function EquipmentDetailPage() {
         <Button variant="ghost" size="sm" onClick={() => navigate('/equipment')}><ArrowLeft size={16} /> Back</Button>
         <div className="flex-1">
           <h2 className="text-lg font-semibold text-surface-100">{equipment.name}</h2>
-          <p className="text-sm text-surface-500">{equipment.equipment_code}</p>
+          <p className="text-sm font-mono text-surface-400">{equipment.equipment_code}</p>
         </div>
         {canEdit && <Button variant="secondary" size="sm" onClick={openEdit}><Edit2 size={14} /> Edit Details</Button>}
       </div>
@@ -234,6 +234,7 @@ export function EquipmentDetailPage() {
             <thead>
               <tr className="text-left text-surface-500 border-b border-surface-700/60">
                 <th className="py-2 pr-4 font-medium w-10">#</th>
+                <th className="py-2 pr-4 font-medium">Code</th>
                 <th className="py-2 pr-4 font-medium">Serial Number</th>
                 <th className="py-2 pr-4 font-medium">Supplier</th>
                 <th className="py-2 pr-4 font-medium">Delivered</th>
@@ -243,13 +244,14 @@ export function EquipmentDetailPage() {
             </thead>
             <tbody>
               {units.length === 0 ? (
-                <tr><td colSpan={canEdit ? 6 : 5} className="py-4 text-surface-500">No units recorded</td></tr>
+                <tr><td colSpan={canEdit ? 7 : 6} className="py-4 text-surface-500">No units recorded</td></tr>
               ) : units.map((a, idx) => {
                 const status = a.current_status || 'AVAILABLE';
                 const config = EQUIPMENT_STATUS_CONFIG[status as EquipmentStatus];
                 return (
                   <tr key={a.id} className="border-b border-surface-800/60">
                     <td className="py-2.5 pr-4 text-surface-500">{idx + 1}</td>
+                    <td className="py-2.5 pr-4 font-mono text-xs text-surface-200 whitespace-nowrap">{a.equipment_code || '—'}</td>
                     <td className="py-2.5 pr-4 text-surface-200">{a.serial_number || '—'}</td>
                     <td className="py-2.5 pr-4 text-surface-300">{a.vendor_name || '—'}</td>
                     <td className="py-2.5 pr-4 text-surface-300">{fmtDate(a.delivered_date)}</td>
@@ -295,17 +297,19 @@ export function EquipmentDetailPage() {
               <Input label="Name *" value={editForm.name} onChange={(e) => setEdit('name', e.target.value)} required />
               <div>
                 <label className="block text-xs font-medium text-surface-400 mb-1">Department *</label>
-                <select value={editForm.department_id} onChange={(e) => { setEdit('department_id', e.target.value); setEdit('category_id', ''); setEdit('subcategory_id', ''); setEdit('sub_subcategory', ''); }} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100" disabled={catalogDepts.length <= 1}>
+                <select value={editForm.department_id} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 disabled:opacity-60" disabled>
                   <option value="">Select department</option>
                   {catalogDepts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
+                <p className="text-xs text-surface-500 mt-1">Department cannot be changed after create.</p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-surface-400 mb-1">Category *</label>
-                <select value={editForm.category_id} onChange={(e) => { setEdit('category_id', e.target.value); setEdit('subcategory_id', ''); setEdit('sub_subcategory', ''); }} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100">
+                <select value={editForm.category_id} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 disabled:opacity-60" disabled>
                   <option value="">Select category</option>
                   {editCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
+                <p className="text-xs text-surface-500 mt-1">Category cannot be changed after create.</p>
               </div>
               <CatalogCombobox
                 label="Sub category"
@@ -339,7 +343,7 @@ export function EquipmentDetailPage() {
               )}
             </div>
             <Input label="Notes" value={editForm.notes} onChange={(e) => setEdit('notes', e.target.value)} />
-            <p className="text-xs text-surface-500">Changing quantity adds or removes units below. Per-unit serial number, supplier, and delivery date are edited in the Units table.</p>
+            <p className="text-xs text-surface-500">Changing quantity adds or removes units. Brand or model changes rewrite every unit code and keep the same count suffix. Per-unit serial number, supplier, and delivery date are edited in the Units table.</p>
           </div>
 
           <div className="flex gap-3 justify-end pt-2">
@@ -367,7 +371,7 @@ export function EquipmentDetailPage() {
         {statusAsset && (
           <div className="space-y-4">
             <p className="text-sm text-surface-400">
-              Unit: <span className="text-surface-200">{statusAsset.serial_number || 'No serial'}</span>
+              Unit: <span className="text-surface-200 font-mono text-xs">{statusAsset.equipment_code || statusAsset.serial_number || 'No serial'}</span>
               {' · '}Current: <span className="text-surface-200">{EQUIPMENT_STATUS_CONFIG[(statusAsset.current_status || 'AVAILABLE') as EquipmentStatus]?.label}</span>
             </p>
             <div>

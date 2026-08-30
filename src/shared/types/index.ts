@@ -107,6 +107,7 @@ export type EquipmentStatus = 'AVAILABLE' | 'DEPLOYED' | 'IN_REPAIR' | 'ON_HOLD'
 export interface EquipmentAsset {
   id: string;
   equipment_id: string;
+  equipment_code?: string | null;
   serial_number: string;
   asset_tag: string | null;
   purchase_date: string | null;

@@ -17,9 +17,10 @@ import { useToast } from '../hooks';
 import { printHtml, escapeHtml } from '../lib/print';
 
 // Columns the equipment CSV importer understands (see db:equipment:importCsv).
+// Codes are always auto-generated. Put `Qty Available: N` in notes to create N units.
 // base_price is honored only for admins; a manager's import always lands at 0.
 const EQUIPMENT_CSV_HEADERS = [
-  'equipment_code', 'name', 'department', 'category', 'sub_category', 'sub_sub_category',
+  'name', 'department', 'category', 'sub_category', 'sub_sub_category',
   'item_type', 'brand', 'model', 'pricing_type', 'base_price', 'notes',
 ];
 
@@ -64,8 +65,7 @@ function summarizeStatus(item: EquipmentWithAsset): { status: string; mixed: boo
 // only billed as part of the package. They should stay in the database but be hidden
 // from the equipment list (only priced items are shown). Not a deletion — just a filter.
 function isZeroPricedPackageComponent(item: EquipmentWithAsset): boolean {
-  const code = item.equipment_code?.toLowerCase() ?? '';
-  return code.includes('campkg') && (item.base_price ?? 0) === 0;
+  return item.item_type === 'package_component' && (item.base_price ?? 0) === 0;
 }
 
 // Default ordering for the equipment list. Certain groups should surface first on
@@ -192,6 +192,8 @@ export function EquipmentListPage() {
         item.category_name,
         item.subcategory_name,
         item.sub_subcategory,
+        ...(unitsOf(item).map((a) => a.equipment_code)),
+        ...(unitsOf(item).map((a) => a.serial_number)),
       ].filter(Boolean).join(' ').toLowerCase();
       if (!haystack.includes(q)) return false;
     }
@@ -274,7 +276,9 @@ export function EquipmentListPage() {
   };
 
   const columns: Column<EquipmentWithAsset>[] = [
-    { key: 'equipment_code', header: 'Code', className: 'w-24' },
+    { key: 'equipment_code', header: 'Code', className: 'w-56', render: (item) => (
+      <span className="font-mono text-xs text-surface-300">{item.equipment_code}</span>
+    ) },
     { key: 'name', header: 'Name', render: (item) => (<div><p className="font-medium text-surface-100">{item.name}</p><p className="text-xs text-surface-500">{item.brand} {item.model}</p></div>) },
     { key: 'category_name', header: 'Category', render: (item) => (
       <span className="text-surface-400">
@@ -311,7 +315,7 @@ export function EquipmentListPage() {
     const sample: Record<string, string> = {
       name: 'ARRI Alexa Mini LF', department: 'Camera', category: 'Camera',
       sub_category: 'Camera Body', sub_sub_category: '4K', item_type: 'standalone', brand: 'ARRI', model: 'Alexa Mini LF',
-      pricing_type: 'per_day', base_price: isAdmin ? '15000' : '', notes: '', equipment_code: 'CAM-001',
+      pricing_type: 'per_day', base_price: isAdmin ? '15000' : '', notes: 'Qty Available: 2',
     };
     const csv = EQUIPMENT_CSV_HEADERS.join(',') + '\n' + EQUIPMENT_CSV_HEADERS.map((h) => sample[h] ?? '').join(',') + '\n';
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });

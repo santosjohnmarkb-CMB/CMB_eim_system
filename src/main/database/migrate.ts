@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { EQUIPMENT_HIERARCHY } from '../../shared/constants';
+import { buildSkuPrefix, formatUnitCode } from '../../shared/equipment-code';
 
 interface Migration {
   id: string;
@@ -82,36 +83,18 @@ export function seedEquipmentHierarchy(db: any): void {
 export function pruneUnusedObsoleteCatalog(db: any): void {
   if (!tableExists(db, 'departments') || !tableExists(db, 'categories') || !tableExists(db, 'subcategories')) return;
 
-  const allowedCats = new Set<string>();
   const allowedSubs = new Set<string>();
   for (const [deptName, catMap] of Object.entries(EQUIPMENT_HIERARCHY)) {
     for (const [catName, subNames] of Object.entries(catMap)) {
-      allowedCats.add(`${deptName}::${catName}`);
       for (const subName of subNames) allowedSubs.add(`${deptName}::${catName}::${subName}`);
     }
   }
 
-  const usedCatIds = new Set(
-    (db.prepare('SELECT DISTINCT category_id AS id FROM equipment_items WHERE is_active = 1').all() as { id: string }[])
-      .map((r) => r.id),
-  );
   const usedSubIds = new Set(
     (db.prepare(
       'SELECT DISTINCT subcategory_id AS id FROM equipment_items WHERE is_active = 1 AND subcategory_id IS NOT NULL',
     ).all() as { id: string }[]).map((r) => r.id),
   );
-
-  const cats = db.prepare(`
-    SELECT c.id, c.name, d.name AS department_name
-    FROM categories c JOIN departments d ON d.id = c.department_id
-    WHERE c.is_active = 1
-  `).all() as Array<{ id: string; name: string; department_name: string }>;
-  const deactivateCat = db.prepare('UPDATE categories SET is_active = 0 WHERE id = ?');
-  for (const cat of cats) {
-    if (allowedCats.has(`${cat.department_name}::${cat.name}`)) continue;
-    if (usedCatIds.has(cat.id)) continue;
-    deactivateCat.run(cat.id);
-  }
 
   const subs = db.prepare(`
     SELECT s.id, s.name, c.name AS category_name, d.name AS department_name
@@ -221,6 +204,56 @@ export function remapCameraDepartmentTaxonomy(db: any): number {
     }
   }
   return changes;
+}
+
+/** Rewrite every item prefix and per-unit code to the structured naming scheme. */
+export function regenerateEquipmentCodes(db: any): void {
+  if (!tableExists(db, 'equipment_items') || !tableExists(db, 'equipment_assets')) return;
+  if (!columnExists(db, 'equipment_assets', 'equipment_code')) return;
+
+  const items = db.prepare(`
+    SELECT e.id, e.brand, e.model, d.name AS department_name, c.name AS category_name
+    FROM equipment_items e
+    LEFT JOIN departments d ON d.id = e.department_id
+    LEFT JOIN categories c ON c.id = e.category_id
+  `).all() as Array<{
+    id: string; brand: string; model: string; department_name: string | null; category_name: string | null;
+  }>;
+
+  const prefixByItem = new Map<string, string>();
+  const updateItem = db.prepare('UPDATE equipment_items SET equipment_code = ?, updated_at = datetime(\'now\') WHERE id = ?');
+  // Park current codes so UNIQUE swaps cannot collide with a prefix we are about to write.
+  for (const item of items) {
+    updateItem.run(`__tmp__${item.id}`, item.id);
+  }
+  for (const item of items) {
+    const prefix = buildSkuPrefix({
+      departmentName: item.department_name,
+      categoryName: item.category_name,
+      brand: item.brand,
+      model: item.model,
+    });
+    prefixByItem.set(item.id, prefix);
+    try {
+      updateItem.run(prefix, item.id);
+    } catch {
+      // Two SKUs abbreviate to the same prefix. Units still share that prefix and
+      // stay unique via the count suffix; the list row keeps a unique placeholder.
+    }
+  }
+
+  const countsByPrefix = new Map<string, number>();
+  const assets = db.prepare(
+    'SELECT id, equipment_id FROM equipment_assets ORDER BY created_at, id',
+  ).all() as Array<{ id: string; equipment_id: string }>;
+  const updateAsset = db.prepare('UPDATE equipment_assets SET equipment_code = ?, updated_at = datetime(\'now\') WHERE id = ?');
+  for (const asset of assets) {
+    const prefix = prefixByItem.get(asset.equipment_id);
+    if (!prefix) continue;
+    const next = (countsByPrefix.get(prefix) || 0) + 1;
+    countsByPrefix.set(prefix, next);
+    updateAsset.run(formatUnitCode(prefix, next), asset.id);
+  }
 }
 
 const MIGRATIONS: Migration[] = [
@@ -1009,6 +1042,17 @@ const MIGRATIONS: Migration[] = [
     up: (db: any) => {
       seedEquipmentHierarchy(db);
       remapCameraDepartmentTaxonomy(db);
+    },
+  },
+  {
+    id: '026_structured_equipment_codes',
+    up: (db: any) => {
+      if (!tableExists(db, 'equipment_assets') || !tableExists(db, 'equipment_items')) return;
+      if (!columnExists(db, 'equipment_assets', 'equipment_code')) {
+        db.exec('ALTER TABLE equipment_assets ADD COLUMN equipment_code TEXT');
+      }
+      regenerateEquipmentCodes(db);
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_asset_equipment_code ON equipment_assets(equipment_code)');
     },
   },
 ];
