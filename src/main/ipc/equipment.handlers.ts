@@ -509,54 +509,59 @@ export function registerEquipmentHandlers(): void {
     const user = requireInventoryAccess(event);
     assertEquipmentInDepartment(db, event, id);
     const input = EquipmentUpdateSchema.parse(data);
-    const existing: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(id);
-    if (!existing) throw new Error('Equipment not found');
-    const departmentId = existing.department_id;
-    const categoryId = existing.category_id;
-    if (input.subcategory_id !== undefined) {
-      input.subcategory_id = ensureSubcategoryId(categoryId, input.subcategory_id);
-    }
-    const allowedFields = ['name', 'subcategory_id', 'sub_subcategory',
-      'item_type', 'brand', 'model', 'pricing_type', 'notes',
-      ...(user.role === 'admin' ? ['base_price'] : [])];
-    const updates: string[] = [];
-    const values: any[] = [];
 
-    for (const field of allowedFields) {
-      if ((input as Record<string, any>)[field] !== undefined) { updates.push(`${field} = ?`); values.push((input as Record<string, any>)[field]); }
-    }
-
-    if (updates.length > 0) {
-      updates.push("updated_at = datetime('now')");
-      values.push(id);
-      db.prepare(`UPDATE equipment_items SET ${updates.join(', ')} WHERE id = ?`).run(...values);
-    }
-
-    const after: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(id);
-    const prefix = skuPrefixFor(departmentId, categoryId, after.brand, after.model);
-    if (prefix !== after.equipment_code) {
-      db.prepare('UPDATE equipment_items SET equipment_code = ?, updated_at = datetime(\'now\') WHERE id = ?').run(prefix, id);
-      const assets: any[] = db.prepare('SELECT id, equipment_code FROM equipment_assets WHERE equipment_id = ?').all(id);
-      for (const a of assets) {
-        const n = trailingUnitCount(a.equipment_code);
-        if (n == null) continue;
-        db.prepare('UPDATE equipment_assets SET equipment_code = ?, updated_at = datetime(\'now\') WHERE id = ?')
-          .run(formatUnitCode(prefix, n), a.id);
-        const updated: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(a.id);
-        if (updated) void pushOperationalToCloud('equipment_assets', 'UPDATE', updated);
+    const tx = db.transaction(() => {
+      const existing: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(id);
+      if (!existing) throw new Error('Equipment not found');
+      const departmentId = existing.department_id;
+      const categoryId = existing.category_id;
+      if (input.subcategory_id !== undefined) {
+        input.subcategory_id = ensureSubcategoryId(categoryId, input.subcategory_id);
       }
-    }
+      const allowedFields = ['name', 'subcategory_id', 'sub_subcategory',
+        'item_type', 'brand', 'model', 'pricing_type', 'notes',
+        ...(user.role === 'admin' ? ['base_price'] : [])];
+      const updates: string[] = [];
+      const values: any[] = [];
 
-    if (input.units !== undefined) {
-      applyUnitEdits(id, input.units, prefix);
-    } else if (input.quantity !== undefined) {
-      reconcileUnits(id, input.quantity, prefix);
-    }
-    recomputeAvailability(db, id);
+      for (const field of allowedFields) {
+        if ((input as Record<string, any>)[field] !== undefined) { updates.push(`${field} = ?`); values.push((input as Record<string, any>)[field]); }
+      }
 
-    const row: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(id);
-    void pushCatalogToCloud('equipment_items', 'UPDATE', row);
-    return row;
+      if (updates.length > 0) {
+        updates.push("updated_at = datetime('now')");
+        values.push(id);
+        db.prepare(`UPDATE equipment_items SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+      }
+
+      const after: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(id);
+      const prefix = skuPrefixFor(departmentId, categoryId, after.brand, after.model);
+      if (prefix !== after.equipment_code) {
+        db.prepare('UPDATE equipment_items SET equipment_code = ?, updated_at = datetime(\'now\') WHERE id = ?').run(prefix, id);
+        const assets: any[] = db.prepare('SELECT id, equipment_code FROM equipment_assets WHERE equipment_id = ?').all(id);
+        for (const a of assets) {
+          const n = trailingUnitCount(a.equipment_code);
+          if (n == null) continue;
+          db.prepare('UPDATE equipment_assets SET equipment_code = ?, updated_at = datetime(\'now\') WHERE id = ?')
+            .run(formatUnitCode(prefix, n), a.id);
+          const updated: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(a.id);
+          if (updated) void pushOperationalToCloud('equipment_assets', 'UPDATE', updated);
+        }
+      }
+
+      if (input.units !== undefined) {
+        applyUnitEdits(id, input.units, prefix);
+      } else if (input.quantity !== undefined) {
+        reconcileUnits(id, input.quantity, prefix);
+      }
+      recomputeAvailability(db, id);
+
+      const row: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(id);
+      void pushCatalogToCloud('equipment_items', 'UPDATE', row);
+      return row;
+    });
+
+    return tx();
   });
 
   ipcMain.handle('db:equipment:updateAsset', (event: any, data: unknown) => {
