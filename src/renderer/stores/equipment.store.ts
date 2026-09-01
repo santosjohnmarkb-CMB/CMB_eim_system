@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { ipcInvoke } from '../lib/ipc';
 import { reportLoadError } from '../lib/notify';
-import type { EquipmentWithAsset, Category, Subcategory, Department as CatalogDepartment, DashboardStats, AssetStatusLogEntry } from '../../shared/types';
+import type { EquipmentWithAsset, Category, Subcategory, Department as CatalogDepartment, DashboardStats, AssetStatusLogEntry, CsvCategoryPreview } from '../../shared/types';
 
 interface EquipmentState {
   items: EquipmentWithAsset[];
@@ -9,6 +9,7 @@ interface EquipmentState {
   categories: Category[];
   subcategories: Subcategory[];
   loading: boolean;
+  fetchError: string | null;
   dashboardStats: DashboardStats | null;
   fetchAll: () => Promise<void>;
   fetchDepartments: () => Promise<void>;
@@ -24,7 +25,8 @@ interface EquipmentState {
   updateAssetStatus: (data: { asset_id: string; status: string; reason?: string }) => Promise<void>;
   getStatusLog: (equipmentId: string) => Promise<AssetStatusLogEntry[]>;
   generateCode: (payload: { departmentName?: string; categoryName?: string; brand?: string; model?: string }) => Promise<string>;
-  importCsv: (csvContent: string) => Promise<any>;
+  previewCsvCategories: (csvContent: string) => Promise<CsvCategoryPreview>;
+  importCsv: (csvContent: string, autoCreateCategories?: boolean) => Promise<any>;
 }
 
 export const useEquipmentStore = create<EquipmentState>((set, get) => ({
@@ -33,16 +35,19 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
   categories: [],
   subcategories: [],
   loading: false,
+  fetchError: null,
   dashboardStats: null,
 
   fetchAll: async () => {
-    set({ loading: true });
+    const isInitialLoad = get().items.length === 0;
+    if (isInitialLoad) set({ loading: true });
     try {
       const items = await ipcInvoke<EquipmentWithAsset[]>('db:equipment:getAll');
-      set({ items, loading: false });
-    } catch (err) {
+      console.log(`[equipmentStore.fetchAll] received ${items.length} items (was ${get().items.length})`);
+      set({ items, loading: false, fetchError: null });
+    } catch (err: any) {
       reportLoadError('equipment', err);
-      set({ loading: false });
+      set({ loading: false, fetchError: err?.message || 'Failed to load equipment' });
     }
   },
 
@@ -122,9 +127,18 @@ export const useEquipmentStore = create<EquipmentState>((set, get) => ({
     return await ipcInvoke<string>('db:equipment:generateCode', payload);
   },
 
-  importCsv: async (csvContent: string) => {
-    const result = await ipcInvoke('db:equipment:importCsv', csvContent);
-    await get().fetchAll();
+  previewCsvCategories: async (csvContent: string) => {
+    return await ipcInvoke<CsvCategoryPreview>('db:equipment:previewCsvCategories', csvContent);
+  },
+
+  importCsv: async (csvContent: string, autoCreateCategories?: boolean) => {
+    const result = await ipcInvoke('db:equipment:importCsv', csvContent, autoCreateCategories);
+    await Promise.all([
+      get().fetchAll(),
+      get().fetchDepartments(),
+      get().fetchCategories(),
+      get().fetchSubcategories(),
+    ]);
     return result;
   },
 }));

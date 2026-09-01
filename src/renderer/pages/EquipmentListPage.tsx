@@ -11,7 +11,7 @@ import { EQUIPMENT_STATUS_CONFIG } from '../lib/constants';
 import { DEPARTMENT_CONFIG, opsDepartmentOf } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import { categoryOptionsForOps, subcategoryOptionsForCategory, subSubOptionsFor } from '../lib/catalogHierarchy';
-import type { EquipmentWithAsset, EquipmentStatus, BulkImportResult } from '../../shared/types';
+import type { EquipmentWithAsset, EquipmentStatus, BulkImportResult, CsvCategoryPreview } from '../../shared/types';
 import { useAuthStore } from '../stores/auth.store';
 import { useToast } from '../hooks';
 import { printHtml, escapeHtml } from '../lib/print';
@@ -62,12 +62,6 @@ function summarizeStatus(item: EquipmentWithAsset): { status: string; mixed: boo
   return { status: 'Mixed', mixed: true };
 }
 
-// Camera "CAM-CAMPKG" package components are stored at a price of 0 because they are
-// only billed as part of the package. They should stay in the database but be hidden
-// from the equipment list (only priced items are shown). Not a deletion — just a filter.
-function isZeroPricedPackageComponent(item: EquipmentWithAsset): boolean {
-  return item.item_type === 'package_component' && (item.base_price ?? 0) === 0;
-}
 
 // Default ordering for the equipment list. Certain groups should surface first on
 // initial viewing: camera/lens/special for the camera dept, lighting for lights & grips.
@@ -97,7 +91,7 @@ export function EquipmentListPage() {
   const deptConfig = department ? DEPARTMENT_CONFIG[department] : null;
   const DeptIcon = department ? DEPT_ICONS[department] : null;
 
-  const { items, departments, categories, subcategories, loading, fetchAll, fetchDepartments, fetchCategories, fetchSubcategories, importCsv } = useEquipmentStore();
+  const { items, departments, categories, subcategories, loading, fetchError, fetchAll, fetchDepartments, fetchCategories, fetchSubcategories, importCsv, previewCsvCategories } = useEquipmentStore();
   const navigate = useNavigate();
   const toast = useToast();
   const role = useAuthStore((s) => s.user?.role);
@@ -114,6 +108,8 @@ export function EquipmentListPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<BulkImportResult | null>(null);
+  const [pendingCsvText, setPendingCsvText] = useState<string | null>(null);
+  const [categoryPreview, setCategoryPreview] = useState<CsvCategoryPreview | null>(null);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -126,9 +122,9 @@ export function EquipmentListPage() {
   useEffect(() => { fetchAll(); fetchDepartments(); fetchCategories(); fetchSubcategories(); }, [fetchAll, fetchDepartments, fetchCategories, fetchSubcategories]);
 
   const deptItems = useMemo(() => {
-    const visible = items.filter((i) => !isZeroPricedPackageComponent(i));
-    if (!department) return visible;
-    return visible.filter((i) => opsDepartmentOf(i.department_name, i.category_name) === department);
+    if (!department) return items;
+    const matched = items.filter((i) => opsDepartmentOf(i.department_name, i.category_name) === department);
+    return matched;
   }, [items, department]);
 
   const hierarchyCategories = useMemo(
@@ -198,7 +194,6 @@ export function EquipmentListPage() {
   // Shared predicate for the active search/category/subcategory/status filters, so the
   // on-screen table and the printed output stay in sync.
   const matchesFilters = useCallback((item: EquipmentWithAsset) => {
-    if (isZeroPricedPackageComponent(item)) return false;
     if (search) {
       const q = search.toLowerCase();
       const haystack = [
@@ -349,6 +344,23 @@ export function EquipmentListPage() {
     URL.revokeObjectURL(url);
   };
 
+  const showImportToast = (result: BulkImportResult) => {
+    if (result.imported === 0 && result.errors.length > 0) {
+      toast.error('Import failed — see error details');
+      return;
+    }
+    const parts: string[] = [];
+    if (result.created > 0) parts.push(`${result.created} new`);
+    if (result.updated > 0) parts.push(`${result.updated} updated`);
+    if (parts.length === 0 && result.imported > 0) parts.push(`${result.imported} processed`);
+    const summary = parts.join(', ');
+    if (result.errors.length > 0) {
+      toast.success(`${summary} — ${result.errors.length} row${result.errors.length > 1 ? 's' : ''} had errors`);
+    } else {
+      toast.success(summary);
+    }
+  };
+
   const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -356,13 +368,35 @@ export function EquipmentListPage() {
     setIsImporting(true);
     try {
       const text = await file.text();
+      const preview = await previewCsvCategories(text);
+      if (preview.newCategories.length > 0 || preview.newSubcategories.length > 0) {
+        setPendingCsvText(text);
+        setCategoryPreview(preview);
+        setIsImporting(false);
+        return;
+      }
       const result = (await importCsv(text)) as BulkImportResult;
       setImportResult(result);
-      if (result.imported > 0) toast.success(`Imported ${result.imported} item${result.imported > 1 ? 's' : ''}`);
-      if (result.errors.length > 0 && result.imported === 0) toast.error('Import failed — see error details');
+      showImportToast(result);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Import failed');
     } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleConfirmNewCategories = async (accept: boolean) => {
+    if (!pendingCsvText) return;
+    setCategoryPreview(null);
+    setIsImporting(true);
+    try {
+      const result = (await importCsv(pendingCsvText, accept)) as BulkImportResult;
+      setImportResult(result);
+      showImportToast(result);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Import failed');
+    } finally {
+      setPendingCsvText(null);
       setIsImporting(false);
     }
   };
@@ -385,30 +419,39 @@ export function EquipmentListPage() {
         </h1>
       </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-3 flex-wrap">
+      {/* Row 1: Search & filter dropdowns */}
+      <div className="flex items-center gap-3">
         <SearchBox value={search} onChange={setSearch} placeholder="Search name, code, category..." className="w-64" />
         <select value={categoryFilter} onChange={(e) => handleCategoryChange(e.target.value)} className="px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-200">
           <option value="">All Categories</option>
           {hierarchyCategories.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
         </select>
-        {categoryFilter && hierarchySubcategories.length > 0 && (
-          <select value={subcategoryFilter} onChange={(e) => handleSubcategoryChange(e.target.value)} className="px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-200">
-            <option value="">All Subcategories</option>
-            {hierarchySubcategories.map((s) => (<option key={s.id} value={s.id}>{s.name}</option>))}
-          </select>
-        )}
-        {subcategoryFilter && hierarchySubSubs.length > 0 && (
-          <select value={subSubFilter} onChange={(e) => setSubSubFilter(e.target.value)} className="px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-200">
-            <option value="">All Sub-sub categories</option>
-            {hierarchySubSubs.map((n) => (<option key={n} value={n}>{n}</option>))}
-          </select>
-        )}
+        <select
+          value={subcategoryFilter}
+          onChange={(e) => handleSubcategoryChange(e.target.value)}
+          disabled={!categoryFilter || hierarchySubcategories.length === 0}
+          className="px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-200 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <option value="">All Subcategories</option>
+          {hierarchySubcategories.map((s) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+        </select>
+        <select
+          value={subSubFilter}
+          onChange={(e) => setSubSubFilter(e.target.value)}
+          disabled={!subcategoryFilter || hierarchySubSubs.length === 0}
+          className="px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-200 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <option value="">All Sub-subcategories</option>
+          {hierarchySubSubs.map((n) => (<option key={n} value={n}>{n}</option>))}
+        </select>
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-200">
           <option value="">All Statuses</option>
           {Object.entries(EQUIPMENT_STATUS_CONFIG).map(([k, v]) => (<option key={k} value={k}>{v.label}</option>))}
         </select>
-        <div className="flex-1" />
+      </div>
+
+      {/* Row 2: Action buttons */}
+      <div className="flex items-center gap-3">
         <div className="relative" ref={printMenuRef}>
           {isAdmin ? (
             <>
@@ -416,7 +459,7 @@ export function EquipmentListPage() {
                 <Printer size={16} /> Print <ChevronDown size={14} />
               </Button>
               {printMenuOpen && (
-                <div className="absolute right-0 z-20 mt-1 w-56 bg-surface-800 border border-surface-700 rounded-lg shadow-lg overflow-hidden">
+                <div className="absolute left-0 z-20 mt-1 w-56 bg-surface-800 border border-surface-700 rounded-lg shadow-lg overflow-hidden">
                   <button onClick={() => printEquipment('all')} className="w-full text-left px-4 py-2.5 text-sm text-surface-200 hover:bg-surface-700/60 transition-colors border-b border-surface-700/50">Whole List</button>
                   <button onClick={() => printEquipment('camera')} className="w-full text-left px-4 py-2.5 text-sm text-surface-200 hover:bg-surface-700/60 transition-colors border-b border-surface-700/50">Camera Only</button>
                   <button onClick={() => printEquipment('lights_grips')} className="w-full text-left px-4 py-2.5 text-sm text-surface-200 hover:bg-surface-700/60 transition-colors">Lights &amp; Grips Only</button>
@@ -441,24 +484,99 @@ export function EquipmentListPage() {
         )}
       </div>
 
+      {fetchError && (
+        <div className="flex items-center justify-between px-4 py-3 bg-danger-500/10 border border-danger-500/20 rounded-lg text-sm text-danger-300">
+          <span>Failed to load equipment: {fetchError}</span>
+          <button onClick={() => fetchAll()} className="ml-4 px-3 py-1 bg-danger-500/20 hover:bg-danger-500/30 rounded text-xs font-medium transition-colors">
+            Retry
+          </button>
+        </div>
+      )}
       <div className="glass-panel rounded-xl overflow-hidden">
         <DataTable columns={columns} data={filtered} onRowClick={(item) => navigate(`/equipment/detail/${item.id}`)} loading={loading} emptyMessage="No equipment found" />
       </div>
-      <p className="text-xs text-surface-600">{filtered.length} of {deptItems.length} items</p>
+      <p className="text-xs text-surface-600">
+        {filtered.length === deptItems.length
+          ? `${filtered.length} item${filtered.length !== 1 ? 's' : ''}`
+          : `Showing ${filtered.length} of ${deptItems.length} items`}
+      </p>
+
+      <Modal isOpen={!!categoryPreview} onClose={() => handleConfirmNewCategories(false)} title="New Categories Detected" size="lg">
+        {categoryPreview && (
+          <div className="space-y-4">
+            <p className="text-sm text-surface-300">
+              The following categories / subcategories from your CSV are not in the current inventory list
+              and appear in <span className="text-primary-400 font-medium">10 or more</span> equipment rows.
+              Would you like to add them to the inventory category list?
+            </p>
+            {categoryPreview.newCategories.length > 0 && (
+              <div>
+                <h4 className="text-xs font-medium text-surface-400 uppercase tracking-wider mb-2">New Categories</h4>
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {categoryPreview.newCategories.map((c, i) => (
+                    <div key={i} className="flex items-center justify-between px-3 py-1.5 rounded bg-surface-800/50 text-sm">
+                      <span className="text-surface-200">{c.department} &rsaquo; <span className="text-primary-300">{c.category}</span></span>
+                      <span className="text-xs text-surface-500">{c.count} items</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {categoryPreview.newSubcategories.length > 0 && (
+              <div>
+                <h4 className="text-xs font-medium text-surface-400 uppercase tracking-wider mb-2">New Subcategories</h4>
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {categoryPreview.newSubcategories.map((s, i) => (
+                    <div key={i} className="flex items-center justify-between px-3 py-1.5 rounded bg-surface-800/50 text-sm">
+                      <span className="text-surface-200">{s.department} &rsaquo; {s.category} &rsaquo; <span className="text-primary-300">{s.subcategory}</span></span>
+                      <span className="text-xs text-surface-500">{s.count} items</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <p className="text-xs text-surface-500">
+              Total rows in CSV: {categoryPreview.totalRows}
+            </p>
+            <div className="flex justify-end gap-3 pt-2">
+              <Button variant="secondary" onClick={() => handleConfirmNewCategories(false)}>
+                Skip &amp; Import Without
+              </Button>
+              <Button variant="primary" onClick={() => handleConfirmNewCategories(true)}>
+                Add Categories &amp; Import
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <Modal isOpen={!!importResult} onClose={() => setImportResult(null)} title="Import Results" size="lg">
         {importResult && (
           <div className="space-y-4">
             <div className="flex gap-4">
               <div className="glass-panel rounded-lg p-4 flex-1">
-                <p className="text-xs text-surface-400 uppercase tracking-wider mb-1">Imported</p>
-                <p className="text-2xl font-bold text-success-400">{importResult.imported}</p>
+                <p className="text-xs text-surface-400 uppercase tracking-wider mb-1">New Created</p>
+                <p className="text-2xl font-bold text-success-400">{importResult.created}</p>
+              </div>
+              <div className="glass-panel rounded-lg p-4 flex-1">
+                <p className="text-xs text-surface-400 uppercase tracking-wider mb-1">Existing Updated</p>
+                <p className="text-2xl font-bold text-primary-400">{importResult.updated}</p>
               </div>
               <div className="glass-panel rounded-lg p-4 flex-1">
                 <p className="text-xs text-surface-400 uppercase tracking-wider mb-1">Errors</p>
                 <p className="text-2xl font-bold text-danger-400">{importResult.errors.length}</p>
               </div>
             </div>
+            {importResult.updated > 0 && importResult.created === 0 && (
+              <p className="text-xs text-surface-500 bg-surface-800/50 rounded-lg px-3 py-2">
+                All rows matched existing equipment (same department, category, brand &amp; model). Units and quantities were added to the existing items. To create new equipment entries, use different brand/model combinations.
+              </p>
+            )}
+            {importResult.updated > 0 && importResult.created > 0 && (
+              <p className="text-xs text-surface-500 bg-surface-800/50 rounded-lg px-3 py-2">
+                {importResult.updated} row{importResult.updated > 1 ? 's' : ''} matched existing equipment and had units added. {importResult.created} new equipment entr{importResult.created > 1 ? 'ies were' : 'y was'} created.
+              </p>
+            )}
             {importResult.errors.length > 0 && (
               <div>
                 <h4 className="text-sm font-medium text-surface-200 mb-2">Error Details</h4>

@@ -8,3 +8,4 @@ release/
 .env
 sync-config.json
 .DS_Store
+.cursor/

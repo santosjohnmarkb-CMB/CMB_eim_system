@@ -323,6 +323,7 @@ export const IPC_CHANNELS = {
   EQUIPMENT_DELETE: 'db:equipment:delete',
   EQUIPMENT_GENERATE_CODE: 'db:equipment:generateCode',
   EQUIPMENT_IMPORT_CSV: 'db:equipment:importCsv',
+  EQUIPMENT_PREVIEW_CSV_CATEGORIES: 'db:equipment:previewCsvCategories',
   EQUIPMENT_SEARCH: 'db:equipment:search',
   EQUIPMENT_UPDATE_STATUS: 'db:equipment:updateStatus',
   EQUIPMENT_BATCH_UPDATE_STATUS: 'db:equipment:batchUpdateStatus',

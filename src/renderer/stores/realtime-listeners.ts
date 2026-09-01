@@ -22,6 +22,15 @@ const dataChangedHandler = (...args: unknown[]) => {
       useEquipmentStore.getState().fetchAll();
       useEquipmentStore.getState().fetchDashboardStats();
     }
+    if (table === 'categories') {
+      useEquipmentStore.getState().fetchCategories();
+    }
+    if (table === 'subcategories') {
+      useEquipmentStore.getState().fetchSubcategories();
+    }
+    if (table === 'departments') {
+      useEquipmentStore.getState().fetchDepartments();
+    }
     // Package edits (locally or from another machine via Supabase realtime) refresh
     // the packages list. equipment_items also touches packages since a package's
     // price/name lives on its main equipment item.

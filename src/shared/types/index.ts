@@ -468,7 +468,15 @@ export interface BulkImportError {
 
 export interface BulkImportResult {
   imported: number;
+  created: number;
+  updated: number;
   errors: BulkImportError[];
+}
+
+export interface CsvCategoryPreview {
+  newCategories: { department: string; category: string; count: number }[];
+  newSubcategories: { department: string; category: string; subcategory: string; count: number }[];
+  totalRows: number;
 }
 
 export interface EquipmentUseCount {

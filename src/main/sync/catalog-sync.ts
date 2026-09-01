@@ -143,6 +143,8 @@ function canApplyCatalogRow(table: CatalogTable, row: any, db: any): boolean {
   return true;
 }
 
+const VERSIONED_TABLES = new Set<CatalogTable>(['equipment_items', 'package_definitions', 'users']);
+
 function upsertLocalRow(db: any, table: CatalogTable, row: Record<string, unknown>): void {
   const rec = pickCatalogColumns(table, row);
   const keys = Object.keys(rec);
@@ -158,9 +160,16 @@ function upsertLocalRow(db: any, table: CatalogTable, row: Record<string, unknow
     })
     .join(', ');
 
+  // For versioned tables, only overwrite when cloud version >= local version.
+  // This prevents a stale cloud pull from reverting a recent local import/edit
+  // whose push hasn't landed in the cloud yet.
+  const versionGuard = VERSIONED_TABLES.has(table) && keys.includes('version')
+    ? ` WHERE excluded.version >= ${table}.version`
+    : '';
+
   db.prepare(
     `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${placeholders})
-     ON CONFLICT(id) DO UPDATE SET ${updates}`
+     ON CONFLICT(id) DO UPDATE SET ${updates}${versionGuard}`
   ).run(...keys.map(k => coerceForSqlite(rec[k])));
 }
 

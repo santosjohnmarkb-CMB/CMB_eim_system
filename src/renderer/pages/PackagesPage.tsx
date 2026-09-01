@@ -534,17 +534,31 @@ function EquipmentPickerModal({ title, multi, excludeIds, onConfirm, onClose }: 
 }) {
   const { items, fetchAll, fetchCategories } = useEquipmentStore();
   const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
   const [selected, setSelected] = useState<Record<string, number>>({});
 
   useEffect(() => { fetchAll(); fetchCategories(); }, [fetchAll, fetchCategories]);
+
+  const categoryNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const item of items) {
+      if (item.category_name) names.add(item.category_name);
+    }
+    return Array.from(names).sort();
+  }, [items]);
 
   const available = useMemo(() => {
     const q = search.trim().toLowerCase();
     return items
       .filter((i) => !excludeIds.has(i.id))
+      .filter((i) => !categoryFilter || i.category_name === categoryFilter)
       .filter((i) => !q || i.name.toLowerCase().includes(q)
-        || (i.equipment_code || '').toLowerCase().includes(q) || (i.brand || '').toLowerCase().includes(q));
-  }, [items, excludeIds, search]);
+        || (i.equipment_code || '').toLowerCase().includes(q)
+        || (i.brand || '').toLowerCase().includes(q)
+        || (i.model || '').toLowerCase().includes(q)
+        || (i.category_name || '').toLowerCase().includes(q)
+        || (i.subcategory_name || '').toLowerCase().includes(q));
+  }, [items, excludeIds, search, categoryFilter]);
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -571,10 +585,20 @@ function EquipmentPickerModal({ title, multi, excludeIds, onConfirm, onClose }: 
   return (
     <Modal isOpen onClose={onClose} title={title} size="lg">
       <div className="space-y-3">
-        <div className="relative">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500" />
-          <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search equipment..."
-            className="w-full pl-9 pr-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/40 focus:border-primary-500" />
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-500" />
+            <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search equipment..."
+              className="w-full pl-9 pr-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-primary-500/40 focus:border-primary-500" />
+          </div>
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-200 shrink-0"
+          >
+            <option value="">All Categories</option>
+            {categoryNames.map((name) => (<option key={name} value={name}>{name}</option>))}
+          </select>
         </div>
 
         <div className="max-h-80 overflow-y-auto space-y-1 pr-1">
@@ -582,6 +606,7 @@ function EquipmentPickerModal({ title, multi, excludeIds, onConfirm, onClose }: 
             <p className="text-sm text-surface-500 text-center py-8">No equipment found.</p>
           ) : available.map((item) => {
             const isSel = item.id in selected;
+            const catLabel = [item.category_name, item.subcategory_name, item.sub_subcategory].filter(Boolean).join(' · ');
             return (
               <div key={item.id}
                 className={'flex items-center gap-3 px-3 py-2 rounded-lg border transition-colors cursor-pointer ' + (isSel
@@ -593,7 +618,10 @@ function EquipmentPickerModal({ title, multi, excludeIds, onConfirm, onClose }: 
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm text-surface-100 truncate">{item.name}</p>
-                  <p className="text-xs text-surface-500 truncate">{[item.equipment_code, item.brand, item.model].filter(Boolean).join(' · ')}</p>
+                  <p className="text-xs text-surface-500 truncate">
+                    {[item.equipment_code, item.brand, item.model].filter(Boolean).join(' · ')}
+                    {catLabel && <span className="text-surface-600"> — {catLabel}</span>}
+                  </p>
                 </div>
                 {multi && isSel && (
                   <input type="number" min={1} value={selected[item.id]} onClick={(e) => e.stopPropagation()}
@@ -605,11 +633,14 @@ function EquipmentPickerModal({ title, multi, excludeIds, onConfirm, onClose }: 
           })}
         </div>
 
-        <div className="flex justify-end gap-3 pt-3 border-t border-surface-800/60">
-          <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="button" onClick={confirm} disabled={Object.keys(selected).length === 0}>
-            {multi ? `Add ${Object.keys(selected).length || ''} Item${Object.keys(selected).length === 1 ? '' : 's'}`.trim() : 'Select'}
-          </Button>
+        <div className="flex items-center justify-between pt-3 border-t border-surface-800/60">
+          <span className="text-xs text-surface-500">{available.length} item{available.length !== 1 ? 's' : ''}</span>
+          <div className="flex gap-3">
+            <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+            <Button type="button" onClick={confirm} disabled={Object.keys(selected).length === 0}>
+              {multi ? `Add ${Object.keys(selected).length || ''} Item${Object.keys(selected).length === 1 ? '' : 's'}`.trim() : 'Select'}
+            </Button>
+          </div>
         </div>
       </div>
     </Modal>

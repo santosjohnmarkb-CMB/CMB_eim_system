@@ -199,18 +199,25 @@ export function registerEquipmentHandlers(): void {
 
   // Load every unit (asset) for the given equipment ids, grouped by equipment_id.
   // Each unit of quantity has its own equipment_assets row, so an item can have many.
+  // Chunked to avoid hitting SQLite's parameter limit on large inventories.
   const loadAssetsByEquipment = (equipmentIds: string[]): Map<string, any[]> => {
     const grouped = new Map<string, any[]>();
     if (equipmentIds.length === 0) return grouped;
-    const placeholders = equipmentIds.map(() => '?').join(', ');
-    const rows: any[] = db.prepare(
-      `SELECT * FROM equipment_assets WHERE equipment_id IN (${placeholders})`,
-    ).all(...equipmentIds);
-    rows.sort((a, b) => (trailingUnitCount(a.equipment_code) ?? 0) - (trailingUnitCount(b.equipment_code) ?? 0)
+    const chunkSize = 400;
+    const allRows: any[] = [];
+    for (let i = 0; i < equipmentIds.length; i += chunkSize) {
+      const chunk = equipmentIds.slice(i, i + chunkSize);
+      const placeholders = chunk.map(() => '?').join(', ');
+      const rows: any[] = db.prepare(
+        `SELECT * FROM equipment_assets WHERE equipment_id IN (${placeholders})`,
+      ).all(...chunk);
+      allRows.push(...rows);
+    }
+    allRows.sort((a, b) => (trailingUnitCount(a.equipment_code) ?? 0) - (trailingUnitCount(b.equipment_code) ?? 0)
       || String(a.created_at).localeCompare(String(b.created_at))
       || String(a.id).localeCompare(String(b.id)));
-    attachUnitActions(rows);
-    for (const a of rows) {
+    attachUnitActions(allRows);
+    for (const a of allRows) {
       const list = grouped.get(a.equipment_id) || [];
       list.push(a);
       grouped.set(a.equipment_id, list);
@@ -221,6 +228,16 @@ export function registerEquipmentHandlers(): void {
   ipcMain.handle('db:equipment:getAll', (event: any) => {
     const cats = categoriesForDepartment(sessionDepartment(event));
     const catWhere = cats ? `AND d.name IN (${cats.map(() => '?').join(', ')})` : '';
+
+    // Diagnostic: raw count of active items, with and without dept filter
+    const rawTotal: any = db.prepare('SELECT COUNT(*) as c FROM equipment_items WHERE is_active = 1').get();
+    const rawWithDept: any = cats
+      ? db.prepare(`SELECT COUNT(*) as c FROM equipment_items e JOIN departments d ON d.id = e.department_id WHERE e.is_active = 1 AND d.name IN (${cats.map(() => '?').join(', ')})`).get(...cats)
+      : null;
+    const orphanCount: any = db.prepare(
+      'SELECT COUNT(*) as c FROM equipment_items e LEFT JOIN departments d ON d.id = e.department_id WHERE e.is_active = 1 AND d.id IS NULL',
+    ).get();
+
     const items: any[] = db.prepare(`
       SELECT e.*, c.name as category_name, sc.name as subcategory_name, d.name as department_name
       FROM equipment_items e
@@ -231,7 +248,16 @@ export function registerEquipmentHandlers(): void {
       ${catWhere}
       ORDER BY e.equipment_code
     `).all(...(cats || []));
-    const grouped = loadAssetsByEquipment(items.map((i) => i.id));
+
+    console.log(`[getAll] rawActive=${rawTotal.c} deptFiltered=${rawWithDept?.c ?? 'ALL'} orphanItems=${orphanCount.c} returned=${items.length} cats=${JSON.stringify(cats)}`);
+
+    let grouped: Map<string, any[]>;
+    try {
+      grouped = loadAssetsByEquipment(items.map((i) => i.id));
+    } catch (err) {
+      console.error('[getAll] Asset loading failed, returning items without assets:', err);
+      grouped = new Map();
+    }
     return items.map((row: any) => {
       const assets = grouped.get(row.id) || [];
       return { ...row, is_active: !!row.is_active, assets, asset: assets[0] };
@@ -267,12 +293,12 @@ export function registerEquipmentHandlers(): void {
     const user = requireInventoryAccess(event);
     const input = EquipmentCreateSchema.parse(data);
     const departmentId = input.department_id;
+    if (!departmentId) throw new Error('Department is required');
     const categoryId = ensureCategoryId(departmentId, input.category_id);
     const subcategoryId = ensureSubcategoryId(categoryId, input.subcategory_id);
     assertCategoryInDepartment(event, categoryId);
     const basePrice = user.role === 'admin' ? input.base_price : 0;
     const now = new Date().toISOString();
-    if (!departmentId) throw new Error('Department is required');
     const skuPrefix = skuPrefixFor(departmentId, categoryId, input.brand, input.model);
     const pricingType = input.item_type === 'package_main' ? 'package_rate' : input.pricing_type;
 
@@ -755,15 +781,162 @@ export function registerEquipmentHandlers(): void {
     };
   });
 
-  ipcMain.handle('db:equipment:importCsv', (event: any, csvContent: string) => {
-    const user = requireInventoryAccess(event);
-    const canPrice = user.role === 'admin';
-    const sessionDept = sessionDepartment(event);
+  /**
+   * Normalize a parsed CSV row's taxonomy fields, applying legacy Camera remaps.
+   * Returns null (with error pushed) if required fields are missing.
+   */
+  const normalizeCsvTaxonomy = (row: Record<string, string>): {
+    name: string; departmentName: string; categoryName: string; subName: string; subSub: string;
+  } | null => {
+    const pick = (...keys: string[]): string => {
+      for (const k of keys) { const v = row[k]; if (v) return v; }
+      return '';
+    };
+    const name = pick('name', 'equipment_name', 'item_name', 'equipment');
+    const departmentName = pick('department', 'department_name', 'dept');
+    let categoryName = pick('category', 'category_name', 'cat');
+    let subName = pick('sub_category', 'subcategory', 'sub_category_name');
+    let subSub = pick('sub_sub_category', 'sub_subcategory', 'sub_sub');
+    if (!name || !departmentName || !categoryName) return null;
+
+    if (departmentName === 'Camera') {
+      if (categoryName === 'Camera Body') {
+        subSub = subSub || (subName === 'High Speed Camera' ? 'High Speed Camera' : subName);
+        subName = subName === 'High Speed Camera' ? 'High Speed Camera' : 'Camera Body';
+        categoryName = 'Camera';
+      } else if (categoryName === 'Camera Peripherals' && subName === 'Power') {
+        categoryName = 'Power';
+        if (subSub === 'AC Power Supply') { subName = 'AC Power Supply'; subSub = ''; }
+        else { subName = 'Battery and Charger'; }
+      } else if (categoryName === 'Lens' && subName === 'Special Lens' && subSub === 'Lens Support') {
+        subName = 'Lens Support';
+        subSub = '';
+      }
+      if (subSub === 'Telephoto Prime') subSub = 'Telephoto';
+    }
+    return { name, departmentName, categoryName, subName, subSub };
+  };
+
+  /** Threshold: a new category/subcategory must appear in at least this many rows. */
+  const NEW_CATEGORY_MIN_COUNT = 10;
+
+  ipcMain.handle('db:equipment:previewCsvCategories', (event: any, csvContent: string) => {
+    requireInventoryAccess(event);
+    const dept = sessionDepartment(event);
     const lines = csvContent.replace(/^\uFEFF/, '').trim().split(/\r?\n/).filter((l) => l.trim());
     if (lines.length < 2) throw new Error('CSV must have a header row and at least one data row');
     const headers = parseCsvRow(lines[0]!).map((h) => h.trim().replace(/^\uFEFF/, '').toLowerCase().replace(/\s+/g, '_'));
+
+    const findDept = db.prepare('SELECT id, name FROM departments WHERE name = ? AND is_active = 1');
+    const findCat = db.prepare('SELECT id FROM categories WHERE name = ? AND department_id = ? AND is_active = 1');
+    const findSub = db.prepare('SELECT id FROM subcategories WHERE name = ? AND category_id = ? AND is_active = 1');
+
+    const unknownCats = new Map<string, { department: string; category: string; count: number }>();
+    const unknownSubs = new Map<string, { department: string; category: string; subcategory: string; count: number }>();
+    const unknownSubSubs = new Map<string, { department: string; category: string; subcategory: string; subSubcategory: string; count: number }>();
+
+    for (let i = 1; i < lines.length; i++) {
+      const values = parseCsvRow(lines[i]!);
+      const row: Record<string, string> = {};
+      headers.forEach((h, idx) => { row[h] = (values[idx] || '').trim(); });
+
+      const tax = normalizeCsvTaxonomy(row);
+      if (!tax) continue;
+
+      const deptRow: any = findDept.get(tax.departmentName);
+      if (!deptRow) continue;
+      if (dept && opsDepartmentOf(deptRow.name, null) !== dept) continue;
+
+      const cat: any = findCat.get(tax.categoryName, deptRow.id);
+      if (!cat) {
+        const key = `${tax.departmentName}::${tax.categoryName}`;
+        const existing = unknownCats.get(key);
+        if (existing) existing.count++;
+        else unknownCats.set(key, { department: tax.departmentName, category: tax.categoryName, count: 1 });
+        continue;
+      }
+
+      if (tax.subName) {
+        const sub: any = findSub.get(tax.subName, cat.id);
+        if (!sub) {
+          const key = `${tax.departmentName}::${tax.categoryName}::${tax.subName}`;
+          const existing = unknownSubs.get(key);
+          if (existing) existing.count++;
+          else unknownSubs.set(key, { department: tax.departmentName, category: tax.categoryName, subcategory: tax.subName, count: 1 });
+          continue;
+        }
+      }
+    }
+
+    const newCategories = [...unknownCats.values()].filter((c) => c.count >= NEW_CATEGORY_MIN_COUNT);
+    const newSubcategories = [...unknownSubs.values()].filter((s) => s.count >= NEW_CATEGORY_MIN_COUNT);
+
+    return {
+      newCategories,
+      newSubcategories,
+      totalRows: lines.length - 1,
+    };
+  });
+
+  ipcMain.handle('db:equipment:importCsv', (event: any, csvContent: string, autoCreateCategories?: boolean) => {
+    const user = requireInventoryAccess(event);
+    const canPrice = user.role === 'admin';
+    const sessionDept = sessionDepartment(event);
+    let csvText = csvContent.replace(/^\uFEFF/, '').trim();
+    // Auto-detect tab-separated files and convert to comma-delimited
+    const probe = csvText.split(/\r?\n/)[0] || '';
+    if (probe.includes('\t') && !probe.includes(',')) {
+      csvText = csvText.replace(/\t/g, ',');
+    }
+    // Auto-detect semicolon-separated files
+    if (!probe.includes(',') && probe.includes(';')) {
+      csvText = csvText.replace(/;/g, ',');
+    }
+    let lines = csvText.split(/\r?\n/).filter((l) => l.trim());
+    if (lines.length < 2) throw new Error('CSV must have a header row and at least one data row');
+
+    // Detect and skip a title/filename row: if line 1 has only 1 column but
+    // line 2 has multiple columns (or looks like a header row with known names),
+    // treat line 2 as the real header row.
+    const KNOWN_HEADERS = new Set(['name', 'department', 'category', 'brand', 'model', 'item_type', 'qty_available', 'base_price', 'notes', 'equipment_name', 'dept', 'sub_category', 'subcategory', 'pricing_type']);
+    const firstRowCols = parseCsvRow(lines[0]!);
+    const secondRowCols = parseCsvRow(lines[1]!);
+    const secondRowNorm = secondRowCols.map((h) => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
+    const secondRowLooksLikeHeaders = secondRowNorm.filter((h) => KNOWN_HEADERS.has(h)).length >= 2;
+
+    if (firstRowCols.length <= 1 && secondRowCols.length > 1 && lines.length >= 3) {
+      console.log(`[importCsv] Skipping title row "${lines[0]}" — line 2 has ${secondRowCols.length} columns`);
+      lines = lines.slice(1);
+    } else if (firstRowCols.length <= 1 && secondRowLooksLikeHeaders && lines.length >= 3) {
+      console.log(`[importCsv] Skipping title row "${lines[0]}" — line 2 looks like headers: [${secondRowNorm.join(', ')}]`);
+      lines = lines.slice(1);
+    }
+
+    const rawHeaders = parseCsvRow(lines[0]!).map((h) => h.trim().replace(/^\uFEFF/, ''));
+    // Normalize: lowercase, collapse whitespace/special chars to underscores, strip edges
+    const headers = rawHeaders.map((h) => h.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
+
+    // Validate that required columns exist in the headers
+    const hasName = headers.some((h) => ['name', 'equipment_name', 'item_name', 'equipment'].includes(h));
+    const hasDept = headers.some((h) => ['department', 'department_name', 'dept'].includes(h));
+    const hasCat = headers.some((h) => ['category', 'category_name', 'cat'].includes(h));
+    if (!hasName || !hasDept || !hasCat) {
+      const missing: string[] = [];
+      if (!hasName) missing.push('name');
+      if (!hasDept) missing.push('department');
+      if (!hasCat) missing.push('category');
+      throw new Error(
+        `CSV is missing required column${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}. ` +
+        `Found columns: [${rawHeaders.join(', ')}]. ` +
+        `Use the Template button to download a CSV with the correct format.`,
+      );
+    }
+
+    console.log(`[importCsv] ${lines.length - 1} data rows, headers: [${headers.join(', ')}] raw: [${rawHeaders.join(', ')}]`);
     const errors: { row: number; message: string }[] = [];
     let imported = 0;
+    let created = 0;
+    let updated = 0;
     const now = new Date().toISOString();
     const createdAssetIds: string[] = [];
     const touchedItemIds = new Set<string>();
@@ -772,6 +945,18 @@ export function registerEquipmentHandlers(): void {
     const findCat = db.prepare('SELECT id FROM categories WHERE name = ? AND department_id = ? AND is_active = 1');
     const findSub = db.prepare('SELECT id FROM subcategories WHERE name = ? AND category_id = ? AND is_active = 1');
 
+    // Also look for soft-deleted (is_active = 0) SKUs so we can reactivate them
+    // instead of hitting a UNIQUE constraint failure on equipment_code.
+    const findInactiveSku = (departmentId: string, categoryId: string, brand: string, model: string): any => {
+      return db.prepare(`
+        SELECT * FROM equipment_items
+        WHERE is_active = 0 AND department_id = ? AND category_id = ?
+          AND LOWER(TRIM(COALESCE(brand, ''))) = LOWER(TRIM(?))
+          AND LOWER(TRIM(COALESCE(model, ''))) = LOWER(TRIM(?))
+        LIMIT 1
+      `).get(departmentId, categoryId, brand || '', model || '');
+    };
+
     const tx = db.transaction(() => {
       for (let i = 1; i < lines.length; i++) {
         try {
@@ -779,33 +964,17 @@ export function registerEquipmentHandlers(): void {
           const row: Record<string, string> = {};
           headers.forEach((h, idx) => { row[h] = (values[idx] || '').trim(); });
 
-          const name = row.name;
-          const departmentName = row.department || row.department_name;
-          let categoryName = row.category;
-          let subName = row.sub_category || row.subcategory || '';
-          let subSub = row.sub_sub_category || row.sub_subcategory || '';
-          if (!name || !departmentName || !categoryName) {
-            errors.push({ row: i + 1, message: 'Missing required fields: name, department, category' });
+          const tax = normalizeCsvTaxonomy(row);
+          if (!tax) {
+            const missing: string[] = [];
+            if (!row.name && !row.equipment_name && !row.item_name && !row.equipment) missing.push('name');
+            if (!row.department && !row.department_name && !row.dept) missing.push('department');
+            if (!row.category && !row.category_name && !row.cat) missing.push('category');
+            const vals = headers.map((h) => `${h}="${row[h] || ''}"`).join(', ');
+            errors.push({ row: i + 1, message: `Missing required fields: ${missing.join(', ')}. Row values: ${vals}` });
             continue;
           }
-
-          // Accept the previous Camera taxonomy in CSVs (Camera Body as a category,
-          // Power as a Peripherals subcategory, 3K–12K as subcategories).
-          if (departmentName === 'Camera') {
-            if (categoryName === 'Camera Body') {
-              subSub = subSub || (subName === 'High Speed Camera' ? 'High Speed Camera' : subName);
-              subName = subName === 'High Speed Camera' ? 'High Speed Camera' : 'Camera Body';
-              categoryName = 'Camera';
-            } else if (categoryName === 'Camera Peripherals' && subName === 'Power') {
-              categoryName = 'Power';
-              if (subSub === 'AC Power Supply') { subName = 'AC Power Supply'; subSub = ''; }
-              else { subName = 'Battery and Charger'; }
-            } else if (categoryName === 'Lens' && subName === 'Special Lens' && subSub === 'Lens Support') {
-              subName = 'Lens Support';
-              subSub = '';
-            }
-            if (subSub === 'Telephoto Prime') subSub = 'Telephoto';
-          }
+          const { name, departmentName, categoryName, subName, subSub } = tax;
 
           const deptRow: any = findDept.get(departmentName);
           if (!deptRow) {
@@ -817,7 +986,14 @@ export function registerEquipmentHandlers(): void {
             continue;
           }
 
-          const cat: any = findCat.get(categoryName, deptRow.id);
+          let cat: any = findCat.get(categoryName, deptRow.id);
+          if (!cat && autoCreateCategories) {
+            const catId = uuidv4();
+            db.prepare(
+              'INSERT INTO categories (id, department_id, name, display_order, is_active) VALUES (?, ?, ?, 0, 1)',
+            ).run(catId, deptRow.id, categoryName);
+            cat = { id: catId };
+          }
           if (!cat) {
             errors.push({ row: i + 1, message: `Unknown category "${categoryName}" in ${departmentName}` });
             continue;
@@ -825,7 +1001,14 @@ export function registerEquipmentHandlers(): void {
 
           let subId: string | null = null;
           if (subName) {
-            const subcat: any = findSub.get(subName, cat.id);
+            let subcat: any = findSub.get(subName, cat.id);
+            if (!subcat && autoCreateCategories) {
+              const newSubId = uuidv4();
+              db.prepare(
+                'INSERT INTO subcategories (id, category_id, name, display_order, is_active) VALUES (?, ?, ?, 0, 1)',
+              ).run(newSubId, cat.id, subName);
+              subcat = { id: newSubId };
+            }
             if (!subcat) {
               errors.push({ row: i + 1, message: `Unknown sub category "${subName}"` });
               continue;
@@ -846,7 +1029,18 @@ export function registerEquipmentHandlers(): void {
           }
 
           const skuPrefix = skuPrefixFor(deptRow.id, cat.id, row.brand || '', row.model || '');
-          const existing = findSku(deptRow.id, cat.id, row.brand || '', row.model || '');
+          let existing = findSku(deptRow.id, cat.id, row.brand || '', row.model || '');
+          // Reactivate a previously soft-deleted SKU so we don't collide with
+          // the UNIQUE constraint on equipment_code.
+          if (!existing) {
+            const inactive = findInactiveSku(deptRow.id, cat.id, row.brand || '', row.model || '');
+            if (inactive) {
+              db.prepare(`
+                UPDATE equipment_items SET is_active = 1, updated_at = ? WHERE id = ?
+              `).run(now, inactive.id);
+              existing = inactive;
+            }
+          }
           const price = canPrice ? (parseFloat(row.base_price || '0') || 0) : 0;
           const unitQty = unitQtyFromCsvRow(row);
 
@@ -861,6 +1055,7 @@ export function registerEquipmentHandlers(): void {
               WHERE id = ?
             `).run(skuPrefix, unitQty, row.notes || null, canPrice ? 1 : 0, price, now, existing.id);
             eqId = existing.id;
+            updated++;
           } else {
             eqId = uuidv4();
             db.prepare(`
@@ -868,6 +1063,7 @@ export function registerEquipmentHandlers(): void {
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
             `).run(eqId, skuPrefix, name, deptRow.id, cat.id, subId, subSub || null, itemType, row.brand || '', row.model || '',
               pricingType, price, row.notes || null, unitQty, unitQty, now, now);
+            created++;
           }
 
           // N blank units with numbered codes (…-001, …-002). Serial, supplier, and
@@ -905,7 +1101,16 @@ export function registerEquipmentHandlers(): void {
       const assetRow: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(aid);
       if (assetRow) void pushOperationalToCloud('equipment_assets', 'INSERT', assetRow);
     }
-    return { imported, errors };
+
+    // Post-import verification: confirm the items actually exist and are active
+    const verifyCount: any = db.prepare('SELECT COUNT(*) as c FROM equipment_items WHERE is_active = 1').get();
+    const touchedActive = [...touchedItemIds].filter((id) => {
+      const row: any = db.prepare('SELECT is_active FROM equipment_items WHERE id = ?').get(id);
+      return row && row.is_active === 1;
+    }).length;
+    console.log(`[importCsv] imported=${imported} created=${created} updated=${updated} errors=${errors.length} touchedItems=${touchedItemIds.size} touchedStillActive=${touchedActive} totalActive=${verifyCount.c}`);
+
+    return { imported, created, updated, errors };
   });
 
   ipcMain.handle('db:equipment:getUseCounts', () => {
@@ -932,5 +1137,60 @@ export function registerEquipmentHandlers(): void {
       GROUP BY e.id
       ORDER BY use_count DESC, e.name ASC
     `).all();
+  });
+
+  // ── Purge equipment list and packages only (local + cloud) ──
+  ipcMain.handle('db:equipment:purgeAllInventory', async (event: any) => {
+    const user = requireInventoryAccess(event);
+    if (user.role !== 'admin') throw new Error('Only admins can purge inventory.');
+
+    const { cloudService: cs } = await import('../sync/cloud-service');
+    const { recordLocalTombstone } = await import('../sync/operational-sync');
+
+    const results = {
+      packageItems: 0, packageDefinitions: 0, assetStatusLogs: 0,
+      equipmentAssets: 0, equipmentItems: 0,
+      cloudErrors: [] as string[],
+    };
+
+    const tryCloudRemove = async (table: string, id: string) => {
+      try { await cs.remove(table as any, id); } catch (err: any) {
+        results.cloudErrors.push(`${table}/${id}: ${err.message}`);
+      }
+    };
+
+    // 1. Package items → package definitions (catalog tables, no tombstones)
+    const pkgItems: any[] = db.prepare('SELECT id FROM package_items').all();
+    results.packageItems = pkgItems.length;
+    for (const r of pkgItems) await tryCloudRemove('package_items', r.id);
+    db.exec('DELETE FROM package_items');
+
+    const pkgDefs: any[] = db.prepare('SELECT id FROM package_definitions').all();
+    results.packageDefinitions = pkgDefs.length;
+    for (const r of pkgDefs) await tryCloudRemove('package_definitions', r.id);
+    db.exec('DELETE FROM package_definitions');
+
+    // 2. Asset status logs → equipment assets (operational tables, use tombstones)
+    const statusLogs: any[] = db.prepare('SELECT id FROM asset_status_log').all();
+    results.assetStatusLogs = statusLogs.length;
+    for (const r of statusLogs) { await tryCloudRemove('asset_status_log', r.id); recordLocalTombstone('asset_status_log', r.id); }
+    db.exec('DELETE FROM asset_status_log');
+
+    const assets: any[] = db.prepare('SELECT id FROM equipment_assets').all();
+    results.equipmentAssets = assets.length;
+    for (const r of assets) { await tryCloudRemove('equipment_assets', r.id); recordLocalTombstone('equipment_assets', r.id); }
+    db.exec('DELETE FROM equipment_assets');
+
+    // 3. Equipment items (catalog table, no tombstones)
+    const items: any[] = db.prepare('SELECT id FROM equipment_items').all();
+    results.equipmentItems = items.length;
+    for (const r of items) await tryCloudRemove('equipment_items', r.id);
+    db.exec('DELETE FROM equipment_items');
+
+    // 4. Clear queued sync entries for purged tables
+    db.exec('DELETE FROM offline_queue');
+
+    console.log('[purgeAllInventory] Done:', JSON.stringify(results));
+    return results;
   });
 }
