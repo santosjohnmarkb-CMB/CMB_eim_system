@@ -29,8 +29,8 @@ export function CatalogCombobox({
   const filtered = useMemo(() => {
     const q = value.trim().toLowerCase();
     if (!q) return names;
-    return options.filter((n) => n.toLowerCase().includes(q));
-  }, [names, options, value]);
+    return names.filter((n) => n.toLowerCase().includes(q));
+  }, [names, value]);
 
   const trimmed = value.trim();
   const showCreate = allowCreate && trimmed.length > 0
