@@ -11,7 +11,44 @@ import { Modal } from '../components/common/Modal';
 import { useToast } from '../hooks';
 import { ipcInvoke } from '../lib/ipc';
 import { IPC_CHANNELS } from '../lib/constants';
-import type { PackageDefinition, EquipmentWithAsset, BulkImportResult } from '../../shared/types';
+import type { PackageDefinition, EquipmentWithAsset, BulkImportResult, ItemType } from '../../shared/types';
+
+const MAIN_ITEM_TYPES: ItemType[] = ['package_main'];
+const COMPONENT_ITEM_TYPES: ItemType[] = ['package_component', 'add_on'];
+
+type BrandSort = 'brand_asc' | 'brand_desc' | 'name_asc';
+
+function brandKey(value: string | null | undefined): string {
+  return (value || '').trim().toLowerCase();
+}
+
+function compareBrandThenName(
+  aBrand: string | null | undefined,
+  aName: string,
+  bBrand: string | null | undefined,
+  bName: string,
+  dir: 'asc' | 'desc',
+): number {
+  const ab = brandKey(aBrand);
+  const bb = brandKey(bBrand);
+  if (!ab && !bb) return aName.localeCompare(bName);
+  if (!ab) return 1;
+  if (!bb) return -1;
+  const cmp = ab.localeCompare(bb) || aName.localeCompare(bName);
+  return dir === 'asc' ? cmp : -cmp;
+}
+
+function itemTypeRank(type: ItemType | undefined): number {
+  if (type === 'package_component') return 0;
+  if (type === 'add_on') return 1;
+  return 2;
+}
+
+function itemTypeLabel(type: ItemType | undefined): string {
+  if (type === 'package_component') return 'Component';
+  if (type === 'add_on') return 'Add-on';
+  return type || '—';
+}
 
 // EIM catalog prices are Philippine pesos. Kept local to avoid a shared dep just
 // for one screen; mirrors the rental app's currency presentation.
@@ -36,8 +73,22 @@ export function PackagesPage() {
   const [isImporting, setIsImporting] = useState(false);
   const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false);
   const [importResult, setImportResult] = useState<BulkImportResult | null>(null);
+  const [listSort, setListSort] = useState<BrandSort>('brand_asc');
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  const sortedPackages = useMemo(() => {
+    const copy = [...packages];
+    if (listSort === 'name_asc') {
+      copy.sort((a, b) => a.name.localeCompare(b.name));
+      return copy;
+    }
+    const dir = listSort === 'brand_desc' ? 'desc' : 'asc';
+    copy.sort((a, b) => compareBrandThenName(
+      a.main_item?.brand, a.name, b.main_item?.brand, b.name, dir,
+    ));
+    return copy;
+  }, [packages, listSort]);
 
   const handleUploadCsv = async () => {
     setIsImporting(true);
@@ -79,19 +130,33 @@ export function PackagesPage() {
           Equipment packages bundle a main item with its included components.
           {!isAdmin && canManage && ' Prices are managed by an administrator.'}
         </p>
-        {canManage && (
-          <div className="flex items-center gap-2 shrink-0">
-            <Button variant="secondary" size="sm" onClick={handleDownloadTemplate} loading={isDownloadingTemplate}>
-              <Download size={14} /> Template
-            </Button>
-            <Button variant="secondary" size="sm" onClick={handleUploadCsv} loading={isImporting}>
-              <Upload size={14} /> Upload CSV
-            </Button>
-            <Button size="sm" onClick={() => setShowCreate(true)}>
-              <Plus size={14} /> Create Package
-            </Button>
-          </div>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          {packages.length > 0 && (
+            <select
+              value={listSort}
+              onChange={(e) => setListSort(e.target.value as BrandSort)}
+              className="px-3 py-1.5 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-200"
+              aria-label="Sort packages"
+            >
+              <option value="brand_asc">Brand A–Z</option>
+              <option value="brand_desc">Brand Z–A</option>
+              <option value="name_asc">Name A–Z</option>
+            </select>
+          )}
+          {canManage && (
+            <>
+              <Button variant="secondary" size="sm" onClick={handleDownloadTemplate} loading={isDownloadingTemplate}>
+                <Download size={14} /> Template
+              </Button>
+              <Button variant="secondary" size="sm" onClick={handleUploadCsv} loading={isImporting}>
+                <Upload size={14} /> Upload CSV
+              </Button>
+              <Button size="sm" onClick={() => setShowCreate(true)}>
+                <Plus size={14} /> Create Package
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       {isLoading && packages.length === 0 ? (
@@ -105,7 +170,7 @@ export function PackagesPage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {packages.map((pkg) => (
+          {sortedPackages.map((pkg) => (
             <PackageCard
               key={pkg.id}
               pkg={pkg}
@@ -225,6 +290,12 @@ function PackageCard({ pkg, canManage, onEdit, onDelete }: {
   pkg: PackageDefinition; canManage: boolean; onEdit: () => void; onDelete: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const sortedItems = useMemo(() => {
+    return [...(pkg.items || [])].sort((a, b) =>
+      itemTypeRank(a.component?.item_type) - itemTypeRank(b.component?.item_type)
+      || compareBrandThenName(a.component?.brand, a.component?.name || '', b.component?.brand, b.component?.name || '', 'asc'),
+    );
+  }, [pkg.items]);
   return (
     <div className="glass-panel rounded-xl overflow-hidden">
       <div className="w-full flex items-center justify-between px-5 py-4 hover:bg-surface-800/30 transition-colors">
@@ -234,7 +305,9 @@ function PackageCard({ pkg, canManage, onEdit, onDelete }: {
           </div>
           <div className="min-w-0">
             <h3 className="text-sm font-semibold text-surface-100 truncate">{pkg.name}</h3>
-            {pkg.description && <p className="text-xs text-surface-400 mt-0.5 truncate">{pkg.description}</p>}
+            <p className="text-xs text-surface-400 mt-0.5 truncate">
+              {[pkg.main_item?.brand, pkg.description].filter(Boolean).join(' · ') || '—'}
+            </p>
           </div>
         </button>
         <div className="flex items-center gap-3 shrink-0 pl-4">
@@ -269,15 +342,17 @@ function PackageCard({ pkg, canManage, onEdit, onDelete }: {
             <thead>
               <tr className="text-xs text-surface-500 uppercase tracking-wider">
                 <th className="text-left py-2 font-medium">Component</th>
+                <th className="text-left py-2 font-medium">Type</th>
                 <th className="text-left py-2 font-medium">Brand</th>
                 <th className="text-center py-2 font-medium">Qty</th>
                 <th className="text-center py-2 font-medium">Required</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-surface-800/40">
-              {pkg.items.map((pkgItem) => (
+              {sortedItems.map((pkgItem) => (
                 <tr key={pkgItem.id} className="text-sm">
                   <td className="py-2.5 text-surface-200">{pkgItem.component?.name || '—'}</td>
+                  <td className="py-2.5 text-surface-400">{itemTypeLabel(pkgItem.component?.item_type)}</td>
                   <td className="py-2.5 text-surface-400">{pkgItem.component?.brand || '—'}</td>
                   <td className="py-2.5 text-center tabular-nums text-surface-300">{pkgItem.included_qty}</td>
                   <td className="py-2.5 text-center">
@@ -337,6 +412,7 @@ function PackageForm({ onSubmit, onCancel, initial, submitLabel = 'Create Packag
   const [error, setError] = useState('');
   const [mainPickerOpen, setMainPickerOpen] = useState(false);
   const [componentPickerOpen, setComponentPickerOpen] = useState(false);
+  const packages = usePackageStore((s) => s.packages);
 
   const usedEquipmentIds = useMemo(() => {
     const ids = new Set<string>();
@@ -345,9 +421,30 @@ function PackageForm({ onSubmit, onCancel, initial, submitLabel = 'Create Packag
     return ids;
   }, [mainItem, lines]);
 
+  const takenMainIds = useMemo(() => {
+    const ids = new Set(packages.map((p) => p.main_item_id));
+    if (initial?.main_item_id) ids.delete(initial.main_item_id);
+    return ids;
+  }, [packages, initial]);
+
+  const mainExcludeIds = useMemo(() => {
+    const ids = new Set(usedEquipmentIds);
+    for (const id of takenMainIds) ids.add(id);
+    return ids;
+  }, [usedEquipmentIds, takenMainIds]);
+
   const removeLine = (lineId: string) => setLines((prev) => prev.filter((l) => l.id !== lineId));
   const updateLine = (lineId: string, updates: Partial<ComponentLine>) =>
     setLines((prev) => prev.map((l) => (l.id === lineId ? { ...l, ...updates } : l)));
+
+  const visibleLines = useMemo(() => {
+    return lines
+      .filter((l) => l.equipment)
+      .sort((a, b) =>
+        itemTypeRank(a.equipment!.item_type) - itemTypeRank(b.equipment!.item_type)
+        || compareBrandThenName(a.equipment!.brand, a.equipment!.name, b.equipment!.brand, b.equipment!.name, 'asc'),
+      );
+  }, [lines]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -357,7 +454,7 @@ function PackageForm({ onSubmit, onCancel, initial, submitLabel = 'Create Packag
     // Non-admins can't set price: send 0 (backend preserves the existing price).
     const costNum = isAdmin ? parseFloat(packageCost) : 0;
     if (isAdmin && (!packageCost || isNaN(costNum) || costNum < 0)) { setError('Enter a valid package cost.'); return; }
-    const validComponents = lines.filter((l) => l.equipment !== null);
+    const validComponents = visibleLines;
     if (validComponents.length === 0) { setError('Add at least one component.'); return; }
 
     setIsSubmitting(true);
@@ -402,7 +499,7 @@ function PackageForm({ onSubmit, onCancel, initial, submitLabel = 'Create Packag
             <Plus className="h-3.5 w-3.5" /> Select Main Equipment
           </button>
         )}
-        <p className="mt-1 text-xs text-surface-500">The primary item this package is built around.</p>
+        <p className="mt-1 text-xs text-surface-500">Only equipment marked as Package Main is listed.</p>
       </div>
 
       <div className={isAdmin ? 'grid grid-cols-[1fr_160px_1fr] gap-4' : 'grid grid-cols-2 gap-4'}>
@@ -429,23 +526,25 @@ function PackageForm({ onSubmit, onCancel, initial, submitLabel = 'Create Packag
       <div>
         <div className="flex items-center justify-between mb-2">
           <label className={labelClass + ' mb-0'}>Package Components *</label>
-          <span className="text-xs text-surface-500">{lines.filter((l) => l.equipment).length} item{lines.filter((l) => l.equipment).length !== 1 ? 's' : ''}</span>
+          <span className="text-xs text-surface-500">{visibleLines.length} item{visibleLines.length !== 1 ? 's' : ''}</span>
         </div>
 
-        {lines.filter((l) => l.equipment).length > 0 && (
+        {visibleLines.length > 0 && (
           <div className="space-y-2 mb-3">
-            <div className="grid grid-cols-[1fr_70px_80px_36px] gap-2 px-1">
+            <div className="grid grid-cols-[1fr_80px_70px_80px_36px] gap-2 px-1">
               <span className="text-[10px] font-semibold text-surface-500 uppercase tracking-wider">Equipment</span>
+              <span className="text-[10px] font-semibold text-surface-500 uppercase tracking-wider">Type</span>
               <span className="text-[10px] font-semibold text-surface-500 uppercase tracking-wider text-center">Qty</span>
               <span className="text-[10px] font-semibold text-surface-500 uppercase tracking-wider text-center">Required</span>
               <span />
             </div>
-            {lines.filter((l) => l.equipment).map((line) => (
-              <div key={line.id} className="grid grid-cols-[1fr_70px_80px_36px] gap-2 items-center">
+            {visibleLines.map((line) => (
+              <div key={line.id} className="grid grid-cols-[1fr_80px_70px_80px_36px] gap-2 items-center">
                 <div className="flex items-center gap-2 bg-surface-800 border border-surface-700 rounded-lg h-9 px-3">
                   <span className="text-sm text-surface-200 truncate flex-1">{line.equipment!.name}</span>
                   <span className="text-xs text-surface-500">{line.equipment!.brand}</span>
                 </div>
+                <span className="text-xs text-surface-400">{itemTypeLabel(line.equipment!.item_type)}</span>
                 <input type="number" min={1} value={line.qty}
                   onChange={(e) => updateLine(line.id, { qty: Math.max(1, parseInt(e.target.value) || 1) })}
                   className={inputClass + ' text-center px-1'} />
@@ -468,6 +567,7 @@ function PackageForm({ onSubmit, onCancel, initial, submitLabel = 'Create Packag
           className="w-full flex items-center justify-center gap-2 h-9 rounded-lg text-sm border border-dashed border-surface-600 text-surface-400 hover:border-primary-500/50 hover:text-primary-400 hover:bg-primary-500/5 transition-colors">
           <Plus className="h-3.5 w-3.5" /> Add Components
         </button>
+        <p className="mt-1 text-xs text-surface-500">Only Add-on and Package Component equipment is listed.</p>
       </div>
 
       {lines.some((l) => l.equipment) && (
@@ -488,7 +588,9 @@ function PackageForm({ onSubmit, onCancel, initial, submitLabel = 'Create Packag
         <EquipmentPickerModal
           title="Select Main Equipment"
           multi={false}
-          excludeIds={usedEquipmentIds}
+          itemTypes={MAIN_ITEM_TYPES}
+          emptyHint="No Package Main equipment found. Mark an item as Package Main when adding or editing equipment."
+          excludeIds={mainExcludeIds}
           onConfirm={(items) => {
             const first = items[0];
             if (first) {
@@ -505,6 +607,8 @@ function PackageForm({ onSubmit, onCancel, initial, submitLabel = 'Create Packag
         <EquipmentPickerModal
           title="Add Components"
           multi
+          itemTypes={COMPONENT_ITEM_TYPES}
+          emptyHint="No Add-on or Package Component equipment found. Mark items as Package Component or Add-on when adding or editing equipment."
           excludeIds={usedEquipmentIds}
           onConfirm={(items) => {
             setLines((prev) => [
@@ -525,31 +629,39 @@ function PackageForm({ onSubmit, onCancel, initial, submitLabel = 'Create Packag
 // backend already filters to the caller's department), so managers can only pick
 // items from their own department.
 
-function EquipmentPickerModal({ title, multi, excludeIds, onConfirm, onClose }: {
+function EquipmentPickerModal({ title, multi, excludeIds, itemTypes, emptyHint, onConfirm, onClose }: {
   title: string;
   multi: boolean;
   excludeIds: Set<string>;
+  itemTypes: ItemType[];
+  emptyHint: string;
   onConfirm: (items: { equipment: EquipmentWithAsset; qty: number }[]) => void;
   onClose: () => void;
 }) {
   const { items, fetchAll, fetchCategories } = useEquipmentStore();
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [sort, setSort] = useState<BrandSort>('brand_asc');
   const [selected, setSelected] = useState<Record<string, number>>({});
 
   useEffect(() => { fetchAll(); fetchCategories(); }, [fetchAll, fetchCategories]);
 
+  const typedItems = useMemo(
+    () => items.filter((i) => itemTypes.includes(i.item_type)),
+    [items, itemTypes],
+  );
+
   const categoryNames = useMemo(() => {
     const names = new Set<string>();
-    for (const item of items) {
+    for (const item of typedItems) {
       if (item.category_name) names.add(item.category_name);
     }
     return Array.from(names).sort();
-  }, [items]);
+  }, [typedItems]);
 
   const available = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return items
+    const filtered = typedItems
       .filter((i) => !excludeIds.has(i.id))
       .filter((i) => !categoryFilter || i.category_name === categoryFilter)
       .filter((i) => !q || i.name.toLowerCase().includes(q)
@@ -558,7 +670,15 @@ function EquipmentPickerModal({ title, multi, excludeIds, onConfirm, onClose }: 
         || (i.model || '').toLowerCase().includes(q)
         || (i.category_name || '').toLowerCase().includes(q)
         || (i.subcategory_name || '').toLowerCase().includes(q));
-  }, [items, excludeIds, search, categoryFilter]);
+    if (sort === 'name_asc') {
+      return [...filtered].sort((a, b) =>
+        itemTypeRank(a.item_type) - itemTypeRank(b.item_type) || a.name.localeCompare(b.name));
+    }
+    const dir = sort === 'brand_desc' ? 'desc' : 'asc';
+    return [...filtered].sort((a, b) =>
+      itemTypeRank(a.item_type) - itemTypeRank(b.item_type)
+      || compareBrandThenName(a.brand, a.name, b.brand, b.name, dir));
+  }, [typedItems, excludeIds, search, categoryFilter, sort]);
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -573,6 +693,25 @@ function EquipmentPickerModal({ title, multi, excludeIds, onConfirm, onClose }: 
   };
 
   const setQty = (id: string, qty: number) => setSelected((prev) => ({ ...prev, [id]: Math.max(1, qty) }));
+
+  const listedIds = useMemo(() => available.map((item) => item.id), [available]);
+  const allListedSelected = listedIds.length > 0 && listedIds.every((id) => id in selected);
+
+  const toggleAllListed = () => {
+    if (!multi) return;
+    setSelected((prev) => {
+      if (allListedSelected) {
+        const next = { ...prev };
+        for (const id of listedIds) delete next[id];
+        return next;
+      }
+      const next = { ...prev };
+      for (const id of listedIds) {
+        if (!(id in next)) next[id] = 1;
+      }
+      return next;
+    });
+  };
 
   const confirm = () => {
     const byId = new Map(items.map((i) => [i.id, i]));
@@ -599,11 +738,34 @@ function EquipmentPickerModal({ title, multi, excludeIds, onConfirm, onClose }: 
             <option value="">All Categories</option>
             {categoryNames.map((name) => (<option key={name} value={name}>{name}</option>))}
           </select>
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as BrandSort)}
+            className="px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-200 shrink-0"
+            aria-label="Sort equipment"
+          >
+            <option value="brand_asc">Brand A–Z</option>
+            <option value="brand_desc">Brand Z–A</option>
+            <option value="name_asc">Name A–Z</option>
+          </select>
         </div>
+
+        {multi && available.length > 0 && (
+          <button
+            type="button"
+            onClick={toggleAllListed}
+            className="flex items-center gap-2 px-1 py-1 text-sm text-surface-300 hover:text-surface-100 transition-colors"
+          >
+            <div className={'h-4 w-4 rounded border flex items-center justify-center shrink-0 ' + (allListedSelected ? 'bg-primary-500 border-primary-500' : 'border-surface-600')}>
+              {allListedSelected && <div className="h-2 w-2 rounded-sm bg-white" />}
+            </div>
+            {allListedSelected ? 'Uncheck all' : `Check all (${available.length})`}
+          </button>
+        )}
 
         <div className="max-h-80 overflow-y-auto space-y-1 pr-1">
           {available.length === 0 ? (
-            <p className="text-sm text-surface-500 text-center py-8">No equipment found.</p>
+            <p className="text-sm text-surface-500 text-center py-8 px-4">{emptyHint}</p>
           ) : available.map((item) => {
             const isSel = item.id in selected;
             const catLabel = [item.category_name, item.subcategory_name, item.sub_subcategory].filter(Boolean).join(' · ');
@@ -619,6 +781,8 @@ function EquipmentPickerModal({ title, multi, excludeIds, onConfirm, onClose }: 
                 <div className="min-w-0 flex-1">
                   <p className="text-sm text-surface-100 truncate">{item.name}</p>
                   <p className="text-xs text-surface-500 truncate">
+                    {itemTypeLabel(item.item_type)}
+                    {' · '}
                     {[item.equipment_code, item.brand, item.model].filter(Boolean).join(' · ')}
                     {catLabel && <span className="text-surface-600"> — {catLabel}</span>}
                   </p>

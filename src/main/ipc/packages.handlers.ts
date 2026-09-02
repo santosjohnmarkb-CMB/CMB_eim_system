@@ -70,6 +70,35 @@ export function registerPackageHandlers(): void {
     };
   };
 
+  const COMPONENT_ITEM_TYPES = new Set(['package_component', 'add_on']);
+
+  // Package composition is typed on the equipment row: mains must already be
+  // package_main, and new components must be add_on or package_component.
+  // Existing component rows are allowed through on edit so older packages stay
+  // saveable until those lines are replaced.
+  const assertPackageItemRoles = (
+    mainItemId: string,
+    componentIds: string[],
+    allowExistingComponentIds?: Set<string>,
+  ): void => {
+    const main: any = db.prepare('SELECT name, item_type FROM equipment_items WHERE id = ?').get(mainItemId);
+    if (!main) throw new Error('Main equipment item was not found.');
+    if (main.item_type !== 'package_main') {
+      throw new Error(
+        `"${main.name}" must be marked as Package Main before it can be used as a package main.`,
+      );
+    }
+    const lookup = db.prepare('SELECT name, item_type FROM equipment_items WHERE id = ?');
+    for (const id of componentIds) {
+      if (allowExistingComponentIds?.has(id)) continue;
+      const row: any = lookup.get(id);
+      if (!row) throw new Error('A package component was not found.');
+      if (!COMPONENT_ITEM_TYPES.has(row.item_type)) {
+        throw new Error(`"${row.name}" must be marked as Package Component or Add-on.`);
+      }
+    }
+  };
+
   // The department a package belongs to, derived from its main item's category.
   const packageDepartment = (mainItemId: string): string | null => {
     const row: any = db.prepare(`
@@ -130,6 +159,11 @@ export function registerPackageHandlers(): void {
         `That equipment item already backs the active package "${mainItemInUse.name}". Pick a different main item, or edit the existing package.`,
       );
     }
+
+    assertPackageItemRoles(
+      input.main_item_id,
+      input.components.map((c) => c.equipment_id),
+    );
 
     const isPricingAdmin = user.role === 'admin';
 
@@ -205,6 +239,16 @@ export function registerPackageHandlers(): void {
         `That equipment item already backs the active package "${mainItemConflict.name}". Pick a different main item.`,
       );
     }
+
+    const previousComponentIds = new Set(
+      (db.prepare('SELECT component_id FROM package_items WHERE package_id = ?').all(id) as { component_id: string }[])
+        .map((r) => r.component_id),
+    );
+    assertPackageItemRoles(
+      input.main_item_id,
+      input.components.map((c) => c.equipment_id),
+      previousComponentIds,
+    );
 
     const isPricingAdmin = user.role === 'admin';
     const now = new Date().toISOString();

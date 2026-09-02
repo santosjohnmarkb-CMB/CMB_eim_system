@@ -121,6 +121,18 @@ export function buildSkuPrefix(input: {
   ].join('-');
 }
 
+/**
+ * List-row codes must be unique. Unit codes are `{prefix}-001`, so a colliding
+ * list row uses `{prefix}~2` (tilde) instead of another hyphen suffix.
+ */
+export function uniqueItemCode(desired: string, used: Iterable<string>): string {
+  const taken = new Set(used);
+  if (!taken.has(desired)) return desired;
+  let n = 2;
+  while (taken.has(`${desired}~${n}`)) n += 1;
+  return `${desired}~${n}`;
+}
+
 export function formatUnitCount(n: number): string {
   return String(n).padStart(3, '0');
 }

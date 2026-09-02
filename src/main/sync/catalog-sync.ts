@@ -404,7 +404,7 @@ export async function syncCatalogWithCloud(): Promise<void> {
 
 export async function pushCatalogToCloud(table: CatalogTable, action: string, record: Record<string, unknown>): Promise<void> {
   if (!getSupabase()) {
-    offlineQueue.enqueue(action === 'DELETE' ? 'DELETE' : 'UPDATE', table, record.id as string, record);
+    offlineQueue.enqueue(action === 'DELETE' ? 'DELETE' : 'UPDATE', table, record.id as string, toCatalogCloudRecord(table, record));
     return;
   }
 

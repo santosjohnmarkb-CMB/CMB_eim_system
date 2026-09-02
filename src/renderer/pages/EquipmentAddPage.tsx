@@ -244,6 +244,13 @@ export function EquipmentAddPage() {
             }} className={selectClass}>
               {ITEM_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
+            {(form.item_type === 'package_main' || form.item_type === 'package_component' || form.item_type === 'add_on') && (
+              <p className="text-xs text-surface-500 mt-1">
+                {form.item_type === 'package_main'
+                  ? 'Assemble this item into a package on the Packages page.'
+                  : 'This item can be added as a package component on the Packages page.'}
+              </p>
+            )}
           </div>
           <Input label="Brand" value={form.brand} onChange={(e) => set('brand', e.target.value)} />
           <Input label="Model" value={form.model} onChange={(e) => set('model', e.target.value)} />

@@ -23,6 +23,13 @@ const statusVariantMap: Record<string, 'success' | 'info' | 'warning' | 'danger'
 };
 
 const unitInputClass = 'w-full px-2.5 py-1.5 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100';
+const selectClass = 'w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100';
+const ITEM_TYPE_OPTIONS = [
+  { value: 'standalone', label: 'Standalone' },
+  { value: 'package_main', label: 'Package Main' },
+  { value: 'package_component', label: 'Package Component' },
+  { value: 'add_on', label: 'Add-on' },
+];
 
 function fmtDate(d: string | null | undefined) {
   return d ? new Date(d).toLocaleDateString() : '—';
@@ -367,6 +374,26 @@ export function EquipmentDetailPage() {
                 placeholder="Select or type a sub-sub category"
                 allowCreate
               />
+              <div>
+                <label className="block text-xs font-medium text-surface-400 mb-1">Item type</label>
+                <select
+                  value={editForm.item_type}
+                  onChange={(e) => {
+                    setEdit('item_type', e.target.value);
+                    if (e.target.value === 'package_main') setEdit('pricing_type', 'package_rate');
+                  }}
+                  className={selectClass}
+                >
+                  {ITEM_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                {(editForm.item_type === 'package_main' || editForm.item_type === 'package_component' || editForm.item_type === 'add_on') && (
+                  <p className="text-xs text-surface-500 mt-1">
+                    {editForm.item_type === 'package_main'
+                      ? 'Assemble this item into a package on the Packages page.'
+                      : 'This item can be added as a package component on the Packages page.'}
+                  </p>
+                )}
+              </div>
               <Input label="Brand" value={editForm.brand} onChange={(e) => setEdit('brand', e.target.value)} />
               <Input label="Model" value={editForm.model} onChange={(e) => setEdit('model', e.target.value)} />
               <Input label="Quantity" type="number" min={0} value={editForm.quantity} onChange={(e) => setEditQuantity(e.target.value)} />

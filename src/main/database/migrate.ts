@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { EQUIPMENT_HIERARCHY } from '../../shared/constants';
+import { CAMERA_PACKAGE_BRANDS, EQUIPMENT_HIERARCHY } from '../../shared/constants';
 import { buildSkuPrefix, formatUnitCode } from '../../shared/equipment-code';
 
 interface Migration {
@@ -123,6 +123,7 @@ export function pruneUnusedObsoleteCatalog(db: any): void {
  *   Camera Body / High Speed  → Camera / High Speed Camera / High Speed Camera
  *   Peripherals / Power / …   → Power / Battery and Charger | AC Power Supply
  *   Lens / Special / Lens Support → Lens / Lens Support
+ *   Camera Package Component / Arri Camera Package → Camera Package / Arri Camera Package
  * Idempotent: already-migrated rows are left alone.
  */
 export function remapCameraDepartmentTaxonomy(db: any): number {
@@ -142,12 +143,16 @@ export function remapCameraDepartmentTaxonomy(db: any): number {
   const cameraCat = catId('Camera');
   const lensCat = catId('Lens');
   const powerCat = catId('Power');
+  const packageCat = catId('Camera Package Component');
   const cameraBodySub = subId(cameraCat, 'Camera Body');
   const hscSub = subId(cameraCat, 'High Speed Camera');
   const lensSupportSub = subId(lensCat, 'Lens Support');
   const batterySub = subId(powerCat, 'Battery and Charger');
   const acSub = subId(powerCat, 'AC Power Supply');
+  const cameraPackageSub = subId(packageCat, 'Camera Package');
   if (!cameraCat || !cameraBodySub) return 0;
+
+  const cameraPackageBrands = new Set(CAMERA_PACKAGE_BRANDS);
 
   const items = db.prepare(`
     SELECT e.id, e.category_id, e.subcategory_id, e.sub_subcategory,
@@ -171,35 +176,57 @@ export function remapCameraDepartmentTaxonomy(db: any): number {
     let newSub = item.subcategory_id;
     let newSubSub = item.sub_subcategory;
     let changed = false;
+    const subName = (item.sub_name || '').trim();
+    const subSub = (item.sub_subcategory || '').trim();
+    // 024 promotes old sub_sub text into subcategory rows and used to blank the
+    // column. Prefer the column, then the subcategory name, so both shapes remap.
+    const fourth = subSub || subName;
 
     if (item.cat_name === 'Camera Body') {
       newCat = cameraCat;
-      if (item.sub_name === 'High Speed Camera' && hscSub) {
+      if (subName === 'High Speed Camera' && hscSub) {
         newSub = hscSub;
         newSubSub = 'High Speed Camera';
       } else {
         newSub = cameraBodySub;
-        newSubSub = item.sub_name || item.sub_subcategory;
+        newSubSub = fourth || null;
       }
       changed = true;
-    } else if (item.cat_name === 'Lens' && item.sub_name === 'Special Lens' && item.sub_subcategory === 'Lens Support' && lensSupportSub) {
+    } else if (item.cat_name === 'Lens' && lensSupportSub && (subName === 'Lens Support' || subSub === 'Lens Support')) {
       newSub = lensSupportSub;
       newSubSub = null;
       changed = true;
-    } else if (item.cat_name === 'Camera Peripherals' && item.sub_name === 'Power' && powerCat) {
-      newCat = powerCat;
-      const ss = item.sub_subcategory;
-      if (ss === 'AC Power Supply' && acSub) {
-        newSub = acSub;
-        newSubSub = null;
-      } else if (batterySub) {
-        newSub = batterySub;
-        newSubSub = (ss === 'V Mount' || ss === 'B Mount' || ss === 'Battery Pack') ? ss : null;
-      }
+    } else if (
+      (item.cat_name === 'Camera Package Component' || item.cat_name === 'Camera Package Components')
+      && packageCat && cameraPackageSub
+      && (item.cat_name === 'Camera Package Components' || cameraPackageBrands.has(subName))
+    ) {
+      newCat = packageCat;
+      newSub = cameraPackageSub;
+      if (cameraPackageBrands.has(subName)) newSubSub = subName;
+      else if (cameraPackageBrands.has(subSub)) newSubSub = subSub;
+      else if (cameraPackageBrands.has(fourth)) newSubSub = fourth;
       changed = true;
+    } else if (item.cat_name === 'Camera Peripherals' && powerCat) {
+      const isPower = subName === 'Power' || subSub === 'Power'
+        || fourth === 'AC Power Supply'
+        || fourth === 'V Mount'
+        || fourth === 'B Mount'
+        || fourth === 'Battery Pack';
+      if (isPower) {
+        newCat = powerCat;
+        if (fourth === 'AC Power Supply' && acSub) {
+          newSub = acSub;
+          newSubSub = null;
+        } else if (batterySub) {
+          newSub = batterySub;
+          newSubSub = (fourth === 'V Mount' || fourth === 'B Mount' || fourth === 'Battery Pack') ? fourth : null;
+        }
+        changed = true;
+      }
     }
 
-    if (newSubSub === 'Telephoto Prime') {
+    if ((newSubSub || fourth) === 'Telephoto Prime') {
       newSubSub = 'Telephoto';
       changed = true;
     }
@@ -209,6 +236,7 @@ export function remapCameraDepartmentTaxonomy(db: any): number {
       changes += 1;
     }
   }
+  if (changes > 0) regenerateEquipmentCodes(db);
   return changes;
 }
 
@@ -262,15 +290,23 @@ export function regenerateEquipmentCodes(db: any): void {
   const assets = db.prepare(
     'SELECT id, equipment_id, equipment_code FROM equipment_assets ORDER BY created_at, id',
   ).all() as Array<{ id: string; equipment_id: string; equipment_code: string | null }>;
-  const updateAsset = db.prepare('UPDATE equipment_assets SET equipment_code = ?, updated_at = datetime(\'now\') WHERE id = ?');
+  const plannedAssets: Array<{ id: string; nextCode: string; current: string | null }> = [];
   for (const asset of assets) {
     const prefix = prefixByItem.get(asset.equipment_id);
     if (!prefix) continue;
     const next = (countsByPrefix.get(prefix) || 0) + 1;
     countsByPrefix.set(prefix, next);
-    const nextCode = formatUnitCode(prefix, next);
-    if (asset.equipment_code === nextCode) continue;
-    updateAsset.run(nextCode, asset.id);
+    plannedAssets.push({ id: asset.id, nextCode: formatUnitCode(prefix, next), current: asset.equipment_code });
+  }
+  const updateAsset = db.prepare('UPDATE equipment_assets SET equipment_code = ?, updated_at = datetime(\'now\') WHERE id = ?');
+  if (plannedAssets.some((a) => a.current !== a.nextCode)) {
+    // Park before rewrite so UNIQUE swaps (e.g. …-002 → …-001 while a sibling still holds …-001) cannot collide.
+    for (const asset of plannedAssets) {
+      updateAsset.run(`__tmp__${asset.id}`, asset.id);
+    }
+    for (const asset of plannedAssets) {
+      updateAsset.run(asset.nextCode, asset.id);
+    }
   }
 }
 
@@ -1048,6 +1084,7 @@ const MIGRATIONS: Migration[] = [
       const versionExpr = hasVersion ? 'ei.version' : '1';
 
       // Old categories → departments, old subcategories → categories_new.
+      // Keep sub_subcategory: 025 remaps 4th-level labels (3K, V Mount, …) from it.
       // LEFT JOIN keeps rows with NULL/orphaned subcategory_id; department falls back
       // to the old category_id (now a department id) or a catch-all department.
       db.exec(`
@@ -1065,7 +1102,7 @@ const MIGRATIONS: Migration[] = [
             ORDER BY c3.display_order, c3.id LIMIT 1
           )),
           src.subcategory_id,
-          '',
+          src.sub_subcategory,
           src.item_type, src.brand, src.model, src.pricing_type, src.base_price, src.notes,
           src.quantity, src.available_qty,
           src.is_active, src.version, src.created_at, src.updated_at
@@ -1079,6 +1116,7 @@ const MIGRATIONS: Migration[] = [
             ) AS department_id,
             cn.id AS matched_category_id,
             sn.id AS subcategory_id,
+            ei.sub_subcategory,
             ei.item_type, ei.brand, ei.model, ei.pricing_type, ei.base_price, ei.notes,
             ${qtyExpr} AS quantity, ${availExpr} AS available_qty,
             ei.is_active, ${versionExpr} AS version, ei.created_at, ei.updated_at

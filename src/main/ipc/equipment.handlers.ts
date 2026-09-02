@@ -6,14 +6,14 @@ import { writeAuditLog } from './audit';
 import { EquipmentCreateSchema, EquipmentUpdateSchema, AssetUpdateSchema, AssetStatusUpdateSchema } from '../../shared/schemas';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { pushOperationalToCloud } from '../sync/operational-sync';
-import { opsDepartmentOf } from '../../shared/constants';
+import { CAMERA_PACKAGE_BRANDS, opsDepartmentOf } from '../../shared/constants';
 import { seedEquipmentHierarchy } from '../database/migrate';
 import { sessionDepartment, categoriesForDepartment, assertEquipmentInDepartment } from './department';
 import { recomputeAvailability, insertAssetStatusLog, pushStatusLogsToCloud } from './availability';
 import { parseCsvRow } from './utils/csv';
 import {
   buildSkuPrefix, formatUnitCode, nextUnitCounts,
-  parseUnitCount, trailingUnitCount, unitQtyFromCsvRow,
+  parseUnitCount, trailingUnitCount, uniqueItemCode, unitQtyFromCsvRow,
 } from '../../shared/equipment-code';
 
 export function registerEquipmentHandlers(): void {
@@ -107,6 +107,52 @@ export function registerEquipmentHandlers(): void {
         AND LOWER(TRIM(COALESCE(model, ''))) = LOWER(TRIM(?))
       LIMIT 1
     `).get(departmentId, categoryId, brand || '', model || '');
+  };
+
+  const findInactiveSku = (departmentId: string, categoryId: string, brand: string, model: string): any => {
+    return db.prepare(`
+      SELECT * FROM equipment_items
+      WHERE is_active = 0 AND department_id = ? AND category_id = ?
+        AND LOWER(TRIM(COALESCE(brand, ''))) = LOWER(TRIM(?))
+        AND LOWER(TRIM(COALESCE(model, ''))) = LOWER(TRIM(?))
+      LIMIT 1
+    `).get(departmentId, categoryId, brand || '', model || '');
+  };
+
+  const itemByCode = (code: string): any => {
+    return db.prepare('SELECT * FROM equipment_items WHERE equipment_code = ? LIMIT 1').get(code);
+  };
+
+  const sameBrandModel = (row: any, brand: string, model: string): boolean => {
+    const b = (v: unknown) => String(v ?? '').trim().toLowerCase();
+    return b(row?.brand) === b(brand) && b(row?.model) === b(model);
+  };
+
+  /** Reuse the SKU when brand/model match, even if category_id differs (remap / duplicate rows). */
+  const resolveExistingSku = (
+    departmentId: string, categoryId: string, brand: string, model: string, prefix: string,
+  ): any => {
+    const active = findSku(departmentId, categoryId, brand, model);
+    if (active) return active;
+    const inactive = findInactiveSku(departmentId, categoryId, brand, model);
+    if (inactive) return inactive;
+    const owner = itemByCode(prefix);
+    if (owner && owner.department_id === departmentId && sameBrandModel(owner, brand, model)) return owner;
+    return null;
+  };
+
+  const usedItemCodes = (): string[] => {
+    return (db.prepare('SELECT equipment_code FROM equipment_items').all() as Array<{ equipment_code: string }>)
+      .map((r) => r.equipment_code)
+      .filter(Boolean);
+  };
+
+  /** Keep an existing list code when the desired prefix belongs to another row. */
+  const itemCodeForWrite = (desired: string, existing?: { id: string; equipment_code: string } | null): string => {
+    const owner = itemByCode(desired);
+    if (!owner || owner.id === existing?.id) return desired;
+    if (existing?.equipment_code) return existing.equipment_code;
+    return uniqueItemCode(desired, usedItemCodes());
   };
 
   const insertAsset = (params: {
@@ -318,7 +364,8 @@ export function registerEquipmentHandlers(): void {
           }));
     const qty = units.length;
 
-    const existingSku = findSku(departmentId, categoryId, input.brand, input.model);
+    const existingSku = resolveExistingSku(departmentId, categoryId, input.brand, input.model, skuPrefix);
+    const itemCode = itemCodeForWrite(skuPrefix, existingSku);
     const assetIds: string[] = [];
     const targetId = existingSku?.id || uuidv4();
 
@@ -327,19 +374,19 @@ export function registerEquipmentHandlers(): void {
         db.prepare(`
           UPDATE equipment_items SET
             equipment_code = ?, quantity = quantity + ?, notes = COALESCE(?, notes),
-            updated_at = ?, version = version + 1
+            is_active = 1, updated_at = ?, version = version + 1
           WHERE id = ?
-        `).run(skuPrefix, qty, input.notes || null, now, existingSku.id);
+        `).run(itemCode, qty, input.notes || null, now, existingSku.id);
       } else {
         db.prepare(`
           INSERT INTO equipment_items (id, equipment_code, name, department_id, category_id, subcategory_id, sub_subcategory, item_type, brand, model, pricing_type, base_price, notes, quantity, available_qty, is_active, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-        `).run(targetId, skuPrefix, input.name, departmentId, categoryId, subcategoryId,
+        `).run(targetId, itemCode, input.name, departmentId, categoryId, subcategoryId,
           input.sub_subcategory || null, input.item_type, input.brand, input.model,
           pricingType, basePrice, input.notes || null, qty, qty, now, now);
       }
 
-      const counts = nextUnitCounts(usedCountsForPrefix(skuPrefix), qty);
+      const counts = nextUnitCounts(usedCountsForPrefix(itemCode), qty);
       for (let i = 0; i < units.length; i++) {
         const unit = units[i]!;
         const unitId = uuidv4();
@@ -347,7 +394,7 @@ export function registerEquipmentHandlers(): void {
         insertAsset({
           id: unitId,
           equipmentId: targetId,
-          unitCode: formatUnitCode(skuPrefix, counts[i]!),
+          unitCode: formatUnitCode(itemCode, counts[i]!),
           serial_number: unit.serial_number,
           asset_tag: unit.asset_tag,
           purchase_date: input.purchase_date || null,
@@ -536,23 +583,24 @@ export function registerEquipmentHandlers(): void {
 
       const after: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(id);
       const prefix = skuPrefixFor(departmentId, categoryId, after.brand, after.model);
-      if (prefix !== after.equipment_code) {
-        db.prepare('UPDATE equipment_items SET equipment_code = ?, updated_at = datetime(\'now\') WHERE id = ?').run(prefix, id);
+      const nextCode = itemCodeForWrite(prefix, after);
+      if (nextCode !== after.equipment_code) {
+        db.prepare('UPDATE equipment_items SET equipment_code = ?, updated_at = datetime(\'now\') WHERE id = ?').run(nextCode, id);
         const assets: any[] = db.prepare('SELECT id, equipment_code FROM equipment_assets WHERE equipment_id = ?').all(id);
         for (const a of assets) {
           const n = trailingUnitCount(a.equipment_code);
           if (n == null) continue;
           db.prepare('UPDATE equipment_assets SET equipment_code = ?, updated_at = datetime(\'now\') WHERE id = ?')
-            .run(formatUnitCode(prefix, n), a.id);
+            .run(formatUnitCode(nextCode, n), a.id);
           const updated: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(a.id);
           if (updated) void pushOperationalToCloud('equipment_assets', 'UPDATE', updated);
         }
       }
 
       if (input.units !== undefined) {
-        applyUnitEdits(id, input.units, prefix);
+        applyUnitEdits(id, input.units, nextCode);
       } else if (input.quantity !== undefined) {
-        reconcileUnits(id, input.quantity, prefix);
+        reconcileUnits(id, input.quantity, nextCode);
       }
       recomputeAvailability(db, id);
 
@@ -816,6 +864,15 @@ export function registerEquipmentHandlers(): void {
       } else if (categoryName === 'Lens' && subName === 'Special Lens' && subSub === 'Lens Support') {
         subName = 'Lens Support';
         subSub = '';
+      } else if (categoryName === 'Camera Package Component' || categoryName === 'Camera Package Components') {
+        const packageBrands = new Set(CAMERA_PACKAGE_BRANDS);
+        categoryName = 'Camera Package Component';
+        if (packageBrands.has(subName)) {
+          subSub = subName;
+          subName = 'Camera Package';
+        } else if (subName !== 'Camera Package') {
+          subName = 'Camera Package';
+        }
       }
       if (subSub === 'Telephoto Prime') subSub = 'Telephoto';
     }
@@ -950,18 +1007,6 @@ export function registerEquipmentHandlers(): void {
     const findCat = db.prepare('SELECT id FROM categories WHERE name = ? AND department_id = ? AND is_active = 1');
     const findSub = db.prepare('SELECT id FROM subcategories WHERE name = ? AND category_id = ? AND is_active = 1');
 
-    // Also look for soft-deleted (is_active = 0) SKUs so we can reactivate them
-    // instead of hitting a UNIQUE constraint failure on equipment_code.
-    const findInactiveSku = (departmentId: string, categoryId: string, brand: string, model: string): any => {
-      return db.prepare(`
-        SELECT * FROM equipment_items
-        WHERE is_active = 0 AND department_id = ? AND category_id = ?
-          AND LOWER(TRIM(COALESCE(brand, ''))) = LOWER(TRIM(?))
-          AND LOWER(TRIM(COALESCE(model, ''))) = LOWER(TRIM(?))
-        LIMIT 1
-      `).get(departmentId, categoryId, brand || '', model || '');
-    };
-
     const tx = db.transaction(() => {
       for (let i = 1; i < lines.length; i++) {
         try {
@@ -1034,18 +1079,8 @@ export function registerEquipmentHandlers(): void {
           }
 
           const skuPrefix = skuPrefixFor(deptRow.id, cat.id, row.brand || '', row.model || '');
-          let existing = findSku(deptRow.id, cat.id, row.brand || '', row.model || '');
-          // Reactivate a previously soft-deleted SKU so we don't collide with
-          // the UNIQUE constraint on equipment_code.
-          if (!existing) {
-            const inactive = findInactiveSku(deptRow.id, cat.id, row.brand || '', row.model || '');
-            if (inactive) {
-              db.prepare(`
-                UPDATE equipment_items SET is_active = 1, updated_at = ? WHERE id = ?
-              `).run(now, inactive.id);
-              existing = inactive;
-            }
-          }
+          const existing = resolveExistingSku(deptRow.id, cat.id, row.brand || '', row.model || '', skuPrefix);
+          const itemCode = itemCodeForWrite(skuPrefix, existing);
           const price = canPrice ? (parseFloat(row.base_price || '0') || 0) : 0;
           const unitQty = unitQtyFromCsvRow(row);
 
@@ -1058,7 +1093,7 @@ export function registerEquipmentHandlers(): void {
                 base_price = CASE WHEN ? = 1 THEN ? ELSE base_price END,
                 is_active = 1, updated_at = ?, version = version + 1
               WHERE id = ?
-            `).run(skuPrefix, unitQty, row.notes || null, canPrice ? 1 : 0, price, now, existing.id);
+            `).run(itemCode, unitQty, row.notes || null, canPrice ? 1 : 0, price, now, existing.id);
             eqId = existing.id;
             updated++;
           } else {
@@ -1066,21 +1101,21 @@ export function registerEquipmentHandlers(): void {
             db.prepare(`
               INSERT INTO equipment_items (id, equipment_code, name, department_id, category_id, subcategory_id, sub_subcategory, item_type, brand, model, pricing_type, base_price, notes, quantity, available_qty, is_active, created_at, updated_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-            `).run(eqId, skuPrefix, name, deptRow.id, cat.id, subId, subSub || null, itemType, row.brand || '', row.model || '',
+            `).run(eqId, itemCode, name, deptRow.id, cat.id, subId, subSub || null, itemType, row.brand || '', row.model || '',
               pricingType, price, row.notes || null, unitQty, unitQty, now, now);
             created++;
           }
 
           // N blank units with numbered codes (…-001, …-002). Serial, supplier, and
           // delivered date stay empty so they can be filled later from Edit Details.
-          const counts = nextUnitCounts(usedCountsForPrefix(skuPrefix), unitQty);
+          const counts = nextUnitCounts(usedCountsForPrefix(itemCode), unitQty);
           for (let u = 0; u < unitQty; u++) {
             const assetId = uuidv4();
             createdAssetIds.push(assetId);
             insertAsset({
               id: assetId,
               equipmentId: eqId!,
-              unitCode: formatUnitCode(skuPrefix, counts[u]!),
+              unitCode: formatUnitCode(itemCode, counts[u]!),
               serial_number: '',
               now,
             });

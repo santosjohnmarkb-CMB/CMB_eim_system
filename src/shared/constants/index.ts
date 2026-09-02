@@ -6,6 +6,7 @@ export const EQUIPMENT_HIERARCHY: Record<string, Record<string, string[]>> = {
     'Camera Support Equipment': ['Tripod and Fluid Head', 'Matte Box', 'Follow Focus', 'Support System', 'Camera Rigs'],
     'Camera Peripherals': ['Monitor', 'Recorder', 'Storage Media', 'Converters', 'Video Assist', 'Cables'],
     'Power': ['Battery and Charger', 'AC Power Supply'],
+    'Camera Package Component': ['Camera Package'],
   },
   'Dollies Mounts & Cranes': {
     'Crane': [],
@@ -49,7 +50,17 @@ export const EQUIPMENT_SUB_SUBS: Record<string, string[]> = {
   'Camera Peripherals::Video Assist': ['Wireless', 'Wired'],
   'Camera Peripherals::Cables': ['Video Cable', 'Modular Cable', 'Power Cable', 'Storage Media Cable'],
   'Power::Battery and Charger': ['V Mount', 'B Mount', 'Battery Pack'],
+  'Camera Package Component::Camera Package': [
+    'Arri Camera Package',
+    'Sony Camera Package',
+    'Red Camera Package',
+    'Canon Camera Package',
+    'Blackmagic Camera Package',
+    'Vision Research Camera Package',
+  ],
 };
+
+export const CAMERA_PACKAGE_BRANDS = EQUIPMENT_SUB_SUBS['Camera Package Component::Camera Package'] ?? [];
 
 export function subSubsFor(categoryName: string, subcategoryName: string): string[] {
   return EQUIPMENT_SUB_SUBS[`${categoryName}::${subcategoryName}`] ?? [];
@@ -235,6 +246,7 @@ export const USE_COUNT_SUBCATEGORIES: Record<Department, { label: string; subcat
     { label: 'Camera Support Equipment', subcategoryNames: ['Camera Support Equipment', 'Camera Support'] },
     { label: 'Camera Peripherals', subcategoryNames: ['Camera Peripherals'] },
     { label: 'Power', subcategoryNames: ['Power'] },
+    { label: 'Camera Package Component', subcategoryNames: ['Camera Package Component', 'Camera Package'] },
   ],
   lights_grips: [
     { label: 'Lighting', subcategoryNames: ['Lighting'] },

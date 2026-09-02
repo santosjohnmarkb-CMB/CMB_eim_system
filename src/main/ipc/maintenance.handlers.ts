@@ -458,8 +458,9 @@ export function registerMaintenanceHandlers(): void {
     const id = uuidv4();
     const input = PreventiveScheduleSchema.parse(data);
     const now = new Date().toISOString();
+    const asset: any = db.prepare('SELECT id FROM equipment_assets WHERE equipment_id = ?').get(input.equipment_id);
     db.prepare(`INSERT INTO preventive_schedules (id, equipment_id, asset_id, schedule_type, interval_days, interval_rentals, description, next_due_date, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`)
-      .run(id, input.equipment_id, null, input.schedule_type || 'calendar', input.interval_days || null, input.interval_rentals || null, input.description || '', input.next_due_date || null, now, now);
+      .run(id, input.equipment_id, asset?.id || null, input.schedule_type || 'calendar', input.interval_days || null, input.interval_rentals || null, input.description || '', input.next_due_date || null, now, now);
     const row: any = db.prepare('SELECT * FROM preventive_schedules WHERE id = ?').get(id);
     void pushOperationalToCloud('preventive_schedules', 'INSERT', row);
     return row;

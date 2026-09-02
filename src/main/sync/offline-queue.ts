@@ -45,6 +45,7 @@ const LOCAL_ONLY_COLUMNS = new Set([
 
 export function coerceForCloud(payload: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
+  const legacyDisplay = typeof payload.display_name === 'string' ? payload.display_name.trim() : '';
   for (const [key, value] of Object.entries(payload)) {
     if (LOCAL_ONLY_COLUMNS.has(key)) continue;
     if (key === 'is_active' || key === 'is_required') {
@@ -52,6 +53,11 @@ export function coerceForCloud(payload: Record<string, unknown>): Record<string,
     } else {
       result[key] = value;
     }
+  }
+  // Retired equipment_items.display_name is stripped above. If name is empty,
+  // keep the display string so an offline-queued raw row does not sync as blank.
+  if (legacyDisplay && (typeof result.name !== 'string' || !result.name.trim())) {
+    result.name = legacyDisplay;
   }
   return result;
 }
