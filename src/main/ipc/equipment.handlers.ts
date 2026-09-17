@@ -6,11 +6,11 @@ import { writeAuditLog } from './audit';
 import { EquipmentCreateSchema, EquipmentUpdateSchema, AssetUpdateSchema, AssetStatusUpdateSchema } from '../../shared/schemas';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { pushOperationalToCloud } from '../sync/operational-sync';
-import { CAMERA_PACKAGE_BRANDS, opsDepartmentOf } from '../../shared/constants';
+import { CAMERA_PACKAGE_BRANDS, catalogDeptHasTaxonomy, isDelistedCategoryName, opsDepartmentOf } from '../../shared/constants';
 import { seedEquipmentHierarchy } from '../database/migrate';
 import { sessionDepartment, categoriesForDepartment, assertEquipmentInDepartment } from './department';
 import { recomputeAvailability, insertAssetStatusLog, pushStatusLogsToCloud } from './availability';
-import { parseCsvRow } from './utils/csv';
+import { parseCsvRow, skipCsvTitleRows, splitCsvLines, normalizeCsvHeader, csvCellValue, csvRowIsBlank, csvRowLooksLikeHeaders } from './utils/csv';
 import {
   buildSkuPrefix, formatUnitCode, nextUnitCounts,
   parseUnitCount, trailingUnitCount, uniqueItemCode, unitQtyFromCsvRow,
@@ -35,10 +35,15 @@ export function registerEquipmentHandlers(): void {
 
   const ensureCategoryId = (departmentId: string, categoryIdOrName: string): string => {
     seedEquipmentHierarchy(db);
-    const byId: any = db.prepare('SELECT id FROM categories WHERE id = ?').get(categoryIdOrName);
+    const byId: any = db.prepare('SELECT id, name FROM categories WHERE id = ?').get(categoryIdOrName);
     if (byId) {
-      db.prepare('UPDATE categories SET is_active = 1 WHERE id = ?').run(byId.id);
+      if (!isDelistedCategoryName(byId.name)) {
+        db.prepare('UPDATE categories SET is_active = 1 WHERE id = ?').run(byId.id);
+      }
       return byId.id as string;
+    }
+    if (isDelistedCategoryName(categoryIdOrName)) {
+      throw new Error(`Category "${categoryIdOrName}" is not available.`);
     }
     const byName: any = db.prepare(
       'SELECT id FROM categories WHERE department_id = ? AND name = ? LIMIT 1',
@@ -885,9 +890,9 @@ export function registerEquipmentHandlers(): void {
   ipcMain.handle('db:equipment:previewCsvCategories', (event: any, csvContent: string) => {
     requireInventoryAccess(event);
     const dept = sessionDepartment(event);
-    const lines = csvContent.replace(/^\uFEFF/, '').trim().split(/\r?\n/).filter((l) => l.trim());
+    const lines = skipCsvTitleRows(splitCsvLines(csvContent));
     if (lines.length < 2) throw new Error('CSV must have a header row and at least one data row');
-    const headers = parseCsvRow(lines[0]!).map((h) => h.trim().replace(/^\uFEFF/, '').toLowerCase().replace(/\s+/g, '_'));
+    const headers = parseCsvRow(lines[0]!).map(normalizeCsvHeader);
 
     const findDept = db.prepare('SELECT id, name FROM departments WHERE name = ? AND is_active = 1');
     const findCat = db.prepare('SELECT id FROM categories WHERE name = ? AND department_id = ? AND is_active = 1');
@@ -898,9 +903,10 @@ export function registerEquipmentHandlers(): void {
     const unknownSubSubs = new Map<string, { department: string; category: string; subcategory: string; subSubcategory: string; count: number }>();
 
     for (let i = 1; i < lines.length; i++) {
-      const values = parseCsvRow(lines[i]!);
+      const values = parseCsvRow(lines[i]!).map(csvCellValue);
+      if (csvRowIsBlank(values) || csvRowLooksLikeHeaders(values)) continue;
       const row: Record<string, string> = {};
-      headers.forEach((h, idx) => { row[h] = (values[idx] || '').trim(); });
+      headers.forEach((h, idx) => { row[h] = values[idx] || ''; });
 
       const tax = normalizeCsvTaxonomy(row);
       if (!tax) continue;
@@ -908,6 +914,8 @@ export function registerEquipmentHandlers(): void {
       const deptRow: any = findDept.get(tax.departmentName);
       if (!deptRow) continue;
       if (dept && opsDepartmentOf(deptRow.name, null) !== dept) continue;
+      // Lights & Grips categories are created from the CSV as-is; don't prompt.
+      if (!catalogDeptHasTaxonomy(deptRow.name)) continue;
 
       const cat: any = findCat.get(tax.categoryName, deptRow.id);
       if (!cat) {
@@ -944,39 +952,11 @@ export function registerEquipmentHandlers(): void {
     const user = requireInventoryAccess(event);
     const canPrice = user.role === 'admin';
     const sessionDept = sessionDepartment(event);
-    let csvText = csvContent.replace(/^\uFEFF/, '').trim();
-    // Auto-detect tab-separated files and convert to comma-delimited
-    const probe = csvText.split(/\r?\n/)[0] || '';
-    if (probe.includes('\t') && !probe.includes(',')) {
-      csvText = csvText.replace(/\t/g, ',');
-    }
-    // Auto-detect semicolon-separated files
-    if (!probe.includes(',') && probe.includes(';')) {
-      csvText = csvText.replace(/;/g, ',');
-    }
-    let lines = csvText.split(/\r?\n/).filter((l) => l.trim());
+    let lines = skipCsvTitleRows(splitCsvLines(csvContent));
     if (lines.length < 2) throw new Error('CSV must have a header row and at least one data row');
 
-    // Detect and skip a title/filename row: if line 1 has only 1 column but
-    // line 2 has multiple columns (or looks like a header row with known names),
-    // treat line 2 as the real header row.
-    const KNOWN_HEADERS = new Set(['name', 'department', 'category', 'brand', 'model', 'item_type', 'qty_available', 'base_price', 'notes', 'equipment_name', 'dept', 'sub_category', 'subcategory', 'pricing_type']);
-    const firstRowCols = parseCsvRow(lines[0]!);
-    const secondRowCols = parseCsvRow(lines[1]!);
-    const secondRowNorm = secondRowCols.map((h) => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
-    const secondRowLooksLikeHeaders = secondRowNorm.filter((h) => KNOWN_HEADERS.has(h)).length >= 2;
-
-    if (firstRowCols.length <= 1 && secondRowCols.length > 1 && lines.length >= 3) {
-      console.log(`[importCsv] Skipping title row "${lines[0]}" — line 2 has ${secondRowCols.length} columns`);
-      lines = lines.slice(1);
-    } else if (firstRowCols.length <= 1 && secondRowLooksLikeHeaders && lines.length >= 3) {
-      console.log(`[importCsv] Skipping title row "${lines[0]}" — line 2 looks like headers: [${secondRowNorm.join(', ')}]`);
-      lines = lines.slice(1);
-    }
-
     const rawHeaders = parseCsvRow(lines[0]!).map((h) => h.trim().replace(/^\uFEFF/, ''));
-    // Normalize: lowercase, collapse whitespace/special chars to underscores, strip edges
-    const headers = rawHeaders.map((h) => h.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''));
+    const headers = rawHeaders.map(normalizeCsvHeader);
 
     // Validate that required columns exist in the headers
     const hasName = headers.some((h) => ['name', 'equipment_name', 'item_name', 'equipment'].includes(h));
@@ -1010,9 +990,10 @@ export function registerEquipmentHandlers(): void {
     const tx = db.transaction(() => {
       for (let i = 1; i < lines.length; i++) {
         try {
-          const values = parseCsvRow(lines[i]!);
+          const values = parseCsvRow(lines[i]!).map(csvCellValue);
+          if (csvRowIsBlank(values) || csvRowLooksLikeHeaders(values)) continue;
           const row: Record<string, string> = {};
-          headers.forEach((h, idx) => { row[h] = (values[idx] || '').trim(); });
+          headers.forEach((h, idx) => { row[h] = values[idx] || ''; });
 
           const tax = normalizeCsvTaxonomy(row);
           if (!tax) {
@@ -1036,13 +1017,10 @@ export function registerEquipmentHandlers(): void {
             continue;
           }
 
+          const allowCreate = autoCreateCategories || !catalogDeptHasTaxonomy(deptRow.name);
           let cat: any = findCat.get(categoryName, deptRow.id);
-          if (!cat && autoCreateCategories) {
-            const catId = uuidv4();
-            db.prepare(
-              'INSERT INTO categories (id, department_id, name, display_order, is_active) VALUES (?, ?, ?, 0, 1)',
-            ).run(catId, deptRow.id, categoryName);
-            cat = { id: catId };
+          if (!cat && allowCreate) {
+            cat = { id: ensureCategoryId(deptRow.id, categoryName) };
           }
           if (!cat) {
             errors.push({ row: i + 1, message: `Unknown category "${categoryName}" in ${departmentName}` });
@@ -1052,12 +1030,8 @@ export function registerEquipmentHandlers(): void {
           let subId: string | null = null;
           if (subName) {
             let subcat: any = findSub.get(subName, cat.id);
-            if (!subcat && autoCreateCategories) {
-              const newSubId = uuidv4();
-              db.prepare(
-                'INSERT INTO subcategories (id, category_id, name, display_order, is_active) VALUES (?, ?, ?, 0, 1)',
-              ).run(newSubId, cat.id, subName);
-              subcat = { id: newSubId };
+            if (!subcat && allowCreate) {
+              subcat = { id: ensureSubcategoryId(cat.id, subName) };
             }
             if (!subcat) {
               errors.push({ row: i + 1, message: `Unknown sub category "${subName}"` });
@@ -1149,6 +1123,10 @@ export function registerEquipmentHandlers(): void {
       return row && row.is_active === 1;
     }).length;
     console.log(`[importCsv] imported=${imported} created=${created} updated=${updated} errors=${errors.length} touchedItems=${touchedItemIds.size} touchedStillActive=${touchedActive} totalActive=${verifyCount.c}`);
+
+    if (imported === 0 && errors.length === 0) {
+      throw new Error('CSV has a header row but no equipment data rows. Fill name, department, and category on each item row.');
+    }
 
     return { imported, created, updated, errors };
   });

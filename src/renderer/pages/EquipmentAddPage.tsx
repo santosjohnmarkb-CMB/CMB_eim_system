@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useEquipmentStore } from '../stores/equipment.store';
 import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
@@ -10,7 +10,7 @@ import type { Department } from '../../shared/constants';
 import {
   latestDepartments,
   categoryOptionsForDepartment,
-  subcategoryChoices,
+  subcategoryOptionsForCategory,
   subSubChoices,
   categoryNameForSubcategory,
   pathForSubSub,
@@ -43,20 +43,25 @@ export function EquipmentAddPage() {
     fetchAll, fetchDepartments, fetchCategories, fetchSubcategories, createEquipment,
   } = useEquipmentStore();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const toast = useToast();
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === 'admin';
   const userDept = user?.department as Department | null;
+  const queryDept = params.get('dept');
+  const opsDept = (!isAdmin && userDept)
+    ? userDept
+    : (queryDept === 'camera' || queryDept === 'lights_grips' ? queryDept : userDept);
 
   const catalogDepts = useMemo(
-    () => latestDepartments(departments, userDept, categories),
-    [departments, userDept, categories],
+    () => latestDepartments(departments, opsDept, categories),
+    [departments, opsDept, categories],
   );
 
   const defaultDeptId = useMemo(() => {
-    const preferred = userDept ? DEPARTMENT_CONFIG[userDept].categories[0] : catalogDepts[0]?.name;
+    const preferred = opsDept ? DEPARTMENT_CONFIG[opsDept].categories[0] : catalogDepts[0]?.name;
     return catalogDepts.find((d) => d.name === preferred)?.id || catalogDepts[0]?.id || '';
-  }, [catalogDepts, userDept]);
+  }, [catalogDepts, opsDept]);
 
   const [form, setForm] = useState<Record<string, any>>({
     name: '', department_id: '', category_id: '', subcategory_id: '', sub_subcategory: '',
@@ -78,13 +83,15 @@ export function EquipmentAddPage() {
   const filteredCats = categoryOptionsForDepartment(categories, departments, form.department_id);
   const selectedCat = filteredCats.find((c) => c.id === form.category_id)
     || filteredCats.find((c) => c.name === form.category_id);
-  const filteredSubs = subcategoryChoices(
+  const filteredSubs = subcategoryOptionsForCategory(
     subcategories, departments, form.department_id, form.category_id, categories,
   );
   const selectedSub = filteredSubs.find((s) => s.id === form.subcategory_id)
     || subcategories.find((s) => s.id === form.subcategory_id)
     || (form.subcategory_id ? { id: form.subcategory_id, name: form.subcategory_id } : undefined);
-  const subSubOptions = subSubChoices(selectedDept?.name, selectedCat?.name, selectedSub?.name, items, selectedCat?.id, selectedSub?.id);
+  const subSubOptions = subSubChoices(
+    selectedDept?.name, selectedCat?.name, selectedSub?.name, items, selectedCat?.id, selectedSub?.id,
+  );
   const set = (field: string, value: any) => setForm((p) => ({ ...p, [field]: value }));
 
   const setCategory = (name: string) => {

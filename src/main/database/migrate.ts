@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { CAMERA_PACKAGE_BRANDS, EQUIPMENT_HIERARCHY } from '../../shared/constants';
+import { CAMERA_PACKAGE_BRANDS, catalogDeptHasTaxonomy, DEPARTMENT_CONFIG, EQUIPMENT_HIERARCHY, isDelistedCategoryName } from '../../shared/constants';
 import { buildSkuPrefix, formatUnitCode } from '../../shared/equipment-code';
 
 interface Migration {
@@ -85,13 +85,86 @@ export function seedEquipmentHierarchy(db: any): void {
   }
 }
 
+const LIGHTS_GRIPS_CATALOG_DEPTS = DEPARTMENT_CONFIG.lights_grips.categories;
+
+/** Old Lights & Grips tree removed from EQUIPMENT_HIERARCHY. Keep these inactive if cloud/sync restores them. */
+const LEGACY_LIGHTS_GRIPS_CATEGORIES: Record<string, string[]> = {
+  'Lights and Grips': ['Grip', 'Lighting'],
+  'Dollies Mounts & Cranes': ['Crane', 'Motorized Dolly', 'Dolly', 'Tracks', 'Slider/Table Top Dolly', 'Mounts'],
+  'Power & Transport': ['Power', 'Transport'],
+  'Special Equipment': ['SFX & Others'],
+};
+
+/** Deactivate every category/subcategory under Lights & Grips catalog departments. Camera is untouched. */
+export function deactivateLightsGripsCatalog(db: any): void {
+  if (!tableExists(db, 'departments') || !tableExists(db, 'categories') || !tableExists(db, 'subcategories')) return;
+  const placeholders = LIGHTS_GRIPS_CATALOG_DEPTS.map(() => '?').join(', ');
+  db.prepare(
+    `UPDATE subcategories SET is_active = 0 WHERE category_id IN (
+      SELECT c.id FROM categories c JOIN departments d ON d.id = c.department_id WHERE d.name IN (${placeholders})
+    )`,
+  ).run(...LIGHTS_GRIPS_CATALOG_DEPTS);
+  db.prepare(
+    `UPDATE categories SET is_active = 0 WHERE department_id IN (
+      SELECT id FROM departments WHERE name IN (${placeholders})
+    )`,
+  ).run(...LIGHTS_GRIPS_CATALOG_DEPTS);
+}
+
+/** Re-hide the retired Lights & Grips names after catalog sync without touching import-created rows. */
+export function deactivateLegacyLightsGripsTaxonomy(db: any): void {
+  if (!tableExists(db, 'departments') || !tableExists(db, 'categories') || !tableExists(db, 'subcategories')) return;
+  const usedCatIds = new Set(
+    (db.prepare(
+      'SELECT DISTINCT category_id AS id FROM equipment_items WHERE is_active = 1 AND category_id IS NOT NULL',
+    ).all() as { id: string }[]).map((r) => r.id),
+  );
+  const findDept = db.prepare('SELECT id FROM departments WHERE name = ?');
+  const findCat = db.prepare('SELECT id FROM categories WHERE department_id = ? AND name = ?');
+  const deactivateCats = db.prepare(
+    'UPDATE categories SET is_active = 0 WHERE department_id = ? AND name = ?',
+  );
+  const deactivateSubs = db.prepare(
+    `UPDATE subcategories SET is_active = 0 WHERE category_id IN (
+      SELECT id FROM categories WHERE department_id = ? AND name = ?
+    )`,
+  );
+  for (const [deptName, catNames] of Object.entries(LEGACY_LIGHTS_GRIPS_CATEGORIES)) {
+    const dept = findDept.get(deptName) as { id: string } | undefined;
+    if (!dept) continue;
+    for (const catName of catNames) {
+      const cat = findCat.get(dept.id, catName) as { id: string } | undefined;
+      if (cat && usedCatIds.has(cat.id)) continue;
+      deactivateSubs.run(dept.id, catName);
+      deactivateCats.run(dept.id, catName);
+    }
+  }
+  deactivateDelistedCategories(db);
+}
+
+/** Hide category labels that must not appear in pickers (e.g. department names imported as categories). */
+export function deactivateDelistedCategories(db: any): void {
+  if (!tableExists(db, 'categories') || !tableExists(db, 'subcategories')) return;
+  const cats = db.prepare('SELECT id, name FROM categories WHERE is_active = 1').all() as Array<{ id: string; name: string }>;
+  const deactivateCat = db.prepare('UPDATE categories SET is_active = 0 WHERE id = ?');
+  const deactivateSubs = db.prepare('UPDATE subcategories SET is_active = 0 WHERE category_id = ?');
+  for (const cat of cats) {
+    if (!isDelistedCategoryName(cat.name)) continue;
+    deactivateSubs.run(cat.id);
+    deactivateCat.run(cat.id);
+  }
+}
+
 /** Hide leftover catalog rows that are no longer in EQUIPMENT_HIERARCHY and unused. */
 export function pruneUnusedObsoleteCatalog(db: any): void {
   if (!tableExists(db, 'departments') || !tableExists(db, 'categories') || !tableExists(db, 'subcategories')) return;
 
+  const allowedCats = new Set<string>();
   const allowedSubs = new Set<string>();
   for (const [deptName, catMap] of Object.entries(EQUIPMENT_HIERARCHY)) {
+    if (!catalogDeptHasTaxonomy(deptName)) continue;
     for (const [catName, subNames] of Object.entries(catMap)) {
+      allowedCats.add(`${deptName}::${catName}`);
       for (const subName of subNames) allowedSubs.add(`${deptName}::${catName}::${subName}`);
     }
   }
@@ -111,9 +184,29 @@ export function pruneUnusedObsoleteCatalog(db: any): void {
   `).all() as Array<{ id: string; name: string; category_name: string; department_name: string }>;
   const deactivateSub = db.prepare('UPDATE subcategories SET is_active = 0 WHERE id = ?');
   for (const sub of subs) {
+    if (!catalogDeptHasTaxonomy(sub.department_name)) continue;
     if (allowedSubs.has(`${sub.department_name}::${sub.category_name}::${sub.name}`)) continue;
     if (usedSubIds.has(sub.id)) continue;
     deactivateSub.run(sub.id);
+  }
+
+  const usedCatIds = new Set(
+    (db.prepare(
+      'SELECT DISTINCT category_id AS id FROM equipment_items WHERE is_active = 1 AND category_id IS NOT NULL',
+    ).all() as { id: string }[]).map((r) => r.id),
+  );
+  const cats = db.prepare(`
+    SELECT c.id, c.name, d.name AS department_name
+    FROM categories c
+    JOIN departments d ON d.id = c.department_id
+    WHERE c.is_active = 1
+  `).all() as Array<{ id: string; name: string; department_name: string }>;
+  const deactivateCat = db.prepare('UPDATE categories SET is_active = 0 WHERE id = ?');
+  for (const cat of cats) {
+    if (!catalogDeptHasTaxonomy(cat.department_name)) continue;
+    if (allowedCats.has(`${cat.department_name}::${cat.name}`)) continue;
+    if (usedCatIds.has(cat.id)) continue;
+    deactivateCat.run(cat.id);
   }
 }
 
@@ -1194,6 +1287,18 @@ const MIGRATIONS: Migration[] = [
       }
       regenerateEquipmentCodes(db);
       db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_asset_equipment_code ON equipment_assets(equipment_code)');
+    },
+  },
+  {
+    id: '027_clear_lights_grips_taxonomy',
+    up: (db: any) => {
+      deactivateLightsGripsCatalog(db);
+    },
+  },
+  {
+    id: '028_delist_dollies_cranes_categories',
+    up: (db: any) => {
+      deactivateDelistedCategories(db);
     },
   },
 ];

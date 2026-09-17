@@ -479,7 +479,7 @@ export function EquipmentListPage() {
             <Button variant="secondary" onClick={handleDownloadTemplate}><Download size={16} /> Template</Button>
             <Button variant="secondary" onClick={() => fileInputRef.current?.click()} loading={isImporting}><Upload size={16} /> Import CSV</Button>
             <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleFileSelected} />
-            <Button onClick={() => navigate('/equipment/new')}><Plus size={16} /> Add Equipment</Button>
+            <Button onClick={() => navigate(department ? `/equipment/new?dept=${department}` : '/equipment/new')}><Plus size={16} /> Add Equipment</Button>
           </>
         )}
       </div>

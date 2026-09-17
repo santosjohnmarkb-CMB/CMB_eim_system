@@ -8,7 +8,7 @@ import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { EQUIPMENT_STATUS_CONFIG } from '../lib/constants';
-import { latestDepartments, categoryOptionsForDepartment, subcategoryChoices, subSubChoices, categoryNameForSubcategory, pathForSubSub } from '../lib/catalogHierarchy';
+import { latestDepartments, categoryOptionsForDepartment, subcategoryOptionsForCategory, subSubChoices, categoryNameForSubcategory, pathForSubSub } from '../lib/catalogHierarchy';
 import { CatalogCombobox } from '../components/common/CatalogCombobox';
 import { useToast } from '../hooks';
 import { useAuthStore } from '../stores/auth.store';
@@ -208,13 +208,15 @@ export function EquipmentDetailPage() {
   const editCategories = categoryOptionsForDepartment(categories, departments, editForm.department_id);
   const selectedCat = editCategories.find((c) => c.id === editForm.category_id)
     || editCategories.find((c) => c.name === editForm.category_id);
-  const editSubcategories = subcategoryChoices(
+  const editSubcategories = subcategoryOptionsForCategory(
     subcategories, departments, editForm.department_id, editForm.category_id, categories,
   );
   const selectedSub = editSubcategories.find((s) => s.id === editForm.subcategory_id)
     || subcategories.find((s) => s.id === editForm.subcategory_id)
     || (editForm.subcategory_id ? { id: editForm.subcategory_id, name: editForm.subcategory_id } : undefined);
-  const editSubSubs = subSubChoices(selectedDept?.name, selectedCat?.name, selectedSub?.name, items, selectedCat?.id, selectedSub?.id);
+  const editSubSubs = subSubChoices(
+    selectedDept?.name, selectedCat?.name, selectedSub?.name, items, selectedCat?.id, selectedSub?.id,
+  );
 
   const editPrefix = buildSkuPrefix({
     departmentName: selectedDept?.name || equipment.department_name,
@@ -355,6 +357,9 @@ export function EquipmentDetailPage() {
                 <select value={editForm.category_id} className="w-full px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 disabled:opacity-60" disabled>
                   <option value="">Select category</option>
                   {editCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {editForm.category_id && !editCategories.some((c) => c.id === editForm.category_id) && (
+                    <option value={editForm.category_id}>{equipment.category_name || editForm.category_id}</option>
+                  )}
                 </select>
                 <p className="text-xs text-surface-500 mt-1">Category cannot be changed after create.</p>
               </div>

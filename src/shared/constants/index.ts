@@ -8,25 +8,13 @@ export const EQUIPMENT_HIERARCHY: Record<string, Record<string, string[]>> = {
     'Power': ['Battery and Charger', 'AC Power Supply'],
     'Camera Package Component': ['Camera Package'],
   },
-  'Dollies Mounts & Cranes': {
-    'Crane': [],
-    'Motorized Dolly': [],
-    'Dolly': [],
-    'Tracks': [],
-    'Slider/Table Top Dolly': [],
-    'Mounts': [],
-  },
-  'Lights and Grips': {
-    'Grip': ['Light Stands', 'Clamps/Arms', 'Magic Cloth', 'Butterfly Frame', 'Chroma', 'Muslin'],
-    'Lighting': ['LED', 'Tungsten', 'Daylight', 'Fluorescent', 'Diffusion', 'Par', 'Traditional'],
-  },
-  'Power & Transport': {
-    'Power': ['Generator', 'Portable Genet', 'Power Box', 'Cables'],
-    'Transport': ['Grip Trucks'],
-  },
-  'Special Equipment': {
-    'SFX & Others': ['Dimmer/Variac', 'DMX Board', 'Smoke FX', 'Wind FX'],
-  },
+  // Lights & Grips has no locked taxonomy. Categories/subcategories come from
+  // CSV import (and from typed values on Add). Keep the catalog departments so
+  // existing equipment still maps here.
+  'Dollies Mounts & Cranes': {},
+  'Lights and Grips': {},
+  'Power & Transport': {},
+  'Special Equipment': {},
 };
 
 /** Fourth-level labels keyed by `category::subcategory`. Stored on equipment_items.sub_subcategory. */
@@ -207,6 +195,12 @@ export function categoriesInCatalogDept(catalogDeptName: string): string[] {
   return Object.keys(EQUIPMENT_HIERARCHY[catalogDeptName] ?? {});
 }
 
+/** True when the catalog department has a hardcoded category tree (Camera). */
+export function catalogDeptHasTaxonomy(catalogDeptName?: string | null): boolean {
+  if (!catalogDeptName) return false;
+  return Object.keys(EQUIPMENT_HIERARCHY[catalogDeptName] ?? {}).length > 0;
+}
+
 export function subcategoriesInCategory(catalogDeptName: string, categoryName: string): string[] {
   return EQUIPMENT_HIERARCHY[catalogDeptName]?.[categoryName] ?? [];
 }
@@ -217,6 +211,23 @@ export function isLatestCategory(catalogDeptName: string, categoryName: string):
 
 export function isLatestSubcategory(catalogDeptName: string, categoryName: string, subcategoryName: string): boolean {
   return (EQUIPMENT_HIERARCHY[catalogDeptName]?.[categoryName] ?? []).includes(subcategoryName);
+}
+
+function normalizeCatalogLabel(name: string): string {
+  return name.trim().toLowerCase().replace(/&/g, 'and').replace(/,/g, ' ').replace(/\s+/g, ' ');
+}
+
+/** Category labels that must not appear in add/edit/list pickers. */
+const DELISTED_CATEGORY_LABELS = new Set([
+  'dollies mounts and cranes',
+  'dollies and cranes',
+  'dollies',
+  'cranes',
+]);
+
+export function isDelistedCategoryName(name?: string | null): boolean {
+  if (!name) return false;
+  return DELISTED_CATEGORY_LABELS.has(normalizeCatalogLabel(name));
 }
 
 /** Maps catalog department names (and legacy top-level category names) to EIM ops departments. */
@@ -248,17 +259,7 @@ export const USE_COUNT_SUBCATEGORIES: Record<Department, { label: string; subcat
     { label: 'Power', subcategoryNames: ['Power'] },
     { label: 'Camera Package Component', subcategoryNames: ['Camera Package Component', 'Camera Package'] },
   ],
-  lights_grips: [
-    { label: 'Lighting', subcategoryNames: ['Lighting'] },
-    { label: 'Grip', subcategoryNames: ['Grip'] },
-    { label: 'Crane', subcategoryNames: ['Crane'] },
-    { label: 'Dolly', subcategoryNames: ['Dolly'] },
-    { label: 'Motorized Dolly', subcategoryNames: ['Motorized Dolly'] },
-    { label: 'Mounts', subcategoryNames: ['Mounts'] },
-    { label: 'Tracks', subcategoryNames: ['Tracks'] },
-    { label: 'Slider/Table Top Dolly', subcategoryNames: ['Slider/Table Top Dolly'] },
-    { label: 'SFX & Others', subcategoryNames: ['SFX & Others'] },
-  ],
+  lights_grips: [],
 };
 
 export const LOAN_STATUS_CONFIG: Record<string, { label: string; color: string; bgColor: string }> = {

@@ -4,7 +4,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { app } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
-import { runMigrations, seedEquipmentHierarchy, pruneUnusedObsoleteCatalog, remapCameraDepartmentTaxonomy, regenerateEquipmentCodes } from './migrate';
+import { runMigrations, seedEquipmentHierarchy, pruneUnusedObsoleteCatalog, remapCameraDepartmentTaxonomy, regenerateEquipmentCodes, deactivateLegacyLightsGripsTaxonomy } from './migrate';
 import { migrateInRowBlobsToFiles } from '../blob-store';
 
 let db: any = null;
@@ -77,6 +77,7 @@ function initializeDatabase(): void {
   // Power). Rewrite SKUs before the first catalog sync so prefixes stay in contract.
   regenerateEquipmentCodes(db);
   pruneUnusedObsoleteCatalog(db);
+  deactivateLegacyLightsGripsTaxonomy(db);
   // Drain any legacy in-row base64 attachments to on-disk files (idempotent).
   migrateInRowBlobsToFiles(db);
   seedDataIfEmpty();

@@ -1,10 +1,12 @@
 import {
   catalogDepartmentNames,
+  catalogDeptHasTaxonomy,
   categoriesInCatalogDept,
   subcategoriesInCategory,
   subSubsFor,
   EQUIPMENT_HIERARCHY,
   EQUIPMENT_SUB_SUBS,
+  isDelistedCategoryName,
 } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import type { Category, Subcategory, Department as CatalogDepartment } from '../../shared/types';
@@ -24,8 +26,9 @@ export function pickCatalogDepartment(
   const matches = departments.filter((d) => d.name === name);
   if (matches.length <= 1) return matches[0];
   const wanted = new Set(categoriesInCatalogDept(name));
-  const score = (deptId: string) =>
-    categories.filter((c) => c.department_id === deptId && wanted.has(c.name)).length;
+  const score = (deptId: string) => wanted.size > 0
+    ? categories.filter((c) => c.department_id === deptId && wanted.has(c.name)).length
+    : categories.filter((c) => c.department_id === deptId).length;
   return [...matches].sort((a, b) => score(b.id) - score(a.id) || (b.display_order ?? 0) - (a.display_order ?? 0))[0];
 }
 
@@ -43,6 +46,11 @@ function optionFor(name: string, row?: { id: string } | undefined, departmentId?
   return { id: row?.id || name, name, departmentId };
 }
 
+/** False when EQUIPMENT_HIERARCHY has no categories for this catalog department. */
+export function departmentHasTaxonomy(deptName?: string | null): boolean {
+  return catalogDeptHasTaxonomy(deptName);
+}
+
 export function latestCategories(
   categories: Category[],
   departments: CatalogDepartment[],
@@ -52,7 +60,13 @@ export function latestCategories(
   for (const deptName of catalogDepartmentNames(opsDept)) {
     const dept = pickCatalogDepartment(departments, deptName, categories);
     if (!dept) continue;
-    for (const catName of categoriesInCatalogDept(deptName)) {
+    const locked = categoriesInCatalogDept(deptName);
+    if (locked.length === 0) {
+      out.push(...categories.filter((c) => c.department_id === dept.id && !isDelistedCategoryName(c.name))
+        .sort((a, b) => a.display_order - b.display_order || a.name.localeCompare(b.name)));
+      continue;
+    }
+    for (const catName of locked) {
       const cat = categories.find((c) => c.department_id === dept.id && c.name === catName);
       if (cat) out.push(cat);
     }
@@ -67,16 +81,19 @@ export function categoryOptionsForDepartment(
 ): HierarchyOption[] {
   const dept = departments.find((d) => d.id === catalogDeptId);
   if (!dept) return [];
+  const locked = categoriesInCatalogDept(dept.name);
+  if (locked.length === 0) {
+    return categories
+      .filter((c) => c.department_id === catalogDeptId && !isDelistedCategoryName(c.name))
+      .sort((a, b) => a.display_order - b.display_order || a.name.localeCompare(b.name))
+      .map((c) => optionFor(c.name, c, catalogDeptId));
+  }
   const seen = new Set<string>();
   const out: HierarchyOption[] = [];
-  for (const name of categoriesInCatalogDept(dept.name)) {
+  for (const name of locked) {
+    if (isDelistedCategoryName(name)) continue;
     seen.add(name);
     out.push(optionFor(name, categories.find((c) => c.department_id === catalogDeptId && c.name === name), catalogDeptId));
-  }
-  for (const cat of categories) {
-    if (cat.department_id !== catalogDeptId || seen.has(cat.name)) continue;
-    seen.add(cat.name);
-    out.push(optionFor(cat.name, cat, catalogDeptId));
   }
   return out;
 }
@@ -94,7 +111,7 @@ export function categoryOptionsForOps(
       ? categoryOptionsForDepartment(categories, departments, dept.id)
       : categoriesInCatalogDept(deptName).map((name) => optionFor(name));
     for (const option of options) {
-      if (seen.has(option.name)) continue;
+      if (seen.has(option.name) || isDelistedCategoryName(option.name)) continue;
       seen.add(option.name);
       out.push(option);
     }
@@ -110,7 +127,13 @@ export function latestSubcategories(
   if (!category) return [];
   const dept = departments.find((d) => d.id === category.department_id);
   if (!dept) return [];
-  return subcategoriesInCategory(dept.name, category.name)
+  const locked = subcategoriesInCategory(dept.name, category.name);
+  if (locked.length === 0) {
+    return subcategories
+      .filter((s) => s.category_id === category.id)
+      .sort((a, b) => a.display_order - b.display_order || a.name.localeCompare(b.name));
+  }
+  return locked
     .map((name) => subcategories.find((s) => s.category_id === category.id && s.name === name))
     .filter((s): s is Subcategory => !!s);
 }
@@ -129,18 +152,18 @@ export function subcategoryOptionsForCategory(
     || categories.find((c) => c.department_id === catalogDeptId && c.name === categoryIdOrName);
   const categoryName = category?.name || categoryIdOrName;
   const categoryId = category?.id;
+  const locked = subcategoriesInCategory(dept.name, categoryName);
+  if (locked.length === 0) {
+    return subcategories
+      .filter((s) => categoryId && s.category_id === categoryId)
+      .sort((a, b) => a.display_order - b.display_order || a.name.localeCompare(b.name))
+      .map((s) => optionFor(s.name, s));
+  }
   const seen = new Set<string>();
   const out: HierarchyOption[] = [];
-  for (const name of subcategoriesInCategory(dept.name, categoryName)) {
+  for (const name of locked) {
     seen.add(name);
     out.push(optionFor(name, subcategories.find((s) => s.name === name && (!categoryId || s.category_id === categoryId))));
-  }
-  if (categoryId) {
-    for (const sub of subcategories) {
-      if (sub.category_id !== categoryId || seen.has(sub.name)) continue;
-      seen.add(sub.name);
-      out.push(optionFor(sub.name, sub));
-    }
   }
   return out;
 }
@@ -165,7 +188,20 @@ export function allSubcategoryOptionsForDepartment(
   if (!dept) return [];
   const out: HierarchyOption[] = [];
   const seen = new Set<string>();
-  for (const [catName, subNames] of Object.entries(EQUIPMENT_HIERARCHY[dept.name] ?? {})) {
+  const lockedTree = EQUIPMENT_HIERARCHY[dept.name] ?? {};
+  if (Object.keys(lockedTree).length === 0) {
+    const catIds = new Set(categories.filter((c) => c.department_id === catalogDeptId).map((c) => c.id));
+    return subcategories
+      .filter((s) => catIds.has(s.category_id))
+      .sort((a, b) => a.display_order - b.display_order || a.name.localeCompare(b.name))
+      .filter((s) => {
+        if (seen.has(s.name)) return false;
+        seen.add(s.name);
+        return true;
+      })
+      .map((s) => optionFor(s.name, s, catalogDeptId));
+  }
+  for (const [catName, subNames] of Object.entries(lockedTree)) {
     const cat = categories.find((c) => c.department_id === catalogDeptId && c.name === catName);
     for (const name of subNames) {
       if (seen.has(name)) continue;
@@ -177,12 +213,6 @@ export function allSubcategoryOptionsForDepartment(
       ));
     }
   }
-  const deptCatIds = new Set(categories.filter((c) => c.department_id === catalogDeptId).map((c) => c.id));
-  for (const sub of subcategories) {
-    if (!deptCatIds.has(sub.category_id) || seen.has(sub.name)) continue;
-    seen.add(sub.name);
-    out.push(optionFor(sub.name, sub, catalogDeptId));
-  }
   return out;
 }
 
@@ -193,11 +223,9 @@ export function subcategoryChoices(
   categoryIdOrName: string,
   categories: Category[],
 ): HierarchyOption[] {
-  const scoped = subcategoryOptionsForCategory(
+  return subcategoryOptionsForCategory(
     subcategories, departments, catalogDeptId, categoryIdOrName, categories,
   );
-  if (scoped.length > 0) return scoped;
-  return allSubcategoryOptionsForDepartment(subcategories, departments, catalogDeptId, categories);
 }
 
 export function allSubSubOptionsForCategory(categoryName: string): string[] {
@@ -248,12 +276,7 @@ export function subSubChoices(
       out.push(ss);
     }
   }
-  if (out.length > 0) return out;
-  if (categoryName) {
-    const forCat = allSubSubOptionsForCategory(categoryName);
-    if (forCat.length > 0) return forCat;
-  }
-  return catalogDeptName ? allSubSubOptionsForDepartment(catalogDeptName) : [];
+  return out;
 }
 
 export function categoryNameForSubcategory(catalogDeptName: string, subcategoryName: string): string | undefined {

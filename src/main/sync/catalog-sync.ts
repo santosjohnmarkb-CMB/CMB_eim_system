@@ -4,6 +4,8 @@ import { cloudService } from './cloud-service';
 import { coerceForCloud, offlineQueue } from './offline-queue';
 import { recordSchemaError } from './schema-health';
 import {
+  deactivateLegacyLightsGripsTaxonomy,
+  pruneUnusedObsoleteCatalog,
   remapCameraDepartmentTaxonomy,
   regenerateEquipmentCodes,
   seedEquipmentHierarchy,
@@ -384,6 +386,8 @@ export async function syncCatalogWithCloud(): Promise<void> {
     seedEquipmentHierarchy(db);
     remapCameraDepartmentTaxonomy(db);
     regenerateEquipmentCodes(db);
+    pruneUnusedObsoleteCatalog(db);
+    deactivateLegacyLightsGripsTaxonomy(db);
   } catch (err) {
     console.warn('[CatalogSync] Catalog canonicalize failed:', err);
   }
