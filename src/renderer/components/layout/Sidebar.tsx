@@ -2,23 +2,25 @@ import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Wrench, Settings, LogOut, Package, Boxes,
-  ChevronRight, ChevronDown, Camera, Lightbulb, PackageCheck, ShoppingCart, Archive, Truck,
+  ChevronRight, ChevronDown, Camera, Lightbulb, PackageCheck, ShoppingCart, Archive, Truck, Users,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuthStore } from '../../stores/auth.store';
 import eimLogo from '../../assets/eim-hor.png';
 import { useAppVersion } from '../../hooks/useAppVersion';
-import { DEPARTMENT_CONFIG } from '../../../shared/constants';
-import type { Department } from '../../../shared/constants';
+import { DEPARTMENT_CONFIG, EQUIPMENT_SECTION_CONFIG } from '../../../shared/constants';
+import type { Department, EquipmentSection } from '../../../shared/constants';
 
-const DEPT_ICON: Record<Department, React.ReactNode> = {
+const DEPT_ICON: Record<EquipmentSection, React.ReactNode> = {
   camera: <Camera size={16} />,
   lights_grips: <Lightbulb size={16} />,
+  personnel: <Users size={16} />,
 };
 
-const DEPT_COLOR: Record<Department, { active: string; hover: string }> = {
+const DEPT_COLOR: Record<EquipmentSection, { active: string; hover: string }> = {
   camera: { active: 'text-primary-400', hover: 'hover:text-primary-300' },
   lights_grips: { active: 'text-amber-400', hover: 'hover:text-amber-300' },
+  personnel: { active: 'text-violet-400', hover: 'hover:text-violet-300' },
 };
 
 function CollapsibleSection({ icon, label, open, onToggle, isActive, children }: {
@@ -53,7 +55,7 @@ function CollapsibleSection({ icon, label, open, onToggle, isActive, children }:
 }
 
 function DeptSubItem({ dept, active, onClick }: {
-  dept: Department; active: boolean; onClick: () => void;
+  dept: EquipmentSection; active: boolean; onClick: () => void;
 }) {
   return (
     <button
@@ -66,7 +68,7 @@ function DeptSubItem({ dept, active, onClick }: {
       )}
     >
       {DEPT_ICON[dept]}
-      <span>{DEPARTMENT_CONFIG[dept].shortLabel}</span>
+      <span>{EQUIPMENT_SECTION_CONFIG[dept].shortLabel}</span>
       {active && <ChevronRight size={14} className="ml-auto opacity-50" />}
     </button>
   );
@@ -94,7 +96,7 @@ export function Sidebar() {
     navigate('/login');
   };
 
-  const isEquipmentDeptActive = (dept: Department) =>
+  const isEquipmentDeptActive = (dept: EquipmentSection) =>
     location.pathname === `/equipment/${dept}`;
 
   // Admins get the full cross-department nav. Viewers get the same cross-department
@@ -135,7 +137,7 @@ export function Sidebar() {
               }}
               isActive={location.pathname.startsWith('/equipment')}
             >
-              {(Object.keys(DEPARTMENT_CONFIG) as Department[]).map((dept) => (
+              {(Object.keys(EQUIPMENT_SECTION_CONFIG) as EquipmentSection[]).map((dept) => (
                 <DeptSubItem
                   key={dept}
                   dept={dept}

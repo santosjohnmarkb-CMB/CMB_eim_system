@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { CAMERA_PACKAGE_BRANDS, catalogDeptHasTaxonomy, DEPARTMENT_CONFIG, EQUIPMENT_HIERARCHY, isDelistedCategoryName } from '../../shared/constants';
+import { CAMERA_PACKAGE_BRANDS, catalogDeptHasTaxonomy, DEPARTMENT_CONFIG, EQUIPMENT_HIERARCHY, isDelistedCategoryName, isPersonnelCatalogName } from '../../shared/constants';
 import { buildSkuPrefix, formatUnitCode } from '../../shared/equipment-code';
 
 interface Migration {
@@ -351,6 +351,9 @@ export function regenerateEquipmentCodes(db: any): void {
   const prefixByItem = new Map<string, string>();
   let itemNeedsRewrite = false;
   for (const item of items) {
+    // Keep 1 Take crew-rate codes as stored; rewriting them would break the
+    // rental personnel picker.
+    if (isPersonnelCatalogName(item.department_name)) continue;
     const prefix = buildSkuPrefix({
       departmentName: item.department_name,
       categoryName: item.category_name,
@@ -365,6 +368,7 @@ export function regenerateEquipmentCodes(db: any): void {
   if (itemNeedsRewrite) {
     // Park current codes so UNIQUE swaps cannot collide with a prefix we are about to write.
     for (const item of items) {
+      if (!prefixByItem.has(item.id)) continue;
       updateItem.run(`__tmp__${item.id}`, item.id);
     }
     for (const item of items) {

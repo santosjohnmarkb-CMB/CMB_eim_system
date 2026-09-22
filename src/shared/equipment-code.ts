@@ -1,5 +1,7 @@
 /** Structured equipment codes: `{D}-{CAT}-{BRAND}-{MODEL}` on the list row, `…-{NNN}` per unit. */
 
+import { isPersonnelCatalogName } from './constants';
+
 const VOWELS = new Set(['A', 'E', 'I', 'O', 'U']);
 
 function isConsonant(ch: string): boolean {
@@ -32,7 +34,10 @@ function firstLetter(word: string): string {
 }
 
 export function departmentLetter(departmentName: string | null | undefined): string {
-  return (departmentName || '').trim() === 'Camera' ? 'C' : 'L';
+  const n = (departmentName || '').trim();
+  if (n === 'Camera') return 'C';
+  if (isPersonnelCatalogName(n)) return 'P';
+  return 'L';
 }
 
 export function abbreviateCategory(name: string | null | undefined): string {

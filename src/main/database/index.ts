@@ -139,8 +139,13 @@ function ensureAdminRecoverable(): void {
       && hash.split(':')[1]!.length === 128;
 
     if (!isValid) {
-      db.prepare("UPDATE users SET password_hash = ?, is_active = 1 WHERE username = 'admin'")
-        .run(hashPassword('admin123'));
+      // Bump version so a catalog pull cannot immediately replace this with a
+      // 1 Take hash that EIM cannot verify (shared users table).
+      db.prepare(
+        `UPDATE users SET password_hash = ?, is_active = 1,
+                version = COALESCE(version, 1) + 1, updated_at = datetime('now')
+          WHERE username = 'admin'`
+      ).run(hashPassword('admin123'));
     }
   } catch (err) {
     console.error('[DB] ensureAdminRecoverable failed:', err);

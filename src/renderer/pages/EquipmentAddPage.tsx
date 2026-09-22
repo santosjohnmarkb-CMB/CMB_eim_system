@@ -5,8 +5,8 @@ import { useAuthStore } from '../stores/auth.store';
 import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
 import { useToast } from '../hooks';
-import { DEPARTMENT_CONFIG } from '../../shared/constants';
-import type { Department } from '../../shared/constants';
+import { EQUIPMENT_SECTION_CONFIG, parseEquipmentSection } from '../../shared/constants';
+import type { Department, EquipmentSection } from '../../shared/constants';
 import {
   latestDepartments,
   categoryOptionsForDepartment,
@@ -48,10 +48,10 @@ export function EquipmentAddPage() {
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === 'admin';
   const userDept = user?.department as Department | null;
-  const queryDept = params.get('dept');
-  const opsDept = (!isAdmin && userDept)
+  const queryDept = parseEquipmentSection(params.get('dept'));
+  const opsDept: EquipmentSection | null = (!isAdmin && userDept)
     ? userDept
-    : (queryDept === 'camera' || queryDept === 'lights_grips' ? queryDept : userDept);
+    : (queryDept || userDept);
 
   const catalogDepts = useMemo(
     () => latestDepartments(departments, opsDept, categories),
@@ -59,7 +59,7 @@ export function EquipmentAddPage() {
   );
 
   const defaultDeptId = useMemo(() => {
-    const preferred = opsDept ? DEPARTMENT_CONFIG[opsDept].categories[0] : catalogDepts[0]?.name;
+    const preferred = opsDept ? EQUIPMENT_SECTION_CONFIG[opsDept].categories[0] : catalogDepts[0]?.name;
     return catalogDepts.find((d) => d.name === preferred)?.id || catalogDepts[0]?.id || '';
   }, [catalogDepts, opsDept]);
 

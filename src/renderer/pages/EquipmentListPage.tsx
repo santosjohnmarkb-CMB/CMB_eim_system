@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Plus, ArrowLeft, Camera, Lightbulb, Printer, ChevronDown, Upload, Download } from 'lucide-react';
+import { Plus, ArrowLeft, Camera, Lightbulb, Printer, ChevronDown, Upload, Download, Users } from 'lucide-react';
 import { useEquipmentStore } from '../stores/equipment.store';
 import { Button } from '../components/common/Button';
 import { SearchBox } from '../components/common/SearchBox';
@@ -8,8 +8,8 @@ import { DataTable, type Column } from '../components/common/DataTable';
 import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
 import { EQUIPMENT_STATUS_CONFIG } from '../lib/constants';
-import { DEPARTMENT_CONFIG, opsDepartmentOf } from '../../shared/constants';
-import type { Department } from '../../shared/constants';
+import { EQUIPMENT_SECTION_CONFIG, equipmentSectionOf, parseEquipmentSection } from '../../shared/constants';
+import type { EquipmentSection } from '../../shared/constants';
 import { categoryOptionsForOps, subcategoryOptionsForCategory, subSubOptionsFor } from '../lib/catalogHierarchy';
 import type { EquipmentWithAsset, EquipmentStatus, BulkImportResult, CsvCategoryPreview } from '../../shared/types';
 import { useAuthStore } from '../stores/auth.store';
@@ -30,9 +30,16 @@ const statusVariantMap: Record<string, 'success' | 'info' | 'warning' | 'danger'
   IN_TRANSIT: 'info', RETIRED: 'default', MISSING: 'danger', FOR_INSPECTION: 'purple',
 };
 
-const DEPT_ICONS: Record<Department, typeof Camera> = {
+const DEPT_ICONS: Record<EquipmentSection, typeof Camera> = {
   camera: Camera,
   lights_grips: Lightbulb,
+  personnel: Users,
+};
+
+const DEPT_ICON_COLOR: Record<EquipmentSection, string> = {
+  camera: 'text-primary-400',
+  lights_grips: 'text-amber-400',
+  personnel: 'text-violet-400',
 };
 
 function fmtDate(d: string | null | undefined) {
@@ -66,7 +73,7 @@ function summarizeStatus(item: EquipmentWithAsset): { status: string; mixed: boo
 // Default ordering for the equipment list. Certain groups should surface first on
 // initial viewing: camera/lens/special for the camera dept, lighting for lights & grips.
 // Lower rank sorts first; items within the same rank keep their existing order.
-function defaultGroupRank(item: EquipmentWithAsset, department: Department | null): number {
+function defaultGroupRank(item: EquipmentWithAsset, department: EquipmentSection | null): number {
   const cat = (item.category_name ?? '').toLowerCase();
   if (department === 'camera') {
     if (cat.includes('support')) return 3;
@@ -87,8 +94,8 @@ function defaultGroupRank(item: EquipmentWithAsset, department: Department | nul
 
 export function EquipmentListPage() {
   const { dept } = useParams<{ dept: string }>();
-  const department = (dept === 'camera' || dept === 'lights_grips') ? dept as Department : null;
-  const deptConfig = department ? DEPARTMENT_CONFIG[department] : null;
+  const department = parseEquipmentSection(dept);
+  const deptConfig = department ? EQUIPMENT_SECTION_CONFIG[department] : null;
   const DeptIcon = department ? DEPT_ICONS[department] : null;
 
   const { items, departments, categories, subcategories, loading, fetchError, fetchAll, fetchDepartments, fetchCategories, fetchSubcategories, importCsv, previewCsvCategories } = useEquipmentStore();
@@ -122,9 +129,8 @@ export function EquipmentListPage() {
   useEffect(() => { fetchAll(); fetchDepartments(); fetchCategories(); fetchSubcategories(); }, [fetchAll, fetchDepartments, fetchCategories, fetchSubcategories]);
 
   const deptItems = useMemo(() => {
-    if (!department) return items;
-    const matched = items.filter((i) => opsDepartmentOf(i.department_name, i.category_name) === department);
-    return matched;
+    if (!department) return items.filter((i) => equipmentSectionOf(i.department_name, i.category_name) !== 'personnel');
+    return items.filter((i) => equipmentSectionOf(i.department_name, i.category_name) === department);
   }, [items, department]);
 
   const hierarchyCategories = useMemo(
@@ -237,18 +243,20 @@ export function EquipmentListPage() {
       .map((x) => x.item);
   }, [deptItems, matchesFilters, department]);
 
-  // Departments this user is allowed to print. Admins get both; a department user only theirs.
-  const printableDepts = useMemo<Department[]>(() => {
+  // Departments this user is allowed to print. Admins get both gear lists; a
+  // department user only theirs. Personnel prints only its own designations.
+  const printableDepts = useMemo<EquipmentSection[]>(() => {
+    if (department === 'personnel') return ['personnel'];
     if (isAdmin) return ['camera', 'lights_grips'];
     if (userDept === 'camera' || userDept === 'lights_grips') return [userDept];
     if (department) return [department];
     return [];
   }, [isAdmin, userDept, department]);
 
-  const buildPrintSection = (d: Department) => {
+  const buildPrintSection = (d: EquipmentSection) => {
     // Respect the active page filters so the printout matches what's visible on screen.
     const list = items
-      .filter((i) => opsDepartmentOf(i.department_name, i.category_name) === d && matchesFilters(i))
+      .filter((i) => equipmentSectionOf(i.department_name, i.category_name) === d && matchesFilters(i))
       .map((item, index) => ({ item, index }))
       .sort((a, b) => defaultGroupRank(a.item, d) - defaultGroupRank(b.item, d) || a.index - b.index)
       .map((x) => x.item);
@@ -270,19 +278,19 @@ export function EquipmentListPage() {
         <td>${escapeHtml(statusLabel)}</td>
       </tr>`;
     }).join('');
-    return `<h2>${escapeHtml(DEPARTMENT_CONFIG[d].label)} (${list.length})</h2>
+    return `<h2>${escapeHtml(EQUIPMENT_SECTION_CONFIG[d].label)} (${list.length})</h2>
       <table>
         <thead><tr><th>Code</th><th>Equipment</th><th>Category</th><th>Supplier</th><th>Delivered</th><th>Qty</th><th>Avail</th><th>Status</th></tr></thead>
         <tbody>${rows || '<tr><td colspan="8">No equipment</td></tr>'}</tbody>
       </table>`;
   };
 
-  const printEquipment = (scope: 'all' | Department) => {
+  const printEquipment = (scope: 'all' | EquipmentSection) => {
     setPrintMenuOpen(false);
-    const depts: Department[] = scope === 'all' ? printableDepts : [scope];
+    const depts: EquipmentSection[] = scope === 'all' ? printableDepts : [scope];
     const title = scope === 'all'
-      ? (depts.length > 1 ? 'All Equipment' : DEPARTMENT_CONFIG[depts[0]!].label)
-      : DEPARTMENT_CONFIG[scope].label;
+      ? (depts.length > 1 ? 'All Equipment' : EQUIPMENT_SECTION_CONFIG[depts[0]!].label)
+      : EQUIPMENT_SECTION_CONFIG[scope].label;
     const body = `
       <div class="header">
         <h1>Equipment List — ${escapeHtml(title)}</h1>
@@ -329,17 +337,23 @@ export function EquipmentListPage() {
   // Client-side CSV template so managers can bulk-load without a backend round trip.
   // base_price is only pre-filled for admins (managers can't set prices).
   const handleDownloadTemplate = () => {
-    const sample: Record<string, string> = {
-      name: 'ARRI Alexa Mini LF', department: 'Camera', category: 'Camera',
-      sub_category: 'Camera Body', sub_sub_category: '4K', item_type: 'standalone', brand: 'ARRI', model: 'Alexa Mini LF',
-      qty_available: '2', pricing_type: 'per_day', base_price: isAdmin ? '15000' : '', notes: '',
-    };
+    const sample: Record<string, string> = department === 'personnel'
+      ? {
+        name: 'Director of Photography', department: 'Personnel', category: 'Camera',
+        sub_category: '', sub_sub_category: '', item_type: 'standalone', brand: '', model: '',
+        qty_available: '1', pricing_type: 'per_day', base_price: isAdmin ? '0' : '', notes: '',
+      }
+      : {
+        name: 'ARRI Alexa Mini LF', department: 'Camera', category: 'Camera',
+        sub_category: 'Camera Body', sub_sub_category: '4K', item_type: 'standalone', brand: 'ARRI', model: 'Alexa Mini LF',
+        qty_available: '2', pricing_type: 'per_day', base_price: isAdmin ? '15000' : '', notes: '',
+      };
     const csv = EQUIPMENT_CSV_HEADERS.join(',') + '\n' + EQUIPMENT_CSV_HEADERS.map((h) => sample[h] ?? '').join(',') + '\n';
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'equipment_import_template.csv';
+    a.download = department === 'personnel' ? 'personnel_import_template.csv' : 'equipment_import_template.csv';
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -413,9 +427,9 @@ export function EquipmentListPage() {
             <ArrowLeft size={16} />
           </button>
         )}
-        {DeptIcon && <DeptIcon size={22} className={department === 'camera' ? 'text-primary-400' : 'text-amber-400'} />}
+        {DeptIcon && <DeptIcon size={22} className={department ? DEPT_ICON_COLOR[department] : ''} />}
         <h1 className="text-lg font-semibold text-surface-100">
-          {deptConfig ? `${deptConfig.shortLabel} Equipment` : 'All Equipment'}
+          {deptConfig ? (department === 'personnel' ? deptConfig.label : `${deptConfig.shortLabel} Equipment`) : 'All Equipment'}
         </h1>
       </div>
 
@@ -453,7 +467,11 @@ export function EquipmentListPage() {
       {/* Row 2: Action buttons */}
       <div className="flex items-center gap-3">
         <div className="relative" ref={printMenuRef}>
-          {isAdmin ? (
+          {department === 'personnel' ? (
+            <Button variant="secondary" onClick={() => printEquipment('personnel')}>
+              <Printer size={16} /> Print List
+            </Button>
+          ) : isAdmin ? (
             <>
               <Button variant="secondary" onClick={() => setPrintMenuOpen((o) => !o)}>
                 <Printer size={16} /> Print <ChevronDown size={14} />
@@ -479,7 +497,7 @@ export function EquipmentListPage() {
             <Button variant="secondary" onClick={handleDownloadTemplate}><Download size={16} /> Template</Button>
             <Button variant="secondary" onClick={() => fileInputRef.current?.click()} loading={isImporting}><Upload size={16} /> Import CSV</Button>
             <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleFileSelected} />
-            <Button onClick={() => navigate(department ? `/equipment/new?dept=${department}` : '/equipment/new')}><Plus size={16} /> Add Equipment</Button>
+            <Button onClick={() => navigate(department ? `/equipment/new?dept=${department}` : '/equipment/new')}><Plus size={16} /> {department === 'personnel' ? 'Add Personnel' : 'Add Equipment'}</Button>
           </>
         )}
       </div>
@@ -493,7 +511,7 @@ export function EquipmentListPage() {
         </div>
       )}
       <div className="glass-panel rounded-xl overflow-hidden">
-        <DataTable columns={columns} data={filtered} onRowClick={(item) => navigate(`/equipment/detail/${item.id}`)} loading={loading} emptyMessage="No equipment found" />
+        <DataTable columns={columns} data={filtered} onRowClick={(item) => navigate(`/equipment/detail/${item.id}`)} loading={loading} emptyMessage={department === 'personnel' ? 'No designations found' : 'No equipment found'} />
       </div>
       <p className="text-xs text-surface-600">
         {filtered.length === deptItems.length

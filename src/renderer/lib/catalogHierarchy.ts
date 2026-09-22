@@ -7,8 +7,10 @@ import {
   EQUIPMENT_HIERARCHY,
   EQUIPMENT_SUB_SUBS,
   isDelistedCategoryName,
+  isPersonnelCatalogName,
+  PERSONNEL_CATALOG_DEPT,
 } from '../../shared/constants';
-import type { Department } from '../../shared/constants';
+import type { EquipmentSection } from '../../shared/constants';
 import type { Category, Subcategory, Department as CatalogDepartment } from '../../shared/types';
 
 export interface HierarchyOption {
@@ -34,9 +36,16 @@ export function pickCatalogDepartment(
 
 export function latestDepartments(
   departments: CatalogDepartment[],
-  opsDept: Department | null,
+  opsDept: EquipmentSection | null,
   categories: Category[] = [],
 ): CatalogDepartment[] {
+  if (opsDept === 'personnel') {
+    const exact = pickCatalogDepartment(departments, PERSONNEL_CATALOG_DEPT, categories);
+    const rest = departments
+      .filter((d) => isPersonnelCatalogName(d.name) && d.id !== exact?.id)
+      .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0) || a.name.localeCompare(b.name));
+    return exact ? [exact, ...rest] : rest;
+  }
   return catalogDepartmentNames(opsDept)
     .map((name) => pickCatalogDepartment(departments, name, categories))
     .filter((d): d is CatalogDepartment => !!d);
@@ -44,6 +53,13 @@ export function latestDepartments(
 
 function optionFor(name: string, row?: { id: string } | undefined, departmentId?: string): HierarchyOption {
   return { id: row?.id || name, name, departmentId };
+}
+
+/** Designations are stored as categories named Personnel… under Camera / Lights & Grips. */
+function personnelCategories(categories: Category[]): Category[] {
+  return categories
+    .filter((c) => isPersonnelCatalogName(c.name) && !isDelistedCategoryName(c.name))
+    .sort((a, b) => a.display_order - b.display_order || a.name.localeCompare(b.name));
 }
 
 /** False when EQUIPMENT_HIERARCHY has no categories for this catalog department. */
@@ -54,15 +70,14 @@ export function departmentHasTaxonomy(deptName?: string | null): boolean {
 export function latestCategories(
   categories: Category[],
   departments: CatalogDepartment[],
-  opsDept: Department | null,
+  opsDept: EquipmentSection | null,
 ): Category[] {
+  if (opsDept === 'personnel') return personnelCategories(categories);
   const out: Category[] = [];
-  for (const deptName of catalogDepartmentNames(opsDept)) {
-    const dept = pickCatalogDepartment(departments, deptName, categories);
-    if (!dept) continue;
-    const locked = categoriesInCatalogDept(deptName);
+  for (const dept of latestDepartments(departments, opsDept, categories)) {
+    const locked = categoriesInCatalogDept(dept.name);
     if (locked.length === 0) {
-      out.push(...categories.filter((c) => c.department_id === dept.id && !isDelistedCategoryName(c.name))
+      out.push(...categories.filter((c) => c.department_id === dept.id && !isDelistedCategoryName(c.name) && !isPersonnelCatalogName(c.name))
         .sort((a, b) => a.display_order - b.display_order || a.name.localeCompare(b.name)));
       continue;
     }
@@ -84,7 +99,7 @@ export function categoryOptionsForDepartment(
   const locked = categoriesInCatalogDept(dept.name);
   if (locked.length === 0) {
     return categories
-      .filter((c) => c.department_id === catalogDeptId && !isDelistedCategoryName(c.name))
+      .filter((c) => c.department_id === catalogDeptId && !isDelistedCategoryName(c.name) && !isPersonnelCatalogName(c.name))
       .sort((a, b) => a.display_order - b.display_order || a.name.localeCompare(b.name))
       .map((c) => optionFor(c.name, c, catalogDeptId));
   }
@@ -101,17 +116,24 @@ export function categoryOptionsForDepartment(
 export function categoryOptionsForOps(
   categories: Category[],
   departments: CatalogDepartment[],
-  opsDept: Department | null,
+  opsDept: EquipmentSection | null,
 ): HierarchyOption[] {
+  if (opsDept === 'personnel') {
+    const cats = personnelCategories(categories);
+    const nameCount = new Map<string, number>();
+    for (const c of cats) nameCount.set(c.name, (nameCount.get(c.name) || 0) + 1);
+    return cats.map((c) => {
+      const dept = departments.find((d) => d.id === c.department_id);
+      const label = (nameCount.get(c.name) || 0) > 1 && dept ? `${c.name} (${dept.name})` : c.name;
+      return optionFor(label, c, c.department_id);
+    });
+  }
   const out: HierarchyOption[] = [];
   const seen = new Set<string>();
-  for (const deptName of catalogDepartmentNames(opsDept)) {
-    const dept = pickCatalogDepartment(departments, deptName, categories);
-    const options = dept
-      ? categoryOptionsForDepartment(categories, departments, dept.id)
-      : categoriesInCatalogDept(deptName).map((name) => optionFor(name));
+  for (const dept of latestDepartments(departments, opsDept, categories)) {
+    const options = categoryOptionsForDepartment(categories, departments, dept.id);
     for (const option of options) {
-      if (seen.has(option.name) || isDelistedCategoryName(option.name)) continue;
+      if (seen.has(option.name) || isDelistedCategoryName(option.name) || isPersonnelCatalogName(option.name)) continue;
       seen.add(option.name);
       out.push(option);
     }

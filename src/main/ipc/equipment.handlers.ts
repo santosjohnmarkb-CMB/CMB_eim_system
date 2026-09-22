@@ -185,6 +185,16 @@ export function registerEquipmentHandlers(): void {
     );
   };
 
+  // Clone purchase/location fields from a sibling unit. Prefer a live unit; if
+  // every unit is RETIRED/MISSING, still inherit from one of those so growing
+  // quantity does not insert blank purchase metadata.
+  const templateAsset = (equipmentId: string, preferred?: any): any | undefined => {
+    if (preferred) return preferred;
+    return db.prepare(
+      'SELECT * FROM equipment_assets WHERE equipment_id = ? ORDER BY created_at, id LIMIT 1',
+    ).get(equipmentId);
+  };
+
   // Reject touching an asset (by asset_id) that belongs to another department.
   const assertAssetInDepartment = (event: any, assetId: string): void => {
     const dept = sessionDepartment(event);
@@ -447,7 +457,7 @@ export function registerEquipmentHandlers(): void {
     liveUnits.sort((a, b) => (trailingUnitCount(a.equipment_code) ?? 0) - (trailingUnitCount(b.equipment_code) ?? 0));
 
     if (desired > liveUnits.length) {
-      const template = liveUnits[0];
+      const template = templateAsset(equipmentId, liveUnits[0]);
       const now = new Date().toISOString();
       const counts = nextUnitCounts(usedCountsForPrefix(prefix), desired - liveUnits.length);
       for (let i = 0; i < counts.length; i++) {
@@ -523,7 +533,7 @@ export function registerEquipmentHandlers(): void {
 
     const newUnits = units.filter((u) => !u.id);
     if (newUnits.length > 0) {
-      const template = live[0];
+      const template = templateAsset(equipmentId, live[0]);
       const now = new Date().toISOString();
       const counts = nextUnitCounts(usedCountsForPrefix(prefix), newUnits.length);
       for (let i = 0; i < newUnits.length; i++) {

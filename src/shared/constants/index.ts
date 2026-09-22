@@ -15,6 +15,8 @@ export const EQUIPMENT_HIERARCHY: Record<string, Record<string, string[]>> = {
   'Lights and Grips': {},
   'Power & Transport': {},
   'Special Equipment': {},
+  // 1 Take crew-rate catalog. Open taxonomy; designations come from CSV / Add.
+  'Personnel': {},
 };
 
 /** Fourth-level labels keyed by `category::subcategory`. Stored on equipment_items.sub_subcategory. */
@@ -170,6 +172,20 @@ export function isEimAppRole(role: unknown): boolean {
 
 export type Department = 'camera' | 'lights_grips';
 
+/** Equipment sidebar / list sections. Personnel is catalog-only, not a user department. */
+export type EquipmentSection = Department | 'personnel';
+
+export const PERSONNEL_CATALOG_DEPT = 'Personnel';
+
+export function isPersonnelCatalogName(name?: string | null): boolean {
+  return typeof name === 'string' && name.trim().toLowerCase().startsWith('personnel');
+}
+
+export function parseEquipmentSection(value?: string | null): EquipmentSection | null {
+  if (value === 'camera' || value === 'lights_grips' || value === 'personnel') return value;
+  return null;
+}
+
 export const DEPARTMENT_CONFIG: Record<Department, { label: string; shortLabel: string; icon: string; categories: string[] }> = {
   camera: {
     label: 'Camera Department',
@@ -186,9 +202,19 @@ export const DEPARTMENT_CONFIG: Record<Department, { label: string; shortLabel: 
   },
 };
 
-export function catalogDepartmentNames(opsDept?: Department | null): string[] {
+export const EQUIPMENT_SECTION_CONFIG: Record<EquipmentSection, { label: string; shortLabel: string; icon: string; categories: string[] }> = {
+  ...DEPARTMENT_CONFIG,
+  personnel: {
+    label: 'Personnel',
+    shortLabel: 'Personnel',
+    icon: 'Users',
+    categories: [PERSONNEL_CATALOG_DEPT],
+  },
+};
+
+export function catalogDepartmentNames(opsDept?: EquipmentSection | null): string[] {
   if (!opsDept) return Object.keys(EQUIPMENT_HIERARCHY);
-  return DEPARTMENT_CONFIG[opsDept].categories;
+  return EQUIPMENT_SECTION_CONFIG[opsDept].categories;
 }
 
 export function categoriesInCatalogDept(catalogDeptName: string): string[] {
@@ -240,9 +266,15 @@ export const CATEGORY_TO_DEPARTMENT: Record<string, Department> = {
 };
 
 export function opsDepartmentOf(departmentName?: string | null, categoryName?: string | null): Department | null {
+  if (isPersonnelCatalogName(departmentName) || isPersonnelCatalogName(categoryName)) return null;
   if (departmentName && CATEGORY_TO_DEPARTMENT[departmentName]) return CATEGORY_TO_DEPARTMENT[departmentName];
   if (categoryName && CATEGORY_TO_DEPARTMENT[categoryName]) return CATEGORY_TO_DEPARTMENT[categoryName];
   return null;
+}
+
+export function equipmentSectionOf(departmentName?: string | null, categoryName?: string | null): EquipmentSection | null {
+  if (isPersonnelCatalogName(departmentName) || isPersonnelCatalogName(categoryName)) return 'personnel';
+  return opsDepartmentOf(departmentName, categoryName);
 }
 
 export const catalogDeptNamesForOps = catalogDepartmentNames;

@@ -56,11 +56,6 @@ function hasDepartmentId(row: any): boolean {
   return Boolean(row && row.department_id);
 }
 
-/** 1 Take crew-rate catalog. EIM must not ingest or deactivate it. */
-export function isPersonnelCatalogName(name: unknown): boolean {
-  return typeof name === 'string' && name.trim().toLowerCase().startsWith('personnel');
-}
-
 function pickCatalogColumns(table: CatalogTable, row: Record<string, unknown>): Record<string, unknown> {
   const allowed = new Set(CATALOG_CLOUD_COLUMNS[table]);
   const rec: Record<string, unknown> = {};
@@ -85,13 +80,10 @@ function filterCatalogPullRows(table: CatalogTable, cloudRows: any[], db: any): 
       .filter((r: any) => isEimAppRole(r.role))
       .map((r: any) => ({ ...r, role: normalizeEimRole(r.role) }));
   }
-  if (table === 'departments') {
-    return cloudRows.filter((r: any) => r && !isPersonnelCatalogName(r.name));
-  }
   if (table === 'categories') {
     const keepDepts = new Set(
       (db.prepare(
-        `SELECT id FROM departments WHERE name NOT LIKE 'Personnel%'`,
+        `SELECT id FROM departments`,
       ).all() as { id: string }[]).map((r) => r.id),
     );
     return cloudRows.filter((r: any) => hasDepartmentId(r) && keepDepts.has(r.department_id));
@@ -99,7 +91,7 @@ function filterCatalogPullRows(table: CatalogTable, cloudRows: any[], db: any): 
   if (table === 'equipment_items') {
     const keepDepts = new Set(
       (db.prepare(
-        `SELECT id FROM departments WHERE is_active = 1 AND name NOT LIKE 'Personnel%'`,
+        `SELECT id FROM departments WHERE is_active = 1`,
       ).all() as { id: string }[]).map((r) => r.id),
     );
     return cloudRows.filter((r: any) => hasDepartmentId(r) && keepDepts.has(r.department_id));
@@ -109,8 +101,7 @@ function filterCatalogPullRows(table: CatalogTable, cloudRows: any[], db: any): 
       (db.prepare(
         `SELECT c.id FROM categories c
          JOIN departments d ON d.id = c.department_id
-         WHERE c.department_id IS NOT NULL AND TRIM(COALESCE(c.department_id, '')) <> ''
-           AND d.name NOT LIKE 'Personnel%'`,
+         WHERE c.department_id IS NOT NULL AND TRIM(COALESCE(c.department_id, '')) <> ''`,
       ).all() as { id: string }[]).map((r) => r.id),
     );
     return cloudRows.filter((r: any) => r && validParents.has(r.category_id));
@@ -120,13 +111,11 @@ function filterCatalogPullRows(table: CatalogTable, cloudRows: any[], db: any): 
 
 function canApplyCatalogRow(table: CatalogTable, row: any, db: any): boolean {
   if (!row) return false;
-  if (table === 'departments') return !isPersonnelCatalogName(row.name);
   if (table === 'equipment_items' || table === 'categories') {
     if (!hasDepartmentId(row)) return false;
     return Boolean(
       db.prepare(
-        `SELECT 1 AS ok FROM departments
-         WHERE id = ? AND name NOT LIKE 'Personnel%' LIMIT 1`,
+        `SELECT 1 AS ok FROM departments WHERE id = ? LIMIT 1`,
       ).get(row.department_id),
     );
   }
@@ -137,7 +126,6 @@ function canApplyCatalogRow(table: CatalogTable, row: any, db: any): boolean {
         `SELECT 1 AS ok FROM categories c
          JOIN departments d ON d.id = c.department_id
          WHERE c.id = ? AND c.department_id IS NOT NULL AND TRIM(COALESCE(c.department_id, '')) <> ''
-           AND d.name NOT LIKE 'Personnel%'
          LIMIT 1`,
       ).get(row.category_id),
     );
@@ -156,7 +144,10 @@ function upsertLocalRow(db: any, table: CatalogTable, row: Record<string, unknow
     .filter(k => k !== 'id')
     .map(k => {
       if (k === 'password_hash') {
-        return `password_hash = CASE WHEN length(excluded.password_hash) > 0 AND excluded.password_hash LIKE '%:%' THEN excluded.password_hash ELSE ${table}.password_hash END`;
+        // EIM stores scrypt as 32-hex-salt : 128-hex-digest (161 chars). 1 Take
+        // hashes also contain a colon but are a different scheme — applying them
+        // makes auth:login fail for every EIM user.
+        return `password_hash = CASE WHEN length(excluded.password_hash) = 161 AND substr(excluded.password_hash, 33, 1) = ':' THEN excluded.password_hash ELSE ${table}.password_hash END`;
       }
       return `${k} = excluded.${k}`;
     })
@@ -194,23 +185,23 @@ function localRowsForCatalogPush(db: any, table: CatalogTable): any[] {
       return db.prepare(`
         SELECT s.* FROM subcategories s
         JOIN categories c ON c.id = s.category_id AND c.is_active = 1
-        JOIN departments d ON d.id = c.department_id AND d.is_active = 1 AND d.name NOT LIKE 'Personnel%'
+        JOIN departments d ON d.id = c.department_id AND d.is_active = 1
         WHERE s.is_active = 1
       `).all();
     case 'categories':
       return db.prepare(`
         SELECT c.* FROM categories c
-        JOIN departments d ON d.id = c.department_id AND d.is_active = 1 AND d.name NOT LIKE 'Personnel%'
+        JOIN departments d ON d.id = c.department_id AND d.is_active = 1
         WHERE c.is_active = 1
       `).all();
     case 'departments':
       return db.prepare(`
-        SELECT * FROM departments WHERE is_active = 1 AND name NOT LIKE 'Personnel%'
+        SELECT * FROM departments WHERE is_active = 1
       `).all();
     case 'equipment_items':
       return db.prepare(`
         SELECT e.* FROM equipment_items e
-        JOIN departments d ON d.id = e.department_id AND d.name NOT LIKE 'Personnel%'
+        JOIN departments d ON d.id = e.department_id
         JOIN categories c ON c.id = e.category_id AND c.is_active = 1
         LEFT JOIN subcategories s ON s.id = e.subcategory_id
         WHERE e.is_active = 1
@@ -235,7 +226,7 @@ function adoptCloudCatalogIds(db: any, cloudIds: Map<CatalogTable, Set<string>>)
   db.pragma('foreign_keys = OFF');
   try {
     const depts = db.prepare(
-      `SELECT id, name FROM departments WHERE name NOT LIKE 'Personnel%' ORDER BY is_active DESC, display_order, id`,
+      `SELECT id, name FROM departments ORDER BY is_active DESC, display_order, id`,
     ).all() as Array<{ id: string; name: string }>;
     const byDeptName = new Map<string, string[]>();
     for (const d of depts) {

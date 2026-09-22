@@ -52,6 +52,7 @@ function RoleGuard({ roles, children }: { roles: string[]; children: React.React
 function DepartmentGuard({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((s) => s.user);
   const { dept } = useParams<{ dept: string }>();
+  if (dept === 'personnel') return <>{children}</>;
   if (user && user.role !== 'admin' && user.department && dept && dept !== user.department) {
     return <Navigate to={`/equipment/${user.department}`} replace />;
   }
