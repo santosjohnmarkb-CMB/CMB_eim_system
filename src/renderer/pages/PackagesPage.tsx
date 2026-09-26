@@ -12,6 +12,8 @@ import { useToast } from '../hooks';
 import { ipcInvoke } from '../lib/ipc';
 import { IPC_CHANNELS } from '../lib/constants';
 import type { PackageDefinition, EquipmentWithAsset, BulkImportResult, ItemType } from '../../shared/types';
+import { DEPARTMENT_CONFIG } from '../../shared/constants';
+import { categoryListLabel, groupByCategoryThenSubcategory, PICKER_OMIT_CATEGORIES } from '../lib/catalogHierarchy';
 
 const MAIN_ITEM_TYPES: ItemType[] = ['package_main'];
 const COMPONENT_ITEM_TYPES: ItemType[] = ['package_component', 'add_on'];
@@ -588,6 +590,7 @@ function PackageForm({ onSubmit, onCancel, initial, submitLabel = 'Create Packag
         <EquipmentPickerModal
           title="Select Main Equipment"
           multi={false}
+          omitCategories={PICKER_OMIT_CATEGORIES}
           itemTypes={MAIN_ITEM_TYPES}
           emptyHint="No Package Main equipment found. Mark an item as Package Main when adding or editing equipment."
           excludeIds={mainExcludeIds}
@@ -629,12 +632,18 @@ function PackageForm({ onSubmit, onCancel, initial, submitLabel = 'Create Packag
 // backend already filters to the caller's department), so managers can only pick
 // items from their own department.
 
-function EquipmentPickerModal({ title, multi, excludeIds, itemTypes, emptyHint, onConfirm, onClose }: {
+const PICKER_CATALOG_DEPTS = [
+  ...DEPARTMENT_CONFIG.camera.categories,
+  ...DEPARTMENT_CONFIG.lights_grips.categories,
+];
+
+function EquipmentPickerModal({ title, multi, excludeIds, itemTypes, emptyHint, omitCategories = [], onConfirm, onClose }: {
   title: string;
   multi: boolean;
   excludeIds: Set<string>;
   itemTypes: ItemType[];
   emptyHint: string;
+  omitCategories?: string[];
   onConfirm: (items: { equipment: EquipmentWithAsset; qty: number }[]) => void;
   onClose: () => void;
 }) {
@@ -647,8 +656,8 @@ function EquipmentPickerModal({ title, multi, excludeIds, itemTypes, emptyHint, 
   useEffect(() => { fetchAll(); fetchCategories(); }, [fetchAll, fetchCategories]);
 
   const typedItems = useMemo(
-    () => items.filter((i) => itemTypes.includes(i.item_type)),
-    [items, itemTypes],
+    () => items.filter((i) => itemTypes.includes(i.item_type) && !omitCategories.includes(i.category_name || '')),
+    [items, itemTypes, omitCategories],
   );
 
   const categoryNames = useMemo(() => {
@@ -656,7 +665,10 @@ function EquipmentPickerModal({ title, multi, excludeIds, itemTypes, emptyHint, 
     for (const item of typedItems) {
       if (item.category_name) names.add(item.category_name);
     }
-    return Array.from(names).sort();
+    return groupByCategoryThenSubcategory(
+      Array.from(names).map((category_name) => ({ category_name, subcategory_name: '' })),
+      PICKER_CATALOG_DEPTS,
+    ).map((group) => group.category);
   }, [typedItems]);
 
   const available = useMemo(() => {
@@ -679,6 +691,11 @@ function EquipmentPickerModal({ title, multi, excludeIds, itemTypes, emptyHint, 
       itemTypeRank(a.item_type) - itemTypeRank(b.item_type)
       || compareBrandThenName(a.brand, a.name, b.brand, b.name, dir));
   }, [typedItems, excludeIds, search, categoryFilter, sort]);
+
+  const grouped = useMemo(
+    () => groupByCategoryThenSubcategory(available, PICKER_CATALOG_DEPTS),
+    [available],
+  );
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -736,7 +753,7 @@ function EquipmentPickerModal({ title, multi, excludeIds, itemTypes, emptyHint, 
             className="px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-200 shrink-0"
           >
             <option value="">All Categories</option>
-            {categoryNames.map((name) => (<option key={name} value={name}>{name}</option>))}
+            {categoryNames.map((name) => (<option key={name} value={name}>{categoryListLabel(name)}</option>))}
           </select>
           <select
             value={sort}
@@ -766,7 +783,13 @@ function EquipmentPickerModal({ title, multi, excludeIds, itemTypes, emptyHint, 
         <div className="max-h-80 overflow-y-auto space-y-1 pr-1">
           {available.length === 0 ? (
             <p className="text-sm text-surface-500 text-center py-8 px-4">{emptyHint}</p>
-          ) : available.map((item) => {
+          ) : grouped.map((group) => (
+            <div key={group.category} className="space-y-1">
+              <p className="px-1 pt-2 text-xs font-semibold uppercase tracking-wide text-surface-300">{group.label}</p>
+              {group.subcategories.map((sub) => (
+                <div key={sub.label} className="space-y-1">
+                  <p className="px-2 text-2xs font-medium uppercase tracking-wide text-surface-500">{sub.label}</p>
+                  {sub.items.map((item) => {
             const isSel = item.id in selected;
             const catLabel = [item.category_name, item.subcategory_name, item.sub_subcategory].filter(Boolean).join(' · ');
             return (
@@ -794,7 +817,11 @@ function EquipmentPickerModal({ title, multi, excludeIds, itemTypes, emptyHint, 
                 )}
               </div>
             );
-          })}
+                  })}
+                </div>
+              ))}
+            </div>
+          ))}
         </div>
 
         <div className="flex items-center justify-between pt-3 border-t border-surface-800/60">

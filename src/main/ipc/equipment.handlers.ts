@@ -861,16 +861,19 @@ export function registerEquipmentHandlers(): void {
       return '';
     };
     const name = pick('name', 'equipment_name', 'item_name', 'equipment');
-    const departmentName = pick('department', 'department_name', 'dept');
+    let departmentName = pick('department', 'department_name', 'dept');
     let categoryName = pick('category', 'category_name', 'cat');
     let subName = pick('sub_category', 'subcategory', 'sub_category_name');
     let subSub = pick('sub_sub_category', 'sub_subcategory', 'sub_sub');
     if (!name || !departmentName || !categoryName) return null;
 
     if (departmentName === 'Camera') {
-      if (categoryName === 'Camera Body') {
-        subSub = subSub || (subName === 'High Speed Camera' ? 'High Speed Camera' : subName);
-        subName = subName === 'High Speed Camera' ? 'High Speed Camera' : 'Camera Body';
+      const legacyCameraPackage = categoryName === 'Camera Body'
+        || (categoryName === 'Camera' && (subName === 'Camera Body' || subName === 'High Speed Camera'));
+      if (legacyCameraPackage) {
+        if (subName === 'High Speed Camera' || subSub === 'High Speed Camera') subSub = 'High Speed';
+        else if (!subSub && subName !== 'Camera Body' && subName !== 'High Speed Camera' && subName !== 'Camera Package') subSub = subName;
+        subName = 'Camera Package';
         categoryName = 'Camera';
       } else if (categoryName === 'Camera Peripherals' && subName === 'Power') {
         categoryName = 'Power';
@@ -890,6 +893,25 @@ export function registerEquipmentHandlers(): void {
         }
       }
       if (subSub === 'Telephoto Prime') subSub = 'Telephoto';
+    }
+    if (
+      (departmentName === 'Lights and Grips' && (categoryName === 'Cloth' || categoryName === 'Clamps' || categoryName === 'Stands' || categoryName === 'Poles' || categoryName === 'Power & Transport' || categoryName === 'SFX & Others' || categoryName === 'Dolllies' || categoryName === 'Dollies' || categoryName === 'Crane' || categoryName === 'Motion Control' || categoryName === 'Jib' || categoryName === 'Mounts'))
+      || (departmentName === 'Dollies Mounts & Cranes' && (categoryName === 'Dolllies' || categoryName === 'Dollies' || categoryName === 'Crane' || categoryName === 'Motion Control' || categoryName === 'Jib' || categoryName === 'Mounts'))
+    ) {
+      if (categoryName === 'Cloth') {
+        subSub = subName === 'Bouunce' ? 'Bounce' : (subName || subSub);
+        subName = 'Cloth';
+      } else if (categoryName === 'Power & Transport' || categoryName === 'SFX & Others' || categoryName === 'Dolllies' || categoryName === 'Dollies' || categoryName === 'Crane' || categoryName === 'Jib') {
+        subSub = subSub || subName;
+        subName = categoryName === 'Dolllies' ? 'Dollies' : categoryName;
+      } else if (categoryName === 'Motion Control' || categoryName === 'Mounts') {
+        subName = categoryName;
+      }
+      departmentName = 'Lights and Grips';
+      categoryName = 'Grips';
+    }
+    if (departmentName === 'Lights and Grips' && categoryName === 'Grips' && subName === 'Power & Transport' && subSub === 'Power Supply') {
+      subSub = 'Portable Power';
     }
     return { name, departmentName, categoryName, subName, subSub };
   };

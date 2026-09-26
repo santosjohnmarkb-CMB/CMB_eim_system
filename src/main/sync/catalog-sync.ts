@@ -7,6 +7,7 @@ import {
   deactivateLegacyLightsGripsTaxonomy,
   pruneUnusedObsoleteCatalog,
   remapCameraDepartmentTaxonomy,
+  remapGripsTaxonomy,
   regenerateEquipmentCodes,
   seedEquipmentHierarchy,
 } from '../database/migrate';
@@ -376,6 +377,7 @@ export async function syncCatalogWithCloud(): Promise<void> {
     adoptCloudCatalogIds(db, cloudIds);
     seedEquipmentHierarchy(db);
     remapCameraDepartmentTaxonomy(db);
+    remapGripsTaxonomy(db);
     regenerateEquipmentCodes(db);
     pruneUnusedObsoleteCatalog(db);
     deactivateLegacyLightsGripsTaxonomy(db);

@@ -1,6 +1,6 @@
 export const EQUIPMENT_HIERARCHY: Record<string, Record<string, string[]>> = {
   'Camera': {
-    'Camera': ['Camera Body', 'High Speed Camera'],
+    'Camera': ['Camera Package'],
     'Lens': ['Prime Lens', 'Zoom Lens', 'Special Lens', 'Lens Support'],
     'Filters': ['Light Control', 'Special FX'],
     'Camera Support Equipment': ['Tripod and Fluid Head', 'Matte Box', 'Follow Focus', 'Support System', 'Camera Rigs'],
@@ -8,11 +8,14 @@ export const EQUIPMENT_HIERARCHY: Record<string, Record<string, string[]>> = {
     'Power': ['Battery and Charger', 'AC Power Supply'],
     'Camera Package Component': ['Camera Package'],
   },
-  // Lights & Grips has no locked taxonomy. Categories/subcategories come from
-  // CSV import (and from typed values on Add). Keep the catalog departments so
-  // existing equipment still maps here.
+  // Category dropdown for this department is only Lights and Grips.
+  // Dollies, Power & Transport, and Special Equipment stay as catalog departments
+  // so existing equipment still maps, but they are not category choices.
   'Dollies Mounts & Cranes': {},
-  'Lights and Grips': {},
+  'Lights and Grips': {
+    'Lights': ['LED', 'HMI', 'Fluorescent', 'Tungsten', 'Diffusions', 'PAR', 'Lighting Control'],
+    'Grips': ['Cloth', 'Clamps', 'Stands', 'Poles', 'Power & Transport', 'SFX & Others', 'Dollies', 'Crane', 'Motion Control', 'Jib', 'Mounts'],
+  },
   'Power & Transport': {},
   'Special Equipment': {},
   // 1 Take crew-rate catalog. Open taxonomy; designations come from CSV / Add.
@@ -21,25 +24,29 @@ export const EQUIPMENT_HIERARCHY: Record<string, Record<string, string[]>> = {
 
 /** Fourth-level labels keyed by `category::subcategory`. Stored on equipment_items.sub_subcategory. */
 export const EQUIPMENT_SUB_SUBS: Record<string, string[]> = {
-  'Camera::Camera Body': ['3K', '4K', '6K', '8K', '12K'],
-  'Camera::High Speed Camera': ['High Speed Camera'],
-  'Lens::Prime Lens': ['Prime Lens Set', 'Wide Lens', 'Telephoto', 'Prime'],
-  'Lens::Zoom Lens': ['Short Zoom Lens', 'Long Zoom Lens'],
-  'Lens::Special Lens': ['Probe Lens', 'Macro Lens', 'Anamorphic'],
+  'Camera::Camera Package': ['2K', '3K', '4K', '6K', '8K', '12K', 'High Speed'],
+  'Lens::Prime Lens': ['Prime Lens Set', 'Wide Lens', 'Telephoto', 'Prime', 'Anamorphic Prime'],
+  'Lens::Zoom Lens': ['Short Zoom Lens', 'Long Zoom Lens', 'Anamorphic Zoom'],
+  'Lens::Special Lens': ['Probe Lens', 'Macro Lens'],
   'Filters::Light Control': ['4x5.65', '6.6x6.6'],
   'Filters::Special FX': ['4x5.65', '6.6x6.6'],
   'Camera Support Equipment::Tripod and Fluid Head': ['100mm', '150mm'],
-  'Camera Support Equipment::Matte Box': ['Clip-On', 'Rod Mount'],
+  'Camera Support Equipment::Matte Box': ['Rod Mount', 'Clip On'],
   'Camera Support Equipment::Follow Focus': ['Wireless', 'Manual'],
   'Camera Support Equipment::Support System': ['Mounting Plate', 'Rods'],
-  'Camera Support Equipment::Camera Rigs': ['Stabilizers', 'Mounts'],
-  'Camera Peripherals::Monitor': ['Overhead', 'Floor Monitor'],
+  'Camera Support Equipment::Camera Rigs': ['Stabilizers', 'Mounts', 'Gimbal'],
+  'Camera Peripherals::Monitor': ['Floor', 'Overhead', 'Monitor/Recorder'],
   'Camera Peripherals::Recorder': ['Monitor Recorder', 'Standalone'],
-  'Camera Peripherals::Storage Media': ['Cards', 'Hard Drive', 'Card Readers'],
+  'Camera Peripherals::Storage Media': ['Hard Drive', 'Media Cards and Readers'],
   'Camera Peripherals::Converters': ['Video Converter'],
-  'Camera Peripherals::Video Assist': ['Wireless', 'Wired'],
+  'Camera Peripherals::Video Assist': ['Wireless', 'Recorder'],
   'Camera Peripherals::Cables': ['Video Cable', 'Modular Cable', 'Power Cable', 'Storage Media Cable'],
   'Power::Battery and Charger': ['V Mount', 'B Mount', 'Battery Pack'],
+  'Grips::Cloth': ['Backing', 'Bounce', 'Chroma', 'Diffusion', 'Frame', 'Net', 'Flags and Scrims'],
+  'Grips::Power & Transport': ['Generator', 'Portable Power', 'Power Box', 'Power Cables', 'Grip Truck', 'Grip Truck W/ Truck Banned'],
+  'Grips::SFX & Others': ['Special FX'],
+  'Grips::Dollies': ['Dolly', 'Dolly Tracks', 'Motorized Dolly', 'Dolly Accesories'],
+  'Grips::Crane': ['Telescopic Crane'],
   'Camera Package Component::Camera Package': [
     'Arri Camera Package',
     'Sony Camera Package',
@@ -283,7 +290,7 @@ export const latestSubcategoryNamesFor = subcategoriesInCategory;
 
 export const USE_COUNT_SUBCATEGORIES: Record<Department, { label: string; subcategoryNames: string[] }[]> = {
   camera: [
-    { label: 'Camera', subcategoryNames: ['Camera', 'Camera Body'] },
+    { label: 'Camera', subcategoryNames: ['Camera', 'Camera Package'] },
     { label: 'Lens', subcategoryNames: ['Lens'] },
     { label: 'Filters', subcategoryNames: ['Filters'] },
     { label: 'Camera Support Equipment', subcategoryNames: ['Camera Support Equipment', 'Camera Support'] },

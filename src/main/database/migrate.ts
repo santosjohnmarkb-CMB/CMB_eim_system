@@ -212,8 +212,10 @@ export function pruneUnusedObsoleteCatalog(db: any): void {
 
 /**
  * Re-point existing Camera-department equipment to the current taxonomy:
- *   Camera Body / 3K          → Camera / Camera Body / 3K
- *   Camera Body / High Speed  → Camera / High Speed Camera / High Speed Camera
+ *   Camera Body / 3K          → Camera / Camera Package / 3K
+ *   Camera Body / High Speed  → Camera / Camera Package / High Speed
+ *   Camera / Camera Body / 4K → Camera / Camera Package / 4K
+ *   Phantom Flex 4K           → Camera / Camera Package / High Speed
  *   Peripherals / Power / …   → Power / Battery and Charger | AC Power Supply
  *   Lens / Special / Lens Support → Lens / Lens Support
  *   Camera Package Component / Arri Camera Package → Camera Package / Arri Camera Package
@@ -237,25 +239,34 @@ export function remapCameraDepartmentTaxonomy(db: any): number {
   const lensCat = catId('Lens');
   const powerCat = catId('Power');
   const packageCat = catId('Camera Package Component');
-  const cameraBodySub = subId(cameraCat, 'Camera Body');
-  const hscSub = subId(cameraCat, 'High Speed Camera');
+  const cameraPackageUnderCamera = subId(cameraCat, 'Camera Package');
   const lensSupportSub = subId(lensCat, 'Lens Support');
   const batterySub = subId(powerCat, 'Battery and Charger');
   const acSub = subId(powerCat, 'AC Power Supply');
   const cameraPackageSub = subId(packageCat, 'Camera Package');
-  if (!cameraCat || !cameraBodySub) return 0;
+  if (!cameraCat || !cameraPackageUnderCamera) return 0;
+
+  const cameraResolutions = new Set(['2K', '3K', '4K', '6K', '8K', '12K']);
+  const cameraPackageLabel = (itemName: string, subName: string, subSub: string, fourth: string): string | null => {
+    if (/phantom/i.test(itemName) || subName === 'High Speed Camera' || subSub === 'High Speed Camera' || subSub === 'High Speed' || fourth === 'High Speed') {
+      return 'High Speed';
+    }
+    if (cameraResolutions.has(subSub)) return subSub;
+    if (cameraResolutions.has(fourth)) return fourth;
+    return subSub || null;
+  };
 
   const cameraPackageBrands = new Set(CAMERA_PACKAGE_BRANDS);
 
   const items = db.prepare(`
-    SELECT e.id, e.category_id, e.subcategory_id, e.sub_subcategory,
+    SELECT e.id, e.name, e.category_id, e.subcategory_id, e.sub_subcategory,
            c.name AS cat_name, s.name AS sub_name
     FROM equipment_items e
     JOIN categories c ON c.id = e.category_id
     LEFT JOIN subcategories s ON s.id = e.subcategory_id
     WHERE e.department_id = ?
   `).all(dept.id) as Array<{
-    id: string; category_id: string; subcategory_id: string | null; sub_subcategory: string | null;
+    id: string; name: string; category_id: string; subcategory_id: string | null; sub_subcategory: string | null;
     cat_name: string; sub_name: string | null;
   }>;
 
@@ -275,15 +286,12 @@ export function remapCameraDepartmentTaxonomy(db: any): number {
     // column. Prefer the column, then the subcategory name, so both shapes remap.
     const fourth = subSub || subName;
 
-    if (item.cat_name === 'Camera Body') {
+    const legacyCameraPackage = item.cat_name === 'Camera Body'
+      || (item.cat_name === 'Camera' && (subName === 'Camera Body' || subName === 'High Speed Camera'));
+    if (legacyCameraPackage) {
       newCat = cameraCat;
-      if (subName === 'High Speed Camera' && hscSub) {
-        newSub = hscSub;
-        newSubSub = 'High Speed Camera';
-      } else {
-        newSub = cameraBodySub;
-        newSubSub = fourth || null;
-      }
+      newSub = cameraPackageUnderCamera;
+      newSubSub = cameraPackageLabel(item.name || '', subName, subSub, fourth);
       changed = true;
     } else if (item.cat_name === 'Lens' && lensSupportSub && (subName === 'Lens Support' || subSub === 'Lens Support')) {
       newSub = lensSupportSub;
@@ -324,6 +332,16 @@ export function remapCameraDepartmentTaxonomy(db: any): number {
       changed = true;
     }
 
+    if (item.cat_name === 'Lens' && subName === 'Zoom Lens' && (subSub === 'Anamorphic' || fourth === 'Anamorphic')) {
+      newSubSub = 'Anamorphic Zoom';
+      changed = true;
+    }
+
+    if (subName === 'Storage Media' && (subSub === 'Cards' || subSub === 'Card Readers')) {
+      newSubSub = 'Media Cards and Readers';
+      changed = true;
+    }
+
     if (changed && (newCat !== item.category_id || newSub !== item.subcategory_id || (newSubSub || null) !== (item.sub_subcategory || null))) {
       update.run(newCat, newSub ?? null, newSubSub ?? null, item.id);
       changes += 1;
@@ -331,6 +349,130 @@ export function remapCameraDepartmentTaxonomy(db: any): number {
   }
   if (changes > 0) regenerateEquipmentCodes(db);
   return changes;
+}
+
+/**
+ * Lights and Grips: category Grips owns subcategory Cloth (former Cloth
+ * subcategories become sub-subcategories) plus Clamps, Stands, Poles,
+ * Power & Transport, and SFX & Others. Bouunce folds into Bounce. Idempotent.
+ */
+export function remapGripsTaxonomy(db: any): number {
+  if (!tableExists(db, 'departments') || !tableExists(db, 'categories') || !tableExists(db, 'equipment_items')) return 0;
+  const dept = db.prepare("SELECT id FROM departments WHERE name = 'Lights and Grips' LIMIT 1").get() as { id: string } | undefined;
+  if (!dept) return 0;
+
+  const findCat = db.prepare('SELECT id FROM categories WHERE department_id = ? AND name = ? ORDER BY is_active DESC, display_order, id LIMIT 1');
+  const findSub = db.prepare('SELECT id FROM subcategories WHERE category_id = ? AND name = ? ORDER BY is_active DESC, display_order, id LIMIT 1');
+  const insertCat = db.prepare('INSERT INTO categories (id, department_id, name, display_order, is_active) VALUES (?, ?, ?, ?, 1)');
+  const insertSub = db.prepare('INSERT INTO subcategories (id, category_id, name, display_order, is_active) VALUES (?, ?, ?, ?, 1)');
+  const activateCat = db.prepare('UPDATE categories SET is_active = 1 WHERE id = ?');
+  const activateSub = db.prepare('UPDATE subcategories SET is_active = 1, display_order = ? WHERE id = ?');
+
+  let grips = findCat.get(dept.id, 'Grips') as { id: string } | undefined;
+  if (!grips) {
+    const id = randomUUID();
+    insertCat.run(id, dept.id, 'Grips', 0);
+    grips = { id };
+  } else {
+    activateCat.run(grips.id);
+  }
+
+  const ensureSub = (name: string, order: number): string => {
+    const existing = findSub.get(grips!.id, name) as { id: string } | undefined;
+    if (existing) {
+      activateSub.run(order, existing.id);
+      return existing.id;
+    }
+    const id = randomUUID();
+    insertSub.run(id, grips!.id, name, order);
+    return id;
+  };
+
+  const clothSub = ensureSub('Cloth', 1);
+  const clampsSub = ensureSub('Clamps', 2);
+  const standsSub = ensureSub('Stands', 3);
+  const polesSub = ensureSub('Poles', 4);
+  const powerSub = ensureSub('Power & Transport', 5);
+  const sfxSub = ensureSub('SFX & Others', 6);
+  const dolliesSub = ensureSub('Dollies', 7);
+  const craneSub = ensureSub('Crane', 8);
+  const motionSub = ensureSub('Motion Control', 9);
+  const jibSub = ensureSub('Jib', 10);
+  const mountsSub = ensureSub('Mounts', 11);
+
+  const subForMoved: Record<string, string> = {
+    Cloth: clothSub,
+    Clamps: clampsSub,
+    Stands: standsSub,
+    Poles: polesSub,
+    'Power & Transport': powerSub,
+    'SFX & Others': sfxSub,
+    Dolllies: dolliesSub,
+    Dollies: dolliesSub,
+    Crane: craneSub,
+    'Motion Control': motionSub,
+    Jib: jibSub,
+    Mounts: mountsSub,
+  };
+
+  const items = db.prepare(`
+    SELECT e.id, e.department_id, e.category_id, e.subcategory_id, e.sub_subcategory, c.name AS cat_name, s.name AS sub_name
+    FROM equipment_items e
+    JOIN categories c ON c.id = e.category_id
+    JOIN departments d ON d.id = c.department_id
+    LEFT JOIN subcategories s ON s.id = e.subcategory_id
+    WHERE (d.name = 'Lights and Grips' AND c.name IN ('Cloth', 'Clamps', 'Stands', 'Poles', 'Power & Transport', 'SFX & Others'))
+       OR (d.name = 'Dollies Mounts & Cranes' AND c.name IN ('Dolllies', 'Dollies', 'Crane', 'Motion Control', 'Jib', 'Mounts'))
+  `).all() as Array<{ id: string; department_id: string; category_id: string; subcategory_id: string | null; sub_subcategory: string | null; cat_name: string; sub_name: string | null }>;
+
+  const update = db.prepare(
+    `UPDATE equipment_items SET department_id = ?, category_id = ?, subcategory_id = ?, sub_subcategory = ?, updated_at = datetime('now') WHERE id = ?`,
+  );
+  let changes = 0;
+  for (const item of items) {
+    const newSub = subForMoved[item.cat_name];
+    if (!newSub) continue;
+    let newSubSub = (item.sub_subcategory || '').trim() || null;
+    if (item.cat_name === 'Cloth') {
+      const label = (item.sub_name || '').trim();
+      newSubSub = label === 'Bouunce' ? 'Bounce' : (label || newSubSub);
+    } else if (item.cat_name === 'Power & Transport' || item.cat_name === 'SFX & Others' || item.cat_name === 'Dolllies' || item.cat_name === 'Dollies' || item.cat_name === 'Crane' || item.cat_name === 'Jib') {
+      const label = (item.sub_name || '').trim();
+      newSubSub = newSubSub || label || null;
+    }
+    if (item.department_id !== dept.id || item.category_id !== grips.id || item.subcategory_id !== newSub || (newSubSub || null) !== (item.sub_subcategory || null)) {
+      update.run(dept.id, grips.id, newSub, newSubSub, item.id);
+      changes += 1;
+    }
+  }
+
+  const deactivateCat = db.prepare('UPDATE categories SET is_active = 0 WHERE id = ?');
+  const deactivateSubs = db.prepare('UPDATE subcategories SET is_active = 0 WHERE category_id = ?');
+  for (const [deptName, names] of [
+    ['Lights and Grips', ['Cloth', 'Clamps', 'Stands', 'Poles', 'Power & Transport', 'SFX & Others']],
+    ['Dollies Mounts & Cranes', ['Dolllies', 'Dollies', 'Crane', 'Motion Control', 'Jib', 'Mounts']],
+  ] as Array<[string, string[]]>) {
+    const owner = db.prepare("SELECT id FROM departments WHERE name = ? LIMIT 1").get(deptName) as { id: string } | undefined;
+    if (!owner) continue;
+    for (const name of names) {
+      const old = findCat.get(owner.id, name) as { id: string } | undefined;
+      if (!old || old.id === grips.id) continue;
+      const still = db.prepare('SELECT COUNT(*) AS n FROM equipment_items WHERE category_id = ? AND is_active = 1').get(old.id) as { n: number };
+      if (still.n > 0) continue;
+      deactivateSubs.run(old.id);
+      deactivateCat.run(old.id);
+    }
+  }
+
+  const supplyMoved = db.prepare(`
+    UPDATE equipment_items
+    SET sub_subcategory = 'Portable Power', updated_at = datetime('now')
+    WHERE subcategory_id = ?
+      AND TRIM(COALESCE(sub_subcategory, '')) = 'Power Supply'
+  `).run(powerSub) as { changes: number };
+
+  if (changes > 0) regenerateEquipmentCodes(db);
+  return changes + (supplyMoved.changes || 0);
 }
 
 /** Rewrite every item prefix and per-unit code to the structured naming scheme. */

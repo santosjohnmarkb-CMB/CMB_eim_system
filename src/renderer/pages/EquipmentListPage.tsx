@@ -10,7 +10,7 @@ import { Modal } from '../components/common/Modal';
 import { EQUIPMENT_STATUS_CONFIG } from '../lib/constants';
 import { EQUIPMENT_SECTION_CONFIG, equipmentSectionOf, parseEquipmentSection } from '../../shared/constants';
 import type { EquipmentSection } from '../../shared/constants';
-import { categoryOptionsForOps, subcategoryOptionsForCategory, subSubOptionsFor } from '../lib/catalogHierarchy';
+import { categoryOptionsForOps, categoryListLabel, PICKER_OMIT_CATEGORIES, subcategoryOptionsForCategory, subSubOptionsFor } from '../lib/catalogHierarchy';
 import type { EquipmentWithAsset, EquipmentStatus, BulkImportResult, CsvCategoryPreview } from '../../shared/types';
 import { useAuthStore } from '../stores/auth.store';
 import { useToast } from '../hooks';
@@ -134,7 +134,8 @@ export function EquipmentListPage() {
   }, [items, department]);
 
   const hierarchyCategories = useMemo(
-    () => categoryOptionsForOps(categories, departments, department),
+    () => categoryOptionsForOps(categories, departments, department)
+      .filter((c) => !PICKER_OMIT_CATEGORIES.includes(c.name)),
     [categories, departments, department],
   );
 
@@ -301,35 +302,23 @@ export function EquipmentListPage() {
   };
 
   const columns: Column<EquipmentWithAsset>[] = [
-    { key: 'equipment_code', header: 'Code', className: 'w-56', render: (item) => (
-      <span className="font-mono text-xs text-surface-300">{item.equipment_code}</span>
+    { key: 'equipment_code', header: 'Code', className: 'w-48', render: (item) => (
+      <span className="block truncate font-mono text-xs text-surface-300" title={item.equipment_code}>{item.equipment_code}</span>
     ) },
-    { key: 'name', header: 'Name', render: (item) => (<div><p className="font-medium text-surface-100">{item.name}</p><p className="text-xs text-surface-500">{item.brand} {item.model}</p></div>) },
-    { key: 'category_name', header: 'Category', render: (item) => (
-      <span className="text-surface-400">
-        {[item.category_name, item.subcategory_name, item.sub_subcategory].filter(Boolean).join(' · ') || '—'}
-      </span>
-    ) },
-    { key: 'supplier', header: 'Supplier', render: (item) => (<span className="text-surface-400">{summarizeField(item, (a) => a.vendor_name)}</span>) },
-    { key: 'delivered_date', header: 'Delivered', render: (item) => {
-      const units = unitsOf(item);
-      const distinct = Array.from(new Set(units.map((a) => a.delivered_date || '')));
-      const label = units.length === 0 ? '—' : distinct.length === 1 ? fmtDate(distinct[0] || null) : 'Multiple';
-      return <span className="text-surface-400">{label}</span>;
-    }},
-    { key: 'status', header: 'Status', render: (item) => {
+    { key: 'name', header: 'Name', render: (item) => (<div><p className="truncate font-medium text-surface-100" title={item.name}>{item.name}</p><p className="truncate text-xs text-surface-500">{item.brand} {item.model}</p></div>) },
+    { key: 'status', header: 'Status', className: 'w-28', render: (item) => {
       const { status, mixed } = summarizeStatus(item);
       if (mixed) return <Badge variant="default">Mixed</Badge>;
       const config = EQUIPMENT_STATUS_CONFIG[status as EquipmentStatus];
       return <Badge variant={statusVariantMap[status] || 'default'}>{config?.label || status}</Badge>;
     }},
-    { key: 'quantity', header: 'Qty', render: (item) => (<span className="text-surface-300">{item.quantity ?? 1}</span>), className: 'w-14 text-center' },
+    { key: 'quantity', header: 'Qty', render: (item) => (<span className="text-surface-300">{item.quantity ?? 1}</span>), className: 'w-16 text-center' },
     { key: 'available_qty', header: 'Avail', render: (item) => {
       const avail = item.available_qty ?? item.quantity ?? 1;
       const total = item.quantity ?? 1;
       const color = avail === 0 ? 'text-danger-400' : avail < total ? 'text-warning-400' : 'text-success-400';
       return <span className={color}>{avail}</span>;
-    }, className: 'w-14 text-center' },
+    }, className: 'w-16 text-center' },
   ];
 
   const canCreate = role === 'admin' || role === 'equipment_manager';
@@ -345,7 +334,7 @@ export function EquipmentListPage() {
       }
       : {
         name: 'ARRI Alexa Mini LF', department: 'Camera', category: 'Camera',
-        sub_category: 'Camera Body', sub_sub_category: '4K', item_type: 'standalone', brand: 'ARRI', model: 'Alexa Mini LF',
+        sub_category: 'Camera Package', sub_sub_category: '4K', item_type: 'standalone', brand: 'ARRI', model: 'Alexa Mini LF',
         qty_available: '2', pricing_type: 'per_day', base_price: isAdmin ? '15000' : '', notes: '',
       };
     const csv = EQUIPMENT_CSV_HEADERS.join(',') + '\n' + EQUIPMENT_CSV_HEADERS.map((h) => sample[h] ?? '').join(',') + '\n';
@@ -438,7 +427,7 @@ export function EquipmentListPage() {
         <SearchBox value={search} onChange={setSearch} placeholder="Search name, code, category..." className="w-64" />
         <select value={categoryFilter} onChange={(e) => handleCategoryChange(e.target.value)} className="px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-200">
           <option value="">All Categories</option>
-          {hierarchyCategories.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
+          {hierarchyCategories.map((c) => (<option key={c.id} value={c.id}>{categoryListLabel(c.name)}</option>))}
         </select>
         <select
           value={subcategoryFilter}
@@ -511,7 +500,7 @@ export function EquipmentListPage() {
         </div>
       )}
       <div className="glass-panel rounded-xl overflow-hidden">
-        <DataTable columns={columns} data={filtered} onRowClick={(item) => navigate(`/equipment/detail/${item.id}`)} loading={loading} emptyMessage={department === 'personnel' ? 'No designations found' : 'No equipment found'} />
+        <DataTable fixed columns={columns} data={filtered} onRowClick={(item) => navigate(`/equipment/detail/${item.id}`)} loading={loading} emptyMessage={department === 'personnel' ? 'No designations found' : 'No equipment found'} />
       </div>
       <p className="text-xs text-surface-600">
         {filtered.length === deptItems.length

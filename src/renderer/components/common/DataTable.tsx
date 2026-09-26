@@ -14,6 +14,7 @@ interface DataTableProps<T> {
   emptyMessage?: string;
   loading?: boolean;
   rowClassName?: (item: T) => string | undefined;
+  fixed?: boolean;
 }
 
 export function DataTable<T extends { id: string }>({
@@ -23,6 +24,7 @@ export function DataTable<T extends { id: string }>({
   emptyMessage = 'No data found',
   loading = false,
   rowClassName,
+  fixed = false,
 }: DataTableProps<T>) {
   if (loading) {
     return (
@@ -34,7 +36,14 @@ export function DataTable<T extends { id: string }>({
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full">
+      <table className={clsx('w-full', fixed && 'table-fixed')}>
+        {fixed && (
+          <colgroup>
+            {columns.map((col) => (
+              <col key={col.key} className={col.className} />
+            ))}
+          </colgroup>
+        )}
         <thead>
           <tr className="border-b border-surface-800">
             {columns.map((col) => (

@@ -4,7 +4,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { app } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
-import { runMigrations, seedEquipmentHierarchy, pruneUnusedObsoleteCatalog, remapCameraDepartmentTaxonomy, regenerateEquipmentCodes, deactivateLegacyLightsGripsTaxonomy } from './migrate';
+import { runMigrations, seedEquipmentHierarchy, pruneUnusedObsoleteCatalog, remapCameraDepartmentTaxonomy, remapGripsTaxonomy, regenerateEquipmentCodes, deactivateLegacyLightsGripsTaxonomy } from './migrate';
 import { migrateInRowBlobsToFiles } from '../blob-store';
 
 let db: any = null;
@@ -73,6 +73,7 @@ function initializeDatabase(): void {
   runMigrations(db);
   seedEquipmentHierarchy(db);
   remapCameraDepartmentTaxonomy(db);
+  remapGripsTaxonomy(db);
   // Remap can re-point items after 026 already ran (e.g. Camera Peripherals →
   // Power). Rewrite SKUs before the first catalog sync so prefixes stay in contract.
   regenerateEquipmentCodes(db);

@@ -4,7 +4,8 @@ import {
   Camera, Lightbulb, Package, CheckCircle, Wrench,
   AlertTriangle, ArrowRight, BarChart3,
 } from 'lucide-react';
-import { DEPARTMENT_CONFIG, USE_COUNT_SUBCATEGORIES, opsDepartmentOf } from '../../shared/constants';
+import { DEPARTMENT_CONFIG, opsDepartmentOf } from '../../shared/constants';
+import { groupByCategoryThenSubcategory } from '../lib/catalogHierarchy';
 import type { Department } from '../../shared/constants';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { ipcInvoke } from '../lib/ipc';
@@ -144,32 +145,11 @@ export function EquipmentDashboardPage() {
             const accent = DEPT_ACCENT[dept];
             const deptCounts = deptUseCounts[dept];
 
-            // Preferred subcategory order (as defined in constants), then any others alphabetically.
-            const preferredOrder = USE_COUNT_SUBCATEGORIES[dept].flatMap((g) => g.subcategoryNames);
-            const itemsBySubcategory = new Map<string, EquipmentUseCount[]>();
-            for (const c of deptCounts) {
-              const key = c.subcategory_name || 'Other';
-              const existing = itemsBySubcategory.get(key);
-              if (existing) existing.push(c);
-              else itemsBySubcategory.set(key, [c]);
-            }
-
-            const subcategoryGroups = Array.from(itemsBySubcategory.keys())
-              .sort((a, b) => {
-                const ia = preferredOrder.indexOf(a);
-                const ib = preferredOrder.indexOf(b);
-                if (ia !== -1 && ib !== -1) return ia - ib;
-                if (ia !== -1) return -1;
-                if (ib !== -1) return 1;
-                return a.localeCompare(b);
-              })
-              .map((label) => ({
-                label,
-                items: (itemsBySubcategory.get(label) || [])
-                  .slice()
-                  .sort((a, b) => b.use_count - a.use_count)
-                  .slice(0, 5),
-              }));
+            const subcategoryGroups = groupByCategoryThenSubcategory(deptCounts, DEPARTMENT_CONFIG[dept].categories)
+              .flatMap((group) => group.subcategories.map((sub) => ({
+                label: `${group.label} · ${sub.label}`,
+                items: sub.items.slice().sort((a, b) => b.use_count - a.use_count).slice(0, 5),
+              })));
 
             return (
               <div key={dept} className="p-5 space-y-4">

@@ -317,7 +317,7 @@ export function registerMaintenanceHandlers(): void {
         }
       }
 
-      if (newStatus === 'COMPLETED' || newStatus === 'CANCELLED') {
+      if (newStatus === 'COMPLETED' || newStatus === 'CANCELLED' || newStatus === 'IN_PROGRESS') {
         recomputeAvailability(db, ticket.equipment_id);
       }
     });
@@ -328,7 +328,7 @@ export function registerMaintenanceHandlers(): void {
     const note: any = db.prepare('SELECT * FROM maintenance_notes WHERE id = ?').get(noteId);
     if (note) void pushOperationalToCloud('maintenance_notes', 'INSERT', note);
     // Propagate inventory/asset changes to the shared catalog so the rental system sees them.
-    if (newStatus === 'COMPLETED' || newStatus === 'CANCELLED') {
+    if (newStatus === 'COMPLETED' || newStatus === 'CANCELLED' || newStatus === 'IN_PROGRESS') {
       const eq: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(ticket.equipment_id);
       if (eq) void pushCatalogToCloud('equipment_items', 'UPDATE', eq);
     }

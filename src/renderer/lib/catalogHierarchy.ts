@@ -131,6 +131,7 @@ export function categoryOptionsForOps(
   const out: HierarchyOption[] = [];
   const seen = new Set<string>();
   for (const dept of latestDepartments(departments, opsDept, categories)) {
+    if (opsDept === 'lights_grips' && dept.name !== 'Lights and Grips') continue;
     const options = categoryOptionsForDepartment(categories, departments, dept.id);
     for (const option of options) {
       if (seen.has(option.name) || isDelistedCategoryName(option.name) || isPersonnelCatalogName(option.name)) continue;
@@ -316,4 +317,69 @@ export function pathForSubSub(subSubName: string): { category: string; subcatego
     if (category && subcategory) return { category, subcategory };
   }
   return undefined;
+}
+
+/** Camera category is shown as Camera Package in use counts and pickers. */
+export function categoryListLabel(categoryName: string): string {
+  return categoryName === 'Camera' ? 'Camera Package' : categoryName;
+}
+
+export const PICKER_OMIT_CATEGORIES = ['Camera Package Component'];
+
+function categoryRank(catalogDeptNames: string[], categoryName: string): number {
+  let offset = 0;
+  for (const deptName of catalogDeptNames) {
+    const names = categoriesInCatalogDept(deptName);
+    const idx = names.indexOf(categoryName);
+    if (idx !== -1) return offset + idx;
+    offset += names.length + 1;
+  }
+  return offset + 1000;
+}
+
+function subcategoryRank(catalogDeptNames: string[], categoryName: string, subcategoryName: string): number {
+  for (const deptName of catalogDeptNames) {
+    const names = subcategoriesInCategory(deptName, categoryName);
+    const idx = names.indexOf(subcategoryName);
+    if (idx !== -1) return idx;
+  }
+  return 1000;
+}
+
+export interface HierarchyGroups<T> {
+  category: string;
+  label: string;
+  subcategories: { label: string; items: T[] }[];
+}
+
+/** Group rows by category, then subcategory, in the locked catalog order. */
+export function groupByCategoryThenSubcategory<T extends { category_name?: string | null; subcategory_name?: string | null }>(
+  items: T[],
+  catalogDeptNames: string[],
+): HierarchyGroups<T>[] {
+  const byCat = new Map<string, Map<string, T[]>>();
+  for (const item of items) {
+    const cat = item.category_name || 'Other';
+    const sub = item.subcategory_name || 'Other';
+    let subs = byCat.get(cat);
+    if (!subs) {
+      subs = new Map();
+      byCat.set(cat, subs);
+    }
+    const list = subs.get(sub);
+    if (list) list.push(item);
+    else subs.set(sub, [item]);
+  }
+  return Array.from(byCat.keys())
+    .sort((a, b) => categoryRank(catalogDeptNames, a) - categoryRank(catalogDeptNames, b) || a.localeCompare(b))
+    .map((category) => {
+      const subs = byCat.get(category)!;
+      return {
+        category,
+        label: categoryListLabel(category),
+        subcategories: Array.from(subs.keys())
+          .sort((a, b) => subcategoryRank(catalogDeptNames, category, a) - subcategoryRank(catalogDeptNames, category, b) || a.localeCompare(b))
+          .map((label) => ({ label, items: subs.get(label)! })),
+      };
+    });
 }
