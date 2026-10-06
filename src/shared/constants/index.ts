@@ -1,20 +1,19 @@
 export const EQUIPMENT_HIERARCHY: Record<string, Record<string, string[]>> = {
   'Camera': {
-    'Camera': ['Camera Package'],
-    'Lens': ['Prime Lens', 'Zoom Lens', 'Special Lens', 'Lens Support'],
+    'Camera': ['Camera Package Main', 'Camera Package Component'],
+    'Lens': ['Prime Lens', 'Zoom Lens', 'Special Lens', 'Lens Support', 'Lens Accesories'],
     'Filters': ['Light Control', 'Special FX'],
     'Camera Support Equipment': ['Tripod and Fluid Head', 'Matte Box', 'Follow Focus', 'Support System', 'Camera Rigs'],
-    'Camera Peripherals': ['Monitor', 'Recorder', 'Storage Media', 'Converters', 'Video Assist', 'Cables'],
+    'Video Peripherals': ['Monitor', 'Recorder', 'Storage Media', 'Converters', 'Video Assist', 'Cables'],
     'Power': ['Battery and Charger', 'AC Power Supply'],
-    'Camera Package Component': ['Camera Package'],
   },
   // Category dropdown for this department is only Lights and Grips.
   // Dollies, Power & Transport, and Special Equipment stay as catalog departments
   // so existing equipment still maps, but they are not category choices.
   'Dollies Mounts & Cranes': {},
   'Lights and Grips': {
-    'Lights': ['LED', 'HMI', 'Fluorescent', 'Tungsten', 'Diffusions', 'PAR', 'Lighting Control'],
-    'Grips': ['Cloth', 'Clamps', 'Stands', 'Poles', 'Power & Transport', 'SFX & Others', 'Dollies', 'Crane', 'Motion Control', 'Jib', 'Mounts'],
+    'Lights': ['LED', 'HMI', 'Tungsten', 'Fluorescent', 'PAR', 'Diffusions', 'Lighting Control'],
+    'Grips': ['Dollies', 'Slider', 'Crane', 'Jib', 'Motion Control', 'Mounts', 'Stands', 'Frame with Stand', 'Cloth', 'Clamps', 'Arms', 'SFX & Others', 'Poles', 'Power and Transport'],
   },
   'Power & Transport': {},
   'Special Equipment': {},
@@ -24,30 +23,31 @@ export const EQUIPMENT_HIERARCHY: Record<string, Record<string, string[]>> = {
 
 /** Fourth-level labels keyed by `category::subcategory`. Stored on equipment_items.sub_subcategory. */
 export const EQUIPMENT_SUB_SUBS: Record<string, string[]> = {
-  'Camera::Camera Package': ['2K', '3K', '4K', '6K', '8K', '12K', 'High Speed'],
+  'Camera::Camera Package Main': ['2K', '3K', '4K', '6K', '8K', '12K', 'High Speed'],
   'Lens::Prime Lens': ['Prime Lens Set', 'Wide Lens', 'Telephoto', 'Prime', 'Anamorphic Prime'],
   'Lens::Zoom Lens': ['Short Zoom Lens', 'Long Zoom Lens', 'Anamorphic Zoom'],
   'Lens::Special Lens': ['Probe Lens', 'Macro Lens'],
   'Filters::Light Control': ['4x5.65', '6.6x6.6'],
   'Filters::Special FX': ['4x5.65', '6.6x6.6'],
   'Camera Support Equipment::Tripod and Fluid Head': ['100mm', '150mm'],
-  'Camera Support Equipment::Matte Box': ['Rod Mount', 'Clip On'],
+  'Camera Support Equipment::Matte Box': ['Clip-on', 'Rod Mount'],
   'Camera Support Equipment::Follow Focus': ['Wireless', 'Manual'],
   'Camera Support Equipment::Support System': ['Mounting Plate', 'Rods'],
   'Camera Support Equipment::Camera Rigs': ['Stabilizers', 'Mounts', 'Gimbal'],
-  'Camera Peripherals::Monitor': ['Floor', 'Overhead', 'Monitor/Recorder'],
-  'Camera Peripherals::Recorder': ['Monitor Recorder', 'Standalone'],
-  'Camera Peripherals::Storage Media': ['Hard Drive', 'Media Cards and Readers'],
-  'Camera Peripherals::Converters': ['Video Converter'],
-  'Camera Peripherals::Video Assist': ['Wireless', 'Recorder'],
-  'Camera Peripherals::Cables': ['Video Cable', 'Modular Cable', 'Power Cable', 'Storage Media Cable'],
+  'Video Peripherals::Monitor': ['Floor Monitor', 'Overhead Monitor', 'Monitor/Recorder'],
+  'Video Peripherals::Recorder': ['Monitor Recorder', 'Standalone'],
+  'Video Peripherals::Storage Media': ['Hard Drive', 'Media Cards and Readers'],
+  'Video Peripherals::Converters': ['Video Converter'],
+  'Video Peripherals::Video Assist': ['Wireless', 'Recorder'],
+  'Video Peripherals::Cables': ['Video Cable', 'Modular Cable', 'Power Cable', 'Storage Media Cable'],
   'Power::Battery and Charger': ['V Mount', 'B Mount', 'Battery Pack'],
+  'Lights::Lighting Control': ['Dimmer/Variac', 'DMX'],
   'Grips::Cloth': ['Backing', 'Bounce', 'Chroma', 'Diffusion', 'Frame', 'Net', 'Flags and Scrims'],
-  'Grips::Power & Transport': ['Generator', 'Portable Power', 'Power Box', 'Power Cables', 'Grip Truck', 'Grip Truck W/ Truck Banned'],
+  'Grips::Power and Transport': ['Generator', 'Portable Power', 'Power Box', 'Power Cables', 'Grip Truck', 'Grip Truck W/ Truck Banned'],
   'Grips::SFX & Others': ['Special FX'],
-  'Grips::Dollies': ['Dolly', 'Dolly Tracks', 'Motorized Dolly', 'Dolly Accesories'],
-  'Grips::Crane': ['Telescopic Crane'],
-  'Camera Package Component::Camera Package': [
+  'Grips::Dollies': ['Dolly', 'Table Top Dolly', 'Dolly Tracks', 'Motorized Dolly', 'Dolly Accesories'],
+  'Grips::Crane': ['Telescopic Crane', 'Riding Mode Crane'],
+  'Camera::Camera Package Component': [
     'Arri Camera Package',
     'Sony Camera Package',
     'Red Camera Package',
@@ -57,7 +57,7 @@ export const EQUIPMENT_SUB_SUBS: Record<string, string[]> = {
   ],
 };
 
-export const CAMERA_PACKAGE_BRANDS = EQUIPMENT_SUB_SUBS['Camera Package Component::Camera Package'] ?? [];
+export const CAMERA_PACKAGE_BRANDS = EQUIPMENT_SUB_SUBS['Camera::Camera Package Component'] ?? [];
 
 export function subSubsFor(categoryName: string, subcategoryName: string): string[] {
   return EQUIPMENT_SUB_SUBS[`${categoryName}::${subcategoryName}`] ?? [];
@@ -279,9 +279,112 @@ export function opsDepartmentOf(departmentName?: string | null, categoryName?: s
   return null;
 }
 
+function catalogLabelPresent(name?: string | null): boolean {
+  return typeof name === 'string' && name.trim() !== '';
+}
+
+/**
+ * True when a row belongs in an ops-department bucket.
+ * A missing department name (LEFT JOIN when department_id is absent) is incomplete
+ * data: include it only when `includeUnassigned` is set. A present name that maps
+ * to another department, or that does not map (personnel, unknown), stays out.
+ */
+export function matchesOpsDepartment(
+  bucket: Department,
+  departmentName?: string | null,
+  categoryName?: string | null,
+  includeUnassigned = false,
+): boolean {
+  if (isPersonnelCatalogName(departmentName) || isPersonnelCatalogName(categoryName)) return false;
+  const owner = opsDepartmentOf(departmentName, categoryName);
+  if (owner) return owner === bucket;
+  if (catalogLabelPresent(departmentName)) return false;
+  return includeUnassigned;
+}
+
+/** True when a department-scoped session must be denied this catalog row. */
+export function isOutsideOpsDepartment(
+  sessionDept: Department | null | undefined,
+  departmentName?: string | null,
+  categoryName?: string | null,
+): boolean {
+  if (!sessionDept) return false;
+  return !matchesOpsDepartment(sessionDept, departmentName, categoryName, true);
+}
+
 export function equipmentSectionOf(departmentName?: string | null, categoryName?: string | null): EquipmentSection | null {
   if (isPersonnelCatalogName(departmentName) || isPersonnelCatalogName(categoryName)) return 'personnel';
   return opsDepartmentOf(departmentName, categoryName);
+}
+
+/**
+ * Default category order for the equipment list and use-count pages.
+ * Named groups come first. Any other camera category follows Filters.
+ * Camera Package Component is ranked after those, so it stays last.
+ */
+const DEFAULT_CATEGORY_ORDER: Record<Department, string[]> = {
+  camera: [
+    'camera',
+    'lens',
+    'camera support equipment',
+    'video peripherals',
+    'filters',
+  ],
+  lights_grips: [
+    'lights',
+    'grips',
+  ],
+};
+
+const DEFAULT_CATEGORY_ALIASES: Record<string, string> = {
+  'camera support': 'camera support equipment',
+  'camera peripherals': 'video peripherals',
+};
+
+const CAMERA_PACKAGE_COMPONENT_KEYS = new Set([
+  'camera package component',
+  'camera package components',
+]);
+
+function normalizeCategoryOrderKey(categoryName?: string | null): string {
+  const key = (categoryName ?? '').trim().toLowerCase();
+  return DEFAULT_CATEGORY_ALIASES[key] ?? key;
+}
+
+function isCameraPackageComponentName(name?: string | null): boolean {
+  return CAMERA_PACKAGE_COMPONENT_KEYS.has((name ?? '').trim().toLowerCase());
+}
+
+/** True when this row is a camera package component, whether stored as a category or a subcategory. */
+export function isCameraPackageComponent(categoryName?: string | null, subcategoryName?: string | null): boolean {
+  return isCameraPackageComponentName(categoryName) || isCameraPackageComponentName(subcategoryName);
+}
+
+/**
+ * Lower rank sorts first.
+ * Camera: Camera, Lens, Camera Support Equipment, Video Peripherals, Filters,
+ * then any other category, and Camera Package Component last.
+ */
+export function defaultCategoryRank(
+  section: EquipmentSection | null | undefined,
+  categoryName?: string | null,
+  subcategoryName?: string | null,
+): number {
+  if (section !== 'camera' && section !== 'lights_grips') return 0;
+  const order = DEFAULT_CATEGORY_ORDER[section];
+  if (section === 'camera' && isCameraPackageComponent(categoryName, subcategoryName)) {
+    return order.length + 1;
+  }
+  const idx = order.indexOf(normalizeCategoryOrderKey(categoryName));
+  return idx === -1 ? order.length : idx;
+}
+
+export function listSectionForCatalogDepts(catalogDeptNames: string[]): Department | null {
+  for (const name of catalogDeptNames) {
+    const dept = CATEGORY_TO_DEPARTMENT[name];
+    if (dept) return dept;
+  }
+  return null;
 }
 
 export const catalogDeptNamesForOps = catalogDepartmentNames;
@@ -290,13 +393,12 @@ export const latestSubcategoryNamesFor = subcategoriesInCategory;
 
 export const USE_COUNT_SUBCATEGORIES: Record<Department, { label: string; subcategoryNames: string[] }[]> = {
   camera: [
-    { label: 'Camera', subcategoryNames: ['Camera', 'Camera Package'] },
+    { label: 'Camera', subcategoryNames: ['Camera', 'Camera Package', 'Camera Package Main', 'Camera Package Component'] },
     { label: 'Lens', subcategoryNames: ['Lens'] },
     { label: 'Filters', subcategoryNames: ['Filters'] },
     { label: 'Camera Support Equipment', subcategoryNames: ['Camera Support Equipment', 'Camera Support'] },
-    { label: 'Camera Peripherals', subcategoryNames: ['Camera Peripherals'] },
+    { label: 'Video Peripherals', subcategoryNames: ['Video Peripherals', 'Camera Peripherals'] },
     { label: 'Power', subcategoryNames: ['Power'] },
-    { label: 'Camera Package Component', subcategoryNames: ['Camera Package Component', 'Camera Package'] },
   ],
   lights_grips: [],
 };

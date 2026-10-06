@@ -7,8 +7,8 @@
  *   - db:packages:create       — inventory access; rebuilds package_items in a tx
  *   - db:packages:update       — inventory access; replace-and-rewrite components
  *   - db:packages:delete       — inventory access; soft delete (is_active = 0)
- *   - packages:readCsvFile     — file-picker + read for the importer
- *   - db:packages:bulkImport   — inventory access; CSV import
+ *   - packages:readCsvFile     — file-picker; reads the xlsx template or a CSV
+ *   - db:packages:bulkImport   — inventory access; package import
  *   - packages:downloadTemplate — write a 3-sheet xlsx template
  *
  * Adapted from the rental app: writes are gated by requireInventoryAccess (admin +
@@ -29,9 +29,18 @@ import ExcelJS from 'exceljs';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../database/index';
 import { requireInventoryAccess } from './session';
-import { parseCsvRow } from './utils/csv';
+import { csvCellValue, parseCsvRow } from './utils/csv';
+import {
+  bufferToImportText,
+  isXlsxBuffer,
+  PACKAGE_REQUIRED_HEADERS,
+  readPackageImportTable,
+  xlsxBufferToPackageCsv,
+} from './utils/package-spreadsheet';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
-import { sessionDepartment, departmentForCatalogDepartment, assertEquipmentInDepartment } from './department';
+import { sessionDepartment, assertEquipmentInDepartment } from './department';
+import { isOutsideOpsDepartment } from '../../shared/constants';
+import type { Department } from '../../shared/constants';
 import { PackageCreateSchema, PackageUpdateSchema } from '../../shared/schemas';
 
 export function registerPackageHandlers(): void {
@@ -99,14 +108,23 @@ export function registerPackageHandlers(): void {
     }
   };
 
-  // The department a package belongs to, derived from its main item's category.
-  const packageDepartment = (mainItemId: string): string | null => {
+  // Catalog names for a package's main item. A missing equipment row is not in scope.
+  // A present row with a null department name is incomplete data, not another department.
+  const mainItemCatalog = (mainItemId: string): { department_name: string | null; category_name: string | null } | null => {
     const row: any = db.prepare(`
-      SELECT d.name as department_name
-      FROM equipment_items e LEFT JOIN departments d ON d.id = e.department_id
+      SELECT d.name as department_name, c.name as category_name
+      FROM equipment_items e
+      LEFT JOIN departments d ON d.id = e.department_id
+      LEFT JOIN categories c ON c.id = e.category_id
       WHERE e.id = ?
     `).get(mainItemId);
-    return departmentForCatalogDepartment(row?.department_name);
+    return row ?? null;
+  };
+
+  const packageOutsideSession = (mainItemId: string, dept: Department): boolean => {
+    const row = mainItemCatalog(mainItemId);
+    if (!row) return true;
+    return isOutsideOpsDepartment(dept, row.department_name, row.category_name);
   };
 
   ipcMain.handle('db:packages:getAll', (event: any) => {
@@ -115,7 +133,7 @@ export function registerPackageHandlers(): void {
       .prepare('SELECT * FROM package_definitions WHERE is_active = 1 ORDER BY name')
       .all() as any[];
     const scoped = dept
-      ? packages.filter((p) => packageDepartment(p.main_item_id) === dept)
+      ? packages.filter((p) => !packageOutsideSession(p.main_item_id, dept))
       : packages;
     return scoped.map(hydratePackage);
   });
@@ -124,7 +142,7 @@ export function registerPackageHandlers(): void {
     const pkg: any = db.prepare('SELECT * FROM package_definitions WHERE id = ?').get(id);
     if (!pkg) return null;
     const dept = sessionDepartment(event);
-    if (dept && packageDepartment(pkg.main_item_id) !== dept) return null;
+    if (dept && packageOutsideSession(pkg.main_item_id, dept)) return null;
     return hydratePackage(pkg);
   });
 
@@ -316,27 +334,33 @@ export function registerPackageHandlers(): void {
 
   ipcMain.handle('packages:readCsvFile', async () => {
     const result = await dialog.showOpenDialog({
-      title: 'Select Package CSV File',
-      filters: [{ name: 'CSV Files', extensions: ['csv'] }],
+      title: 'Select Package Import File',
+      filters: [{ name: 'Excel or CSV', extensions: ['xlsx', 'csv'] }],
       properties: ['openFile'],
     });
     if (result.canceled || result.filePaths.length === 0) return null;
-    return fs.readFileSync(result.filePaths[0]!, 'utf-8');
+    const filePath = result.filePaths[0]!;
+    const buf = fs.readFileSync(filePath);
+    if (filePath.toLowerCase().endsWith('.xlsx') || isXlsxBuffer(buf)) {
+      return xlsxBufferToPackageCsv(buf);
+    }
+    return bufferToImportText(buf);
   });
 
   ipcMain.handle('db:packages:bulkImport', (event: any, csvContent: string) => {
     const user = requireInventoryAccess(event);
     const isPricingAdmin = user.role === 'admin';
     const dept = sessionDepartment(event);
-    const lines = csvContent.split(/\r?\n/).filter((l) => l.trim());
-    if (lines.length < 2) throw new Error('CSV file must have a header row and at least one data row');
+    const { headers, rawHeaders, lines } = readPackageImportTable(csvContent);
 
-    const headerLine = lines[0]!;
-    const headers = parseCsvRow(headerLine).map((h) => h.trim().toLowerCase().replace(/\s+/g, '_'));
-
-    const requiredHeaders = ['package_name', 'main_equipment_code', 'component_equipment_code', 'qty'];
-    const missing = requiredHeaders.filter((h) => !headers.includes(h));
-    if (missing.length > 0) throw new Error(`Missing required columns: ${missing.join(', ')}`);
+    const missing = PACKAGE_REQUIRED_HEADERS.filter((h) => !headers.includes(h));
+    if (missing.length > 0) {
+      const found = rawHeaders.map((h) => h.trim()).filter(Boolean);
+      throw new Error(
+        `Missing required columns: ${missing.join(', ')}. Found columns: [${found.join(', ') || 'none'}]. ` +
+        'Upload the Excel template, or a CSV whose header row includes package_name, main_equipment_code, component_equipment_code, and qty.',
+      );
+    }
 
     const equipByCode = new Map<string, any>();
     const allEquip: any[] = db.prepare('SELECT * FROM equipment_items WHERE is_active = 1').all();
@@ -360,8 +384,8 @@ export function registerPackageHandlers(): void {
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i];
       if (!line) continue;
-      const values = parseCsvRow(line);
-      if (values.length === 0 || (values.length === 1 && !values[0]!.trim())) continue;
+      const values = parseCsvRow(line).map(csvCellValue);
+      if (values.length === 0 || values.every((v) => !v)) continue;
 
       const row: Record<string, string> = {};
       headers.forEach((h, idx) => {
@@ -369,6 +393,12 @@ export function registerPackageHandlers(): void {
       });
 
       const pkgName = row.package_name;
+      if (
+        pkgName?.toLowerCase() === 'package_name'
+        && (row.main_equipment_code || '').toLowerCase() === 'main_equipment_code'
+      ) {
+        continue;
+      }
       if (!pkgName) {
         errors.push({ row: i + 1, message: 'package_name is required' });
         continue;
@@ -395,7 +425,8 @@ export function registerPackageHandlers(): void {
       }
 
       // Managers may only import packages whose main item is in their department.
-      if (dept && departmentForCatalogDepartment(equipDepartmentName(db, mainEquip.id)) !== dept) {
+      const mainCatalog = equipCatalogNames(db, mainEquip.id);
+      if (dept && (!mainCatalog || isOutsideOpsDepartment(dept, mainCatalog.department_name, mainCatalog.category_name))) {
         errors.push({ row: i + 1, message: `Main equipment "${row.main_equipment_code}" is in another department` });
         continue;
       }
@@ -604,6 +635,8 @@ export function registerPackageHandlers(): void {
     const instructions = [
       'PACKAGE IMPORT INSTRUCTIONS',
       '',
+      'Upload this Excel file with the Import button. A CSV export of the Package Import sheet also works.',
+      '',
       '1. Each row represents one component in a package.',
       '2. Rows sharing the same "package_name" are grouped into a single package.',
       '3. "main_equipment_code" is the headline equipment item for the package (must be the same for all rows in a package).',
@@ -627,12 +660,13 @@ export function registerPackageHandlers(): void {
   });
 }
 
-// Category name for an equipment id (used by the department guard in bulkImport).
-function equipDepartmentName(db: any, equipmentId: string): string | null {
+function equipCatalogNames(db: any, equipmentId: string): { department_name: string | null; category_name: string | null } | null {
   const row: any = db.prepare(`
-    SELECT d.name as department_name
-    FROM equipment_items e LEFT JOIN departments d ON d.id = e.department_id
+    SELECT d.name as department_name, c.name as category_name
+    FROM equipment_items e
+    LEFT JOIN departments d ON d.id = e.department_id
+    LEFT JOIN categories c ON c.id = e.category_id
     WHERE e.id = ?
   `).get(equipmentId);
-  return row?.department_name ?? null;
+  return row ?? null;
 }

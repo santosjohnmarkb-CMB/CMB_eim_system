@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { CAMERA_PACKAGE_BRANDS, catalogDeptHasTaxonomy, DEPARTMENT_CONFIG, EQUIPMENT_HIERARCHY, isDelistedCategoryName, isPersonnelCatalogName } from '../../shared/constants';
-import { buildSkuPrefix, formatUnitCode } from '../../shared/equipment-code';
+import { buildSkuPrefix, formatUnitCode, listCodeMatchesPrefix, uniqueItemCode } from '../../shared/equipment-code';
 
 interface Migration {
   id: string;
@@ -26,9 +26,63 @@ function tableExists(db: any, table: string): boolean {
   return row.count > 0;
 }
 
+/**
+ * Camera Peripherals is now Video Peripherals. Rename the existing category row
+ * so equipment and subcategories keep their ids. If a second row already exists,
+ * fold it into the renamed one.
+ */
+function renameCameraPeripheralsCategory(db: any): void {
+  if (!tableExists(db, 'departments') || !tableExists(db, 'categories') || !tableExists(db, 'subcategories')) return;
+  const depts = db.prepare("SELECT id FROM departments WHERE name = 'Camera'").all() as { id: string }[];
+  const listCats = db.prepare(
+    'SELECT id FROM categories WHERE department_id = ? AND name = ? ORDER BY is_active DESC, display_order, id',
+  );
+  const rename = db.prepare(
+    "UPDATE categories SET name = 'Video Peripherals', is_active = 1, updated_at = datetime('now') WHERE id = ?",
+  );
+  const deactivateCat = db.prepare("UPDATE categories SET is_active = 0, updated_at = datetime('now') WHERE id = ?");
+  const subsOf = db.prepare('SELECT id, name FROM subcategories WHERE category_id = ?');
+  const findSub = db.prepare(
+    'SELECT id FROM subcategories WHERE category_id = ? AND name = ? AND id != ? ORDER BY is_active DESC, display_order, id LIMIT 1',
+  );
+  const moveSub = db.prepare('UPDATE subcategories SET category_id = ? WHERE id = ?');
+  const deactivateSub = db.prepare('UPDATE subcategories SET is_active = 0 WHERE id = ?');
+  const hasItems = tableExists(db, 'equipment_items');
+  const repointSub = hasItems
+    ? db.prepare('UPDATE equipment_items SET subcategory_id = ? WHERE subcategory_id = ?')
+    : null;
+  const repointCat = hasItems
+    ? db.prepare("UPDATE equipment_items SET category_id = ?, updated_at = datetime('now') WHERE category_id = ?")
+    : null;
+
+  for (const dept of depts) {
+    const legacy = listCats.all(dept.id, 'Camera Peripherals') as { id: string }[];
+    if (legacy.length === 0) continue;
+    const current = listCats.all(dept.id, 'Video Peripherals') as { id: string }[];
+    const survivor = legacy[0]!;
+    rename.run(survivor.id);
+    for (const extra of [...legacy.slice(1), ...current]) {
+      if (extra.id === survivor.id) continue;
+      const subs = subsOf.all(extra.id) as { id: string; name: string }[];
+      for (const sub of subs) {
+        const existing = findSub.get(survivor.id, sub.name, sub.id) as { id: string } | undefined;
+        if (existing) {
+          repointSub?.run(existing.id, sub.id);
+          deactivateSub.run(sub.id);
+        } else {
+          moveSub.run(survivor.id, sub.id);
+        }
+      }
+      repointCat?.run(survivor.id, extra.id);
+      deactivateCat.run(extra.id);
+    }
+  }
+}
+
 /** Inserts any missing departments/categories/subcategories from EQUIPMENT_HIERARCHY. */
 export function seedEquipmentHierarchy(db: any): void {
   if (!tableExists(db, 'departments') || !tableExists(db, 'categories') || !tableExists(db, 'subcategories')) return;
+  renameCameraPeripheralsCategory(db);
 
   const insertCat = db.prepare(
     `INSERT INTO categories (id, department_id, name, display_order, is_active) VALUES (?, ?, ?, ?, 1)`
@@ -218,7 +272,7 @@ export function pruneUnusedObsoleteCatalog(db: any): void {
  *   Phantom Flex 4K           → Camera / Camera Package / High Speed
  *   Peripherals / Power / …   → Power / Battery and Charger | AC Power Supply
  *   Lens / Special / Lens Support → Lens / Lens Support
- *   Camera Package Component / Arri Camera Package → Camera Package / Arri Camera Package
+ *   Camera Package Component / Arri Camera Package → Camera / Camera Package Component / Arri Camera Package
  * Idempotent: already-migrated rows are left alone.
  */
 export function remapCameraDepartmentTaxonomy(db: any): number {
@@ -239,12 +293,27 @@ export function remapCameraDepartmentTaxonomy(db: any): number {
   const lensCat = catId('Lens');
   const powerCat = catId('Power');
   const packageCat = catId('Camera Package Component');
-  const cameraPackageUnderCamera = subId(cameraCat, 'Camera Package');
+  const cameraPackageMain = subId(cameraCat, 'Camera Package Main');
+  const legacyCameraPackageSub = subId(cameraCat, 'Camera Package');
+  if (cameraCat && cameraPackageMain && legacyCameraPackageSub && legacyCameraPackageSub !== cameraPackageMain) {
+    db.prepare('UPDATE equipment_items SET subcategory_id = ? WHERE subcategory_id = ?').run(cameraPackageMain, legacyCameraPackageSub);
+    db.prepare('UPDATE subcategories SET is_active = 0 WHERE id = ?').run(legacyCameraPackageSub);
+  }
+  const componentSub = subId(cameraCat, 'Camera Package Component');
+  const legacyComponentSub = subId(packageCat, 'Camera Package');
+  if (cameraCat && componentSub && packageCat) {
+    db.prepare(
+      'UPDATE equipment_items SET category_id = ?, subcategory_id = COALESCE(?, subcategory_id) WHERE category_id = ?',
+    ).run(cameraCat, componentSub, packageCat);
+    if (legacyComponentSub && legacyComponentSub !== componentSub) {
+      db.prepare('UPDATE equipment_items SET subcategory_id = ? WHERE subcategory_id = ?').run(componentSub, legacyComponentSub);
+      db.prepare('UPDATE subcategories SET is_active = 0 WHERE id = ?').run(legacyComponentSub);
+    }
+  }
   const lensSupportSub = subId(lensCat, 'Lens Support');
   const batterySub = subId(powerCat, 'Battery and Charger');
   const acSub = subId(powerCat, 'AC Power Supply');
-  const cameraPackageSub = subId(packageCat, 'Camera Package');
-  if (!cameraCat || !cameraPackageUnderCamera) return 0;
+  if (!cameraCat || !cameraPackageMain) return 0;
 
   const cameraResolutions = new Set(['2K', '3K', '4K', '6K', '8K', '12K']);
   const cameraPackageLabel = (itemName: string, subName: string, subSub: string, fourth: string): string | null => {
@@ -290,7 +359,7 @@ export function remapCameraDepartmentTaxonomy(db: any): number {
       || (item.cat_name === 'Camera' && (subName === 'Camera Body' || subName === 'High Speed Camera'));
     if (legacyCameraPackage) {
       newCat = cameraCat;
-      newSub = cameraPackageUnderCamera;
+      newSub = cameraPackageMain;
       newSubSub = cameraPackageLabel(item.name || '', subName, subSub, fourth);
       changed = true;
     } else if (item.cat_name === 'Lens' && lensSupportSub && (subName === 'Lens Support' || subSub === 'Lens Support')) {
@@ -299,16 +368,16 @@ export function remapCameraDepartmentTaxonomy(db: any): number {
       changed = true;
     } else if (
       (item.cat_name === 'Camera Package Component' || item.cat_name === 'Camera Package Components')
-      && packageCat && cameraPackageSub
-      && (item.cat_name === 'Camera Package Components' || cameraPackageBrands.has(subName))
+      && componentSub
+      && (item.cat_name === 'Camera Package Components' || cameraPackageBrands.has(subName) || subName === 'Camera Package' || subName === 'Camera Package Component')
     ) {
-      newCat = packageCat;
-      newSub = cameraPackageSub;
+      newCat = cameraCat;
+      newSub = componentSub;
       if (cameraPackageBrands.has(subName)) newSubSub = subName;
       else if (cameraPackageBrands.has(subSub)) newSubSub = subSub;
       else if (cameraPackageBrands.has(fourth)) newSubSub = fourth;
       changed = true;
-    } else if (item.cat_name === 'Camera Peripherals' && powerCat) {
+    } else if ((item.cat_name === 'Camera Peripherals' || item.cat_name === 'Video Peripherals') && powerCat) {
       const isPower = subName === 'Power' || subSub === 'Power'
         || fourth === 'AC Power Supply'
         || fourth === 'V Mount'
@@ -332,9 +401,29 @@ export function remapCameraDepartmentTaxonomy(db: any): number {
       changed = true;
     }
 
+    if (item.cat_name === 'Camera Support Equipment' && subName === 'Matte Box' && (newSubSub || '').trim() === 'Clip On') {
+      newSubSub = 'Clip-on';
+      changed = true;
+    }
+
+    if (item.cat_name === 'Camera Support Equipment' && subName === 'Follow Focus' && (newSubSub || '').trim() === 'Wireless Follow Focus') {
+      newSubSub = 'Wireless';
+      changed = true;
+    }
+
     if (item.cat_name === 'Lens' && subName === 'Zoom Lens' && (subSub === 'Anamorphic' || fourth === 'Anamorphic')) {
       newSubSub = 'Anamorphic Zoom';
       changed = true;
+    }
+
+    if ((item.cat_name === 'Camera Peripherals' || item.cat_name === 'Video Peripherals') && subName === 'Monitor') {
+      if (subSub === 'Floor') {
+        newSubSub = 'Floor Monitor';
+        changed = true;
+      } else if (subSub === 'Overhead') {
+        newSubSub = 'Overhead Monitor';
+        changed = true;
+      }
     }
 
     if (subName === 'Storage Media' && (subSub === 'Cards' || subSub === 'Card Readers')) {
@@ -354,7 +443,7 @@ export function remapCameraDepartmentTaxonomy(db: any): number {
 /**
  * Lights and Grips: category Grips owns subcategory Cloth (former Cloth
  * subcategories become sub-subcategories) plus Clamps, Stands, Poles,
- * Power & Transport, and SFX & Others. Bouunce folds into Bounce. Idempotent.
+ * Power and Transport, and SFX & Others. Bouunce folds into Bounce. Idempotent.
  */
 export function remapGripsTaxonomy(db: any): number {
   if (!tableExists(db, 'departments') || !tableExists(db, 'categories') || !tableExists(db, 'equipment_items')) return 0;
@@ -388,17 +477,17 @@ export function remapGripsTaxonomy(db: any): number {
     return id;
   };
 
-  const clothSub = ensureSub('Cloth', 1);
-  const clampsSub = ensureSub('Clamps', 2);
-  const standsSub = ensureSub('Stands', 3);
-  const polesSub = ensureSub('Poles', 4);
-  const powerSub = ensureSub('Power & Transport', 5);
-  const sfxSub = ensureSub('SFX & Others', 6);
-  const dolliesSub = ensureSub('Dollies', 7);
-  const craneSub = ensureSub('Crane', 8);
-  const motionSub = ensureSub('Motion Control', 9);
-  const jibSub = ensureSub('Jib', 10);
-  const mountsSub = ensureSub('Mounts', 11);
+  const dolliesSub = ensureSub('Dollies', 1);
+  const craneSub = ensureSub('Crane', 2);
+  const jibSub = ensureSub('Jib', 3);
+  const motionSub = ensureSub('Motion Control', 4);
+  const mountsSub = ensureSub('Mounts', 5);
+  const standsSub = ensureSub('Stands', 6);
+  const clothSub = ensureSub('Cloth', 7);
+  const clampsSub = ensureSub('Clamps', 8);
+  const sfxSub = ensureSub('SFX & Others', 9);
+  const polesSub = ensureSub('Poles', 10);
+  const powerSub = ensureSub('Power and Transport', 11);
 
   const subForMoved: Record<string, string> = {
     Cloth: clothSub,
@@ -464,6 +553,15 @@ export function remapGripsTaxonomy(db: any): number {
     }
   }
 
+  const legacyPower = findSub.get(grips.id, 'Power & Transport') as { id: string } | undefined;
+  let renamed = 0;
+  if (legacyPower && legacyPower.id !== powerSub) {
+    renamed = (db.prepare(
+      `UPDATE equipment_items SET subcategory_id = ?, updated_at = datetime('now') WHERE subcategory_id = ?`,
+    ).run(powerSub, legacyPower.id) as { changes: number }).changes || 0;
+    db.prepare('UPDATE subcategories SET is_active = 0 WHERE id = ?').run(legacyPower.id);
+  }
+
   const supplyMoved = db.prepare(`
     UPDATE equipment_items
     SET sub_subcategory = 'Portable Power', updated_at = datetime('now')
@@ -472,7 +570,7 @@ export function remapGripsTaxonomy(db: any): number {
   `).run(powerSub) as { changes: number };
 
   if (changes > 0) regenerateEquipmentCodes(db);
-  return changes + (supplyMoved.changes || 0);
+  return changes + (supplyMoved.changes || 0) + renamed;
 }
 
 /** Rewrite every item prefix and per-unit code to the structured naming scheme. */
@@ -491,11 +589,15 @@ export function regenerateEquipmentCodes(db: any): void {
   }>;
 
   const prefixByItem = new Map<string, string>();
-  let itemNeedsRewrite = false;
+  const assignable: typeof items = [];
+  const reserved = new Set<string>();
   for (const item of items) {
     // Keep 1 Take crew-rate codes as stored; rewriting them would break the
     // rental personnel picker.
-    if (isPersonnelCatalogName(item.department_name)) continue;
+    if (isPersonnelCatalogName(item.department_name)) {
+      if (item.equipment_code) reserved.add(item.equipment_code);
+      continue;
+    }
     const prefix = buildSkuPrefix({
       departmentName: item.department_name,
       categoryName: item.category_name,
@@ -503,26 +605,41 @@ export function regenerateEquipmentCodes(db: any): void {
       model: item.model,
     });
     prefixByItem.set(item.id, prefix);
-    if (item.equipment_code !== prefix) itemNeedsRewrite = true;
+    assignable.push(item);
   }
 
+  assignable.sort((a, b) => a.id.localeCompare(b.id));
+  const codeByItem = new Map<string, string>();
+  for (const item of assignable) {
+    const prefix = prefixByItem.get(item.id);
+    const code = item.equipment_code || '';
+    if (!prefix || !listCodeMatchesPrefix(code, prefix) || reserved.has(code)) continue;
+    reserved.add(code);
+    codeByItem.set(item.id, code);
+  }
+  for (const item of assignable) {
+    if (codeByItem.has(item.id)) continue;
+    const prefix = prefixByItem.get(item.id);
+    if (!prefix) continue;
+    const code = uniqueItemCode(prefix, reserved);
+    reserved.add(code);
+    codeByItem.set(item.id, code);
+  }
+
+  const itemNeedsRewrite = assignable.some((item) => item.equipment_code !== codeByItem.get(item.id));
   const updateItem = db.prepare('UPDATE equipment_items SET equipment_code = ?, updated_at = datetime(\'now\') WHERE id = ?');
   if (itemNeedsRewrite) {
-    // Park current codes so UNIQUE swaps cannot collide with a prefix we are about to write.
-    for (const item of items) {
-      if (!prefixByItem.has(item.id)) continue;
-      updateItem.run(`__tmp__${item.id}`, item.id);
-    }
-    for (const item of items) {
-      const prefix = prefixByItem.get(item.id);
-      if (!prefix) continue;
-      try {
-        updateItem.run(prefix, item.id);
-      } catch {
-        // Two SKUs abbreviate to the same prefix. Units still share that prefix and
-        // stay unique via the count suffix; the list row keeps a unique placeholder.
+    const rewriteItems = db.transaction(() => {
+      // Park current codes so UNIQUE swaps cannot collide with a prefix we are about to write.
+      for (const item of assignable) {
+        updateItem.run(`__tmp__${item.id}`, item.id);
       }
-    }
+      for (const item of assignable) {
+        const code = codeByItem.get(item.id);
+        if (code) updateItem.run(code, item.id);
+      }
+    });
+    rewriteItems();
   }
 
   const countsByPrefix = new Map<string, number>();
@@ -1445,6 +1562,108 @@ const MIGRATIONS: Migration[] = [
     id: '028_delist_dollies_cranes_categories',
     up: (db: any) => {
       deactivateDelistedCategories(db);
+    },
+  },
+  {
+    id: '029_loan_project_production',
+    up: (db: any) => {
+      if (!tableExists(db, 'equipment_loans')) return;
+      if (!columnExists(db, 'equipment_loans', 'project_name')) {
+        db.exec(`ALTER TABLE equipment_loans ADD COLUMN project_name TEXT NOT NULL DEFAULT ''`);
+      }
+      if (!columnExists(db, 'equipment_loans', 'production_name')) {
+        db.exec(`ALTER TABLE equipment_loans ADD COLUMN production_name TEXT NOT NULL DEFAULT ''`);
+      }
+    },
+  },
+  {
+    id: '030_equipment_outing_notes',
+    up: (db: any) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS equipment_outing_notes (
+          id TEXT PRIMARY KEY,
+          equipment_id TEXT NOT NULL REFERENCES equipment_items(id) ON DELETE CASCADE,
+          loan_id TEXT NOT NULL REFERENCES equipment_loans(id) ON DELETE CASCADE,
+          notes TEXT NOT NULL DEFAULT '',
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE (equipment_id, loan_id)
+        )
+      `);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_equipment_outing_notes_equipment ON equipment_outing_notes(equipment_id)`);
+    },
+  },
+  {
+    id: '031_rental_shoot_usage',
+    up: (db: any) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS rental_requests (
+          id TEXT PRIMARY KEY,
+          request_number TEXT NOT NULL DEFAULT '',
+          project_name TEXT NOT NULL DEFAULT '',
+          client_name TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'draft',
+          archived_at TEXT,
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS rental_shoot_days (
+          id TEXT PRIMARY KEY,
+          request_id TEXT NOT NULL REFERENCES rental_requests(id) ON DELETE CASCADE,
+          shoot_date TEXT NOT NULL DEFAULT '',
+          day_label TEXT NOT NULL DEFAULT '',
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_rental_shoot_days_request ON rental_shoot_days(request_id)`);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS rental_line_items (
+          id TEXT PRIMARY KEY,
+          request_id TEXT NOT NULL REFERENCES rental_requests(id) ON DELETE CASCADE,
+          day_id TEXT NOT NULL REFERENCES rental_shoot_days(id) ON DELETE CASCADE,
+          description TEXT NOT NULL DEFAULT '',
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_rental_line_items_day ON rental_line_items(day_id)`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_rental_line_items_request ON rental_line_items(request_id)`);
+
+      // Notes used to require an EIM loan. Shoot history is keyed by the 1 Take
+      // shoot day id, so drop that foreign key without discarding saved notes.
+      const notesSql: any = db.prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'equipment_outing_notes'",
+      ).get();
+      if (notesSql?.sql && String(notesSql.sql).includes('equipment_loans')) {
+        db.exec(`
+          CREATE TABLE equipment_outing_notes_new (
+            id TEXT PRIMARY KEY,
+            equipment_id TEXT NOT NULL REFERENCES equipment_items(id) ON DELETE CASCADE,
+            loan_id TEXT NOT NULL,
+            notes TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE (equipment_id, loan_id)
+          )
+        `);
+        db.exec(`
+          INSERT INTO equipment_outing_notes_new (id, equipment_id, loan_id, notes, updated_at)
+          SELECT id, equipment_id, loan_id, notes, updated_at FROM equipment_outing_notes
+        `);
+        db.exec(`DROP TABLE equipment_outing_notes`);
+        db.exec(`ALTER TABLE equipment_outing_notes_new RENAME TO equipment_outing_notes`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_equipment_outing_notes_equipment ON equipment_outing_notes(equipment_id)`);
+      }
+    },
+  },
+  {
+    id: '032_outing_set_and_serial',
+    up: (db: any) => {
+      if (!tableExists(db, 'equipment_outing_notes')) return;
+      if (!columnExists(db, 'equipment_outing_notes', 'set_number')) {
+        db.exec(`ALTER TABLE equipment_outing_notes ADD COLUMN set_number TEXT NOT NULL DEFAULT ''`);
+      }
+      if (!columnExists(db, 'equipment_outing_notes', 'serial_number')) {
+        db.exec(`ALTER TABLE equipment_outing_notes ADD COLUMN serial_number TEXT NOT NULL DEFAULT ''`);
+      }
     },
   },
 ];

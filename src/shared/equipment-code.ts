@@ -126,6 +126,24 @@ export function buildSkuPrefix(input: {
   ].join('-');
 }
 
+/** A list code already reserved for this prefix: the prefix itself, or prefix~2, prefix~3, … */
+export function listCodeMatchesPrefix(code: string, prefix: string): boolean {
+  if (!code || !prefix) return false;
+  if (code === prefix) return true;
+  const mark = `${prefix}~`;
+  if (!code.startsWith(mark)) return false;
+  return /^\d+$/.test(code.slice(mark.length));
+}
+
+/** Drop a trailing ~2 / ~3 so unit codes stay `{prefix}-001`. */
+export function listCodeBase(code: string): string {
+  const mark = code.lastIndexOf('~');
+  if (mark <= 0) return code;
+  const suffix = code.slice(mark + 1);
+  if (!/^\d+$/.test(suffix)) return code;
+  return code.slice(0, mark);
+}
+
 /**
  * List-row codes must be unique. Unit codes are `{prefix}-001`, so a colliding
  * list row uses `{prefix}~2` (tilde) instead of another hyphen suffix.

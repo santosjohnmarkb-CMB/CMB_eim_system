@@ -49,6 +49,7 @@ export function LoanDetailPage() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [editForm, setEditForm] = useState({
     person_or_org: '', loaned_date: '', tentative_return_date: '',
+    project_name: '', production_name: '',
     purpose: '', location: '', duration: '', remarks: '', internal_notes: '',
   });
 
@@ -154,6 +155,8 @@ export function LoanDetailPage() {
     if (!loan) return;
     setEditForm({
       person_or_org: loan.person_or_org || '',
+      project_name: loan.project_name || '',
+      production_name: loan.production_name || '',
       loaned_date: loan.loaned_date || '',
       tentative_return_date: loan.tentative_return_date || '',
       purpose: loan.purpose || '',
@@ -169,10 +172,14 @@ export function LoanDetailPage() {
     if (!id) return;
     if (!editForm.person_or_org.trim()) { toast.error('Person or organization is required'); return; }
     if (!editForm.loaned_date) { toast.error('Date is required'); return; }
+    if (isOutward && !editForm.project_name.trim()) { toast.error('Project name is required'); return; }
+    if (isOutward && !editForm.production_name.trim()) { toast.error('Production name is required'); return; }
     setSavingEdit(true);
     try {
       await update(id, {
         person_or_org: editForm.person_or_org,
+        project_name: editForm.project_name,
+        production_name: editForm.production_name,
         loaned_date: editForm.loaned_date,
         tentative_return_date: editForm.tentative_return_date || null,
         purpose: editForm.purpose,
@@ -281,6 +288,8 @@ export function LoanDetailPage() {
           <Detail label={isOutward ? 'Person / Organization' : 'Lent By'} value={loan.person_or_org} />
           <Detail label={isOutward ? 'Loaned Date' : 'Received Date'} value={fmtDate(loan.loaned_date)} />
           <Detail label={isOutward ? 'Tentative Return' : 'Return By'} value={fmtDate(loan.tentative_return_date)} />
+          {isOutward && <Detail label="Project Name" value={loan.project_name || '—'} />}
+          {isOutward && <Detail label="Production Name" value={loan.production_name || '—'} />}
           <Detail label="Purpose" value={loan.purpose || '—'} />
           <Detail label="Location" value={loan.location || '—'} />
           <Detail label="Duration" value={loan.duration || '—'} />
@@ -404,6 +413,20 @@ export function LoanDetailPage() {
               onChange={(e) => setEditForm((p) => ({ ...p, duration: e.target.value }))}
               placeholder="e.g. 3 days"
             />
+            {isOutward && (
+              <Input
+                label="Project Name *"
+                value={editForm.project_name}
+                onChange={(e) => setEditForm((p) => ({ ...p, project_name: e.target.value }))}
+              />
+            )}
+            {isOutward && (
+              <Input
+                label="Production Name *"
+                value={editForm.production_name}
+                onChange={(e) => setEditForm((p) => ({ ...p, production_name: e.target.value }))}
+              />
+            )}
             <Input
               label="Purpose"
               value={editForm.purpose}

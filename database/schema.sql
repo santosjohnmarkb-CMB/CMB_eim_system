@@ -202,6 +202,54 @@ CREATE TABLE IF NOT EXISTS equipment_loan_items (
 CREATE INDEX IF NOT EXISTS idx_equipment_loan_items_loan ON equipment_loan_items(loan_id);
 CREATE INDEX IF NOT EXISTS idx_equipment_loan_items_equipment ON equipment_loan_items(equipment_id);
 
+-- Per-equipment note on a 1 Take shoot day. Local only: not synced to the shared cloud.
+-- loan_id stores the rental_shoot_days id (kept so existing note rows still fit).
+CREATE TABLE IF NOT EXISTS equipment_outing_notes (
+  id TEXT PRIMARY KEY,
+  equipment_id TEXT NOT NULL REFERENCES equipment_items(id) ON DELETE CASCADE,
+  loan_id TEXT NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  set_number TEXT NOT NULL DEFAULT '',
+  serial_number TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (equipment_id, loan_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_equipment_outing_notes_equipment ON equipment_outing_notes(equipment_id);
+
+-- Read-only mirror of 1 Take shoot schedules. 1 Take owns these rows in the
+-- shared cloud; EIM pulls them so equipment use count equals scheduled shoots.
+CREATE TABLE IF NOT EXISTS rental_requests (
+  id TEXT PRIMARY KEY,
+  request_number TEXT NOT NULL DEFAULT '',
+  project_name TEXT NOT NULL DEFAULT '',
+  client_name TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'draft',
+  archived_at TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS rental_shoot_days (
+  id TEXT PRIMARY KEY,
+  request_id TEXT NOT NULL REFERENCES rental_requests(id) ON DELETE CASCADE,
+  shoot_date TEXT NOT NULL DEFAULT '',
+  day_label TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_rental_shoot_days_request ON rental_shoot_days(request_id);
+
+CREATE TABLE IF NOT EXISTS rental_line_items (
+  id TEXT PRIMARY KEY,
+  request_id TEXT NOT NULL REFERENCES rental_requests(id) ON DELETE CASCADE,
+  day_id TEXT NOT NULL REFERENCES rental_shoot_days(id) ON DELETE CASCADE,
+  description TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_rental_line_items_day ON rental_line_items(day_id);
+CREATE INDEX IF NOT EXISTS idx_rental_line_items_request ON rental_line_items(request_id);
+
 -- Equipment purchase requests. Standalone tracking only; fully independent of the
 -- inventory tables. Each request covers one free-text asset (new equipment,
 -- accessory, spare part, wear-and-tear replacement, or additional inventory).

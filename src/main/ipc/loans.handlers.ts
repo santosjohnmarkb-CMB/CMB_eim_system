@@ -177,9 +177,9 @@ export function registerLoanHandlers(): void {
     const statusLogIds: string[] = [];
     const tx = db.transaction(() => {
       db.prepare(`
-        INSERT INTO equipment_loans (id, loan_number, direction, department, person_or_org, purpose, location, loaned_date, duration, tentative_return_date, remarks, internal_notes, status, created_by, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)
-      `).run(id, loanNumber, input.direction, input.department, input.person_or_org, input.purpose || '', input.location || '',
+        INSERT INTO equipment_loans (id, loan_number, direction, department, person_or_org, project_name, production_name, purpose, location, loaned_date, duration, tentative_return_date, remarks, internal_notes, status, created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)
+      `).run(id, loanNumber, input.direction, input.department, input.person_or_org, input.project_name || '', input.production_name || '', input.purpose || '', input.location || '',
         input.loaned_date, input.duration || '', input.tentative_return_date || null, input.remarks || '', input.internal_notes || '',
         user.full_name, now, now);
 
@@ -239,11 +239,11 @@ export function registerLoanHandlers(): void {
     const input = LoanUpdateSchema.parse(data);
     db.prepare(`
       UPDATE equipment_loans
-      SET person_or_org = ?, purpose = ?, location = ?, loaned_date = ?, duration = ?,
+      SET person_or_org = ?, project_name = ?, production_name = ?, purpose = ?, location = ?, loaned_date = ?, duration = ?,
           tentative_return_date = ?, remarks = ?, internal_notes = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(
-      input.person_or_org, input.purpose || '', input.location || '', input.loaned_date,
+      input.person_or_org, input.project_name || '', input.production_name || '', input.purpose || '', input.location || '', input.loaned_date,
       input.duration || '', input.tentative_return_date || null, input.remarks || '', input.internal_notes || '', id,
     );
     pushLoanToCloud(db, id);

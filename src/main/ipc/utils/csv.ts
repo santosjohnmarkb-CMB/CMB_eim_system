@@ -86,10 +86,12 @@ export function csvRowIsBlank(cols: string[]): boolean {
 }
 
 /** Drop Excel/Numbers title rows like `Table 1,,,,,` so the real header row is first. */
-export function skipCsvTitleRows(lines: string[]): string[] {
+export function skipCsvTitleRows(lines: string[], knownHeaders?: ReadonlySet<string>): string[] {
+  const known = knownHeaders ?? EQUIPMENT_CSV_KNOWN_HEADERS;
   const limit = Math.min(lines.length, 15);
   for (let i = 0; i < limit; i++) {
-    if (!csvRowLooksLikeHeaders(parseCsvRow(lines[i]!))) continue;
+    const hits = parseCsvRow(lines[i]!).map(normalizeCsvHeader).filter((h) => known.has(h)).length;
+    if (hits < 2) continue;
     if (i > 0) console.log(`[csv] Skipping ${i} title row(s) before headers: "${lines[0]}"`);
     return lines.slice(i);
   }

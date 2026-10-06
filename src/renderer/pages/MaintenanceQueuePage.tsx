@@ -7,7 +7,7 @@ import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { CompletedTicketsTab } from '../components/maintenance/CompletedTicketsTab';
 import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG, COMPLETION_OUTCOME_CONFIG } from '../lib/constants';
 import { printHtml, escapeHtml } from '../lib/print';
-import { DEPARTMENT_CONFIG, opsDepartmentOf } from '../../shared/constants';
+import { DEPARTMENT_CONFIG, matchesOpsDepartment } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import type { MaintenanceTicket, RepairStatus, CompletedHistoryEntry } from '../../shared/types';
 
@@ -127,35 +127,41 @@ export function MaintenanceQueuePage() {
     printHtml(`Maintenance History — ${historyModal.equipmentCode}`, body);
   }, [historyModal, modalHistory]);
 
+  const unassignedBucket = visibleDepts.length === 1 ? visibleDepts[0] : null;
+
   const recentByDept = useMemo(() => {
     const result: Record<Department, { equipmentId: string; equipmentName: string; equipmentCode: string; completionDate: string; category: string }[]> = { camera: [], lights_grips: [] };
     const seen: Record<Department, Set<string>> = { camera: new Set(), lights_grips: new Set() };
 
     for (const entry of completedHistory) {
-      const dept = opsDepartmentOf(entry.department_name, entry.category_name) ?? undefined;
-      if (!dept) continue;
-      if (seen[dept].has(entry.equipment_id)) continue;
-      if (result[dept].length >= 5) continue;
-      seen[dept].add(entry.equipment_id);
-      result[dept].push({
-        equipmentId: entry.equipment_id,
-        equipmentName: entry.equipment_name,
-        equipmentCode: entry.equipment_code,
-        completionDate: entry.completion_date || entry.reported_date,
-        category: entry.category_name,
-      });
+      for (const dept of DEPTS) {
+        if (!matchesOpsDepartment(dept, entry.department_name, entry.category_name, unassignedBucket === dept)) continue;
+        if (seen[dept].has(entry.equipment_id)) continue;
+        if (result[dept].length >= 5) continue;
+        seen[dept].add(entry.equipment_id);
+        result[dept].push({
+          equipmentId: entry.equipment_id,
+          equipmentName: entry.equipment_name,
+          equipmentCode: entry.equipment_code,
+          completionDate: entry.completion_date || entry.reported_date,
+          category: entry.category_name,
+        });
+      }
     }
     return result;
-  }, [completedHistory]);
+  }, [completedHistory, unassignedBucket]);
 
   const ticketsByDept = useMemo(() => {
     const result: Record<Department, MaintenanceTicket[]> = { camera: [], lights_grips: [] };
     for (const t of tickets) {
-      const dept = opsDepartmentOf(t.department_name, t.category_name) ?? undefined;
-      if (dept) result[dept].push(t);
+      for (const dept of DEPTS) {
+        if (matchesOpsDepartment(dept, t.department_name, t.category_name, unassignedBucket === dept)) {
+          result[dept].push(t);
+        }
+      }
     }
     return result;
-  }, [tickets]);
+  }, [tickets, unassignedBucket]);
 
   const openByDept = useMemo(() => {
     const result: Record<Department, MaintenanceTicket[]> = { camera: [], lights_grips: [] };

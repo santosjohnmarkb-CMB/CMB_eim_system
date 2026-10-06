@@ -23,6 +23,9 @@ type TableName =
   | 'parts_compatibility'
   | 'preventive_schedules'
   | 'vendors'
+  | 'rental_requests'
+  | 'rental_shoot_days'
+  | 'rental_line_items'
   | 'sync_metadata'
   | 'sync_tombstones'
   | 'audit_logs';

@@ -1,6 +1,6 @@
 import type { IpcMainInvokeEvent } from 'electron';
 import { getSession } from './session';
-import { DEPARTMENT_CONFIG, opsDepartmentOf } from '../../shared/constants';
+import { DEPARTMENT_CONFIG, isOutsideOpsDepartment, opsDepartmentOf } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 
 // Returns the department the current session is scoped to, or null for admins
@@ -40,7 +40,7 @@ export function assertEquipmentInDepartment(db: any, event: IpcMainInvokeEvent, 
     LEFT JOIN categories c ON c.id = e.category_id
     WHERE e.id = ?
   `).get(equipmentId);
-  if (!row || opsDepartmentOf(row.department_name, row.category_name) !== dept) {
+  if (!row || isOutsideOpsDepartment(dept, row.department_name, row.category_name)) {
     throw new Error('This equipment belongs to another department.');
   }
 }

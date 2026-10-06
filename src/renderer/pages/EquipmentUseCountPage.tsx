@@ -1,11 +1,11 @@
 import { useEffect, useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams, Navigate } from 'react-router-dom';
 import { Camera, Lightbulb, ArrowLeft, BarChart3, Search } from 'lucide-react';
 import { DEPARTMENT_CONFIG, opsDepartmentOf } from '../../shared/constants';
 import { groupByCategoryThenSubcategory } from '../lib/catalogHierarchy';
 import type { Department } from '../../shared/constants';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
-import { ipcInvoke } from '../lib/ipc';
+import { ipcInvoke, ipcOn, ipcRemoveListener } from '../lib/ipc';
 import { useAuthStore } from '../stores/auth.store';
 import type { EquipmentUseCount } from '../../shared/types';
 
@@ -21,12 +21,12 @@ const DEPT_ACCENT: Record<Department, string> = {
 
 export function EquipmentUseCountPage() {
   const navigate = useNavigate();
+  const { dept: deptParam } = useParams<{ dept: string }>();
   const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin' || user?.role === 'viewer';
   const userDept = user?.department as Department | null;
-  const departments: Department[] = isAdmin
-    ? (['camera', 'lights_grips'] as Department[])
-    : (userDept ? [userDept] : (['camera', 'lights_grips'] as Department[]));
+  const requested = deptParam === 'camera' || deptParam === 'lights_grips' ? deptParam : null;
+  const departments: Department[] = requested ? [requested] : [];
 
   const [useCounts, setUseCounts] = useState<EquipmentUseCount[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,7 +45,17 @@ export function EquipmentUseCountPage() {
       }
     }
     load();
-    return () => { cancelled = true; };
+    const onShootChange = (...args: unknown[]) => {
+      const table = (args[0] as { table?: string } | undefined)?.table;
+      if (table === 'rental_requests' || table === 'rental_shoot_days' || table === 'rental_line_items') {
+        void load();
+      }
+    };
+    ipcOn('sync:dataChanged', onShootChange);
+    return () => {
+      cancelled = true;
+      ipcRemoveListener('sync:dataChanged', onShootChange);
+    };
   }, []);
 
   // Equipment use counts grouped by department (via category → department mapping).
@@ -66,15 +76,22 @@ export function EquipmentUseCountPage() {
     return result;
   }, [useCounts, search]);
 
+  if (!requested) {
+    return <Navigate to={userDept ? `/equipment/use-count/${userDept}` : '/equipment'} replace />;
+  }
+  if (!isAdmin && userDept && requested !== userDept) {
+    return <Navigate to={`/equipment/use-count/${userDept}`} replace />;
+  }
+
   if (loading) return <LoadingSpinner size="lg" className="py-24" />;
 
   return (
     <div className="space-y-6 max-w-[1400px] mx-auto">
       <button
-        onClick={() => navigate('/equipment')}
+        onClick={() => navigate(-1)}
         className="flex items-center gap-1.5 text-sm text-surface-400 hover:text-surface-200 transition-colors"
       >
-        <ArrowLeft size={16} /> Back to Equipment
+        <ArrowLeft size={16} /> Back
       </button>
 
       <div className="flex items-center gap-3">
@@ -82,7 +99,7 @@ export function EquipmentUseCountPage() {
           <BarChart3 size={20} className="text-primary-400" />
         </div>
         <div className="flex-1">
-          <h1 className="text-xl font-bold text-surface-100">Equipment Use Count</h1>
+          <h1 className="text-xl font-bold text-surface-100">{DEPARTMENT_CONFIG[requested].shortLabel} Equipment Use Count</h1>
           <p className="text-sm text-surface-500">Total deployments per equipment, ranked by usage</p>
         </div>
       </div>
@@ -134,9 +151,11 @@ export function EquipmentUseCountPage() {
                       <div className="space-y-3 pl-2">
                         {group.subcategories.map((sub) => (
                           <div key={sub.label}>
-                            <p className="text-2xs font-medium text-surface-400 mb-1 uppercase tracking-wide">
-                              {sub.label}
-                            </p>
+                            {sub.label !== group.label && (
+                              <p className="text-2xs font-medium text-surface-400 mb-1 uppercase tracking-wide">
+                                {sub.label}
+                              </p>
+                            )}
                             <table className="w-full text-sm">
                               <thead>
                                 <tr className="text-2xs text-surface-500 uppercase tracking-wider border-b border-surface-800">
@@ -150,7 +169,7 @@ export function EquipmentUseCountPage() {
                                 {sub.items.map((item, idx) => (
                                   <tr
                                     key={item.equipment_id}
-                                    onClick={() => navigate(`/equipment/detail/${item.equipment_id}`)}
+                                    onClick={() => navigate(`/equipment/use-count/${requested}/${item.equipment_id}`)}
                                     className="border-b border-surface-800/40 last:border-0 hover:bg-surface-800/40 transition-colors cursor-pointer"
                                   >
                                     <td className="py-1.5 pr-2 text-surface-600 text-right text-xs">{idx + 1}</td>

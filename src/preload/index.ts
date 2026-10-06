@@ -21,6 +21,8 @@ const ALLOWED_CHANNELS = new Set([
   'db:equipment:getStatusLog',
   'db:equipment:getDashboardStats',
   'db:equipment:getUseCounts',
+  'db:equipment:getUseHistory',
+  'db:equipment:saveUseNote',
   'db:equipment:purgeAllInventory',
   'db:packages:getAll',
   'db:packages:getById',

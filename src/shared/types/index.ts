@@ -342,6 +342,8 @@ export interface EquipmentLoan {
   direction: LoanDirection;
   department: 'camera' | 'lights_grips';
   person_or_org: string;
+  project_name?: string;
+  production_name?: string;
   purpose: string;
   location: string;
   loaned_date: string;
@@ -489,6 +491,17 @@ export interface EquipmentUseCount {
   subcategory_name: string;
   department_name?: string;
   use_count: number;
+}
+
+export interface EquipmentOuting {
+  id: string;
+  loaned_date: string;
+  project_name: string;
+  production_name: string;
+  loan_number: string;
+  notes: string;
+  set_number: string;
+  serial_number: string;
 }
 
 export interface CompletedHistoryEntry {

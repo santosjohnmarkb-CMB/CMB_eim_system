@@ -8,7 +8,7 @@ import { DEPARTMENT_CONFIG, opsDepartmentOf } from '../../shared/constants';
 import { groupByCategoryThenSubcategory } from '../lib/catalogHierarchy';
 import type { Department } from '../../shared/constants';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
-import { ipcInvoke } from '../lib/ipc';
+import { ipcInvoke, ipcOn, ipcRemoveListener } from '../lib/ipc';
 import { useAuthStore } from '../stores/auth.store';
 import type { DashboardStats, EquipmentUseCount } from '../../shared/types';
 
@@ -63,7 +63,19 @@ export function EquipmentDashboardPage() {
       setLoading(false);
     }
     load();
-    return () => { cancelled = true; };
+    const onShootChange = (...args: unknown[]) => {
+      const table = (args[0] as { table?: string } | undefined)?.table;
+      if (table === 'rental_requests' || table === 'rental_shoot_days' || table === 'rental_line_items') {
+        void ipcInvoke<EquipmentUseCount[]>('db:equipment:getUseCounts')
+          .then((counts) => { if (!cancelled) setUseCounts(counts || []); })
+          .catch(() => {});
+      }
+    };
+    ipcOn('sync:dataChanged', onShootChange);
+    return () => {
+      cancelled = true;
+      ipcRemoveListener('sync:dataChanged', onShootChange);
+    };
   }, []);
 
   const deptUseCounts = useMemo(() => {
@@ -147,7 +159,7 @@ export function EquipmentDashboardPage() {
 
             const subcategoryGroups = groupByCategoryThenSubcategory(deptCounts, DEPARTMENT_CONFIG[dept].categories)
               .flatMap((group) => group.subcategories.map((sub) => ({
-                label: `${group.label} · ${sub.label}`,
+                label: group.label === sub.label ? group.label : `${group.label} · ${sub.label}`,
                 items: sub.items.slice().sort((a, b) => b.use_count - a.use_count).slice(0, 5),
               })));
 
@@ -186,7 +198,7 @@ export function EquipmentDashboardPage() {
                 })}
 
                 <button
-                  onClick={() => navigate('/equipment/use-count')}
+                  onClick={() => navigate(`/equipment/use-count/${dept}`)}
                   className="text-xs text-primary-400 hover:text-primary-300 transition-colors flex items-center gap-1"
                 >
                   View Complete List <ArrowRight size={12} />

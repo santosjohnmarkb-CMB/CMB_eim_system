@@ -25,6 +25,7 @@ export function TopBar() {
   const syncStatus = useSyncStore((s) => s.status);
 
   let title = PAGE_TITLES[location.pathname] || '';
+  if (!title && location.pathname.startsWith('/equipment/use-count')) title = 'Equipment Use Count';
   if (!title && location.pathname.startsWith('/equipment/')) title = 'Equipment Detail';
   if (!title && location.pathname.startsWith('/maintenance/')) title = 'Ticket Detail';
   if (!title && location.pathname.startsWith('/parts/')) title = 'Part Detail';

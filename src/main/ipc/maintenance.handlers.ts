@@ -6,7 +6,8 @@ import { writeAuditLog } from './audit';
 import { MaintenanceTicketCreateSchema, MaintenanceTicketUpdateSchema, MaintenanceNoteSchema, TicketActionSchema, TicketActionUpdateSchema, AttachmentDataSchema, PreventiveScheduleSchema } from '../../shared/schemas';
 import { pushOperationalToCloud } from '../sync/operational-sync';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
-import { sessionDepartment, categoriesForDepartment, departmentForCatalogDepartment, assertEquipmentInDepartment } from './department';
+import { sessionDepartment, categoriesForDepartment, assertEquipmentInDepartment } from './department';
+import { isOutsideOpsDepartment } from '../../shared/constants';
 import { recomputeAvailability, pickAvailableAsset, insertAssetStatusLog, pushStatusLogsToCloud } from './availability';
 import { archiveMaintenanceTicket, archiveRepairReleaseForm } from '../sync/archive-eim';
 import { saveBlob, deleteBlob, resolveBlob } from '../blob-store';
@@ -72,7 +73,7 @@ export function registerMaintenanceHandlers(): void {
     `).get(id);
     if (!ticket) throw new Error('Ticket not found');
     const dept = sessionDepartment(event);
-    if (dept && departmentForCatalogDepartment(ticket.department_name) !== dept) {
+    if (isOutsideOpsDepartment(dept, ticket.department_name, ticket.category_name)) {
       throw new Error('This ticket belongs to another department.');
     }
     return ticket;
@@ -80,7 +81,9 @@ export function registerMaintenanceHandlers(): void {
 
   ipcMain.handle('db:maintenance:getAll', (event: any) => {
     const cats = categoriesForDepartment(sessionDepartment(event));
-    const catWhere = cats ? `WHERE d.name IN (${cats.map(() => '?').join(', ')})` : '';
+    // d.id IS NULL keeps tickets whose equipment department_id does not resolve.
+    // A missing department is not another department.
+    const catWhere = cats ? `WHERE (d.id IS NULL OR d.name IN (${cats.map(() => '?').join(', ')}))` : '';
     return db.prepare(`
       SELECT mt.*, e.name as equipment_name, e.equipment_code, e.category_id,
         d.name as department_name,
@@ -121,7 +124,7 @@ export function registerMaintenanceHandlers(): void {
     `).get(id);
     if (!row) return null;
     const dept = sessionDepartment(event);
-    if (dept && departmentForCatalogDepartment(row.department_name) !== dept) return null;
+    if (isOutsideOpsDepartment(dept, row.department_name, row.category_name)) return null;
     // Detail view may display/re-upload the service doc, so return a real data URL.
     return { ...row, service_doc_data: resolveBlob(row.service_doc_data) };
   });

@@ -8,7 +8,7 @@ import { DataTable, type Column } from '../components/common/DataTable';
 import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
 import { EQUIPMENT_STATUS_CONFIG } from '../lib/constants';
-import { EQUIPMENT_SECTION_CONFIG, equipmentSectionOf, parseEquipmentSection } from '../../shared/constants';
+import { EQUIPMENT_SECTION_CONFIG, defaultCategoryRank, equipmentSectionOf, matchesOpsDepartment, parseEquipmentSection } from '../../shared/constants';
 import type { EquipmentSection } from '../../shared/constants';
 import { categoryOptionsForOps, categoryListLabel, PICKER_OMIT_CATEGORIES, subcategoryOptionsForCategory, subSubOptionsFor } from '../lib/catalogHierarchy';
 import type { EquipmentWithAsset, EquipmentStatus, BulkImportResult, CsvCategoryPreview } from '../../shared/types';
@@ -70,26 +70,12 @@ function summarizeStatus(item: EquipmentWithAsset): { status: string; mixed: boo
 }
 
 
-// Default ordering for the equipment list. Certain groups should surface first on
-// initial viewing: camera/lens/special for the camera dept, lighting for lights & grips.
-// Lower rank sorts first; items within the same rank keep their existing order.
+// Default list order. Camera: Camera, Lens, Camera Support Equipment,
+// Video Peripherals, Filters, then every other category, with Camera Package
+// Component last. Lights & Grips: Lights, then Grips, then every other category.
+// Items in the same category keep their existing order.
 function defaultGroupRank(item: EquipmentWithAsset, department: EquipmentSection | null): number {
-  const cat = (item.category_name ?? '').toLowerCase();
-  if (department === 'camera') {
-    if (cat.includes('support')) return 3;
-    if (cat.includes('peripheral')) return 4;
-    if (cat === 'camera' || cat.includes('camera body')) return 0;
-    if (cat.includes('lens')) return 1;
-    if (cat.includes('filter')) return 2;
-    if (cat.includes('power')) return 5;
-    return 6;
-  }
-  if (department === 'lights_grips') {
-    if (cat.includes('light')) return 0;
-    if (cat.includes('grip')) return 1;
-    return 2;
-  }
-  return 0;
+  return defaultCategoryRank(department, item.category_name, item.subcategory_name);
 }
 
 export function EquipmentListPage() {
@@ -130,7 +116,8 @@ export function EquipmentListPage() {
 
   const deptItems = useMemo(() => {
     if (!department) return items.filter((i) => equipmentSectionOf(i.department_name, i.category_name) !== 'personnel');
-    return items.filter((i) => equipmentSectionOf(i.department_name, i.category_name) === department);
+    if (department === 'personnel') return items.filter((i) => equipmentSectionOf(i.department_name, i.category_name) === 'personnel');
+    return items.filter((i) => matchesOpsDepartment(department, i.department_name, i.category_name, true));
   }, [items, department]);
 
   const hierarchyCategories = useMemo(
@@ -201,8 +188,9 @@ export function EquipmentListPage() {
   // Shared predicate for the active search/category/subcategory/status filters, so the
   // on-screen table and the printed output stay in sync.
   const matchesFilters = useCallback((item: EquipmentWithAsset) => {
-    if (search) {
-      const q = search.toLowerCase();
+    const q = search.trim().toLowerCase();
+    if (q) {
+      const units = unitsOf(item);
       const haystack = [
         item.name,
         item.equipment_code,
@@ -211,18 +199,21 @@ export function EquipmentListPage() {
         item.category_name,
         item.subcategory_name,
         item.sub_subcategory,
-        ...(unitsOf(item).map((a) => a.equipment_code)),
-        ...(unitsOf(item).map((a) => a.serial_number)),
-      ].filter(Boolean).join(' ').toLowerCase();
-      if (!haystack.includes(q)) return false;
+        ...units.map((a) => a?.equipment_code),
+        ...units.map((a) => a?.serial_number),
+      ].filter((part) => typeof part === 'string' && part.trim()).join(' ').toLowerCase();
+      const words = q.split(/\s+/);
+      if (!words.every((word) => haystack.includes(word))) return false;
     }
     if (categoryFilter && item.category_id !== categoryFilter && item.category_name !== categoryFilter) return false;
     if (subcategoryFilter && item.subcategory_id !== subcategoryFilter && item.subcategory_name !== subcategoryFilter) return false;
     if (subSubFilter) {
-      const wanted = subSubFilter.trim();
-      const stored = (item.sub_subcategory || '').trim();
-      const subName = (item.subcategory_name || '').trim();
-      if (stored !== wanted && subName !== wanted) return false;
+      const wanted = subSubFilter.trim().toLowerCase();
+      const stored = (item.sub_subcategory || '').trim().toLowerCase();
+      const subName = (item.subcategory_name || '').trim().toLowerCase();
+      const storedMatches = stored === wanted
+        || (wanted === 'wireless' && stored === 'wireless follow focus');
+      if (!storedMatches && subName !== wanted) return false;
     }
     if (statusFilter) {
       const units = unitsOf(item);
@@ -334,7 +325,7 @@ export function EquipmentListPage() {
       }
       : {
         name: 'ARRI Alexa Mini LF', department: 'Camera', category: 'Camera',
-        sub_category: 'Camera Package', sub_sub_category: '4K', item_type: 'standalone', brand: 'ARRI', model: 'Alexa Mini LF',
+        sub_category: 'Camera Package Main', sub_sub_category: '4K', item_type: 'standalone', brand: 'ARRI', model: 'Alexa Mini LF',
         qty_available: '2', pricing_type: 'per_day', base_price: isAdmin ? '15000' : '', notes: '',
       };
     const csv = EQUIPMENT_CSV_HEADERS.join(',') + '\n' + EQUIPMENT_CSV_HEADERS.map((h) => sample[h] ?? '').join(',') + '\n';
@@ -424,7 +415,7 @@ export function EquipmentListPage() {
 
       {/* Row 1: Search & filter dropdowns */}
       <div className="flex items-center gap-3">
-        <SearchBox value={search} onChange={setSearch} placeholder="Search name, code, category..." className="w-64" />
+        <SearchBox value={search} onChange={setSearch} placeholder="Search name, brand, or code..." className="w-64" />
         <select value={categoryFilter} onChange={(e) => handleCategoryChange(e.target.value)} className="px-3 py-2 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-200">
           <option value="">All Categories</option>
           {hierarchyCategories.map((c) => (<option key={c.id} value={c.id}>{categoryListLabel(c.name)}</option>))}

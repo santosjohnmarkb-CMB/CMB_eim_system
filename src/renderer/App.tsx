@@ -18,6 +18,7 @@ import { PartsDetailPage } from './pages/PartsDetailPage';
 import { PartsInventoryPage } from './pages/PartsInventoryPage';
 import { StockAdjustmentPage } from './pages/StockAdjustmentPage';
 import { EquipmentUseCountPage } from './pages/EquipmentUseCountPage';
+import { EquipmentUseHistoryPage } from './pages/EquipmentUseHistoryPage';
 import { LoansPage } from './pages/LoansPage';
 import { LoanNewPage } from './pages/LoanNewPage';
 import { LoanDetailPage } from './pages/LoanDetailPage';
@@ -111,6 +112,8 @@ export default function App() {
                   <Route path="/dashboard" element={<RoleGuard roles={['viewer']}><DashboardPage /></RoleGuard>} />
                   <Route path="/equipment" element={<EquipmentDashboardPage />} />
                   <Route path="/equipment/new" element={<RoleGuard roles={['equipment_manager']}><EquipmentAddPage /></RoleGuard>} />
+                  <Route path="/equipment/use-count/:dept/:equipmentId" element={<EquipmentUseHistoryPage />} />
+                  <Route path="/equipment/use-count/:dept" element={<EquipmentUseCountPage />} />
                   <Route path="/equipment/use-count" element={<EquipmentUseCountPage />} />
                   <Route path="/equipment/:dept" element={<DepartmentGuard><EquipmentListPage /></DepartmentGuard>} />
                   <Route path="/equipment/detail/:id" element={<EquipmentDetailPage />} />

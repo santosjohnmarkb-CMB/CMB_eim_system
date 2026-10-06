@@ -8,7 +8,7 @@ import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
 import { useToast } from '../hooks';
 import { printLoanReleaseForm } from '../lib/loanForms';
-import { DEPARTMENT_CONFIG, opsDepartmentOf, LOAN_DIRECTION_CONFIG } from '../../shared/constants';
+import { DEPARTMENT_CONFIG, matchesOpsDepartment, LOAN_DIRECTION_CONFIG } from '../../shared/constants';
 import type { Department } from '../../shared/constants';
 import type { EquipmentWithAsset, LoanDirection } from '../../shared/types';
 
@@ -49,6 +49,8 @@ export function LoanNewPage() {
   const [direction, setDirection] = useState<LoanDirection>(navState.direction || 'OUTWARD');
   const [department, setDepartment] = useState<Department>(lockedDept || navState.department || 'camera');
   const [personOrOrg, setPersonOrOrg] = useState('');
+  const [projectName, setProjectName] = useState('');
+  const [productionName, setProductionName] = useState('');
   const [purpose, setPurpose] = useState('');
   const [location, setLocation] = useState('');
   const [loanedDate, setLoanedDate] = useState(todayISO());
@@ -83,7 +85,7 @@ export function LoanNewPage() {
 
   // Equipment scoped to the chosen department.
   const deptItems = useMemo(
-    () => allItems.filter((i) => opsDepartmentOf(i.department_name, i.category_name) === department),
+    () => allItems.filter((i) => matchesOpsDepartment(department, i.department_name, i.category_name, true)),
     [allItems, department],
   );
 
@@ -159,6 +161,8 @@ export function LoanNewPage() {
       toast.error(isOutward ? 'Person or organization is required' : 'Lender is required');
       return;
     }
+    if (isOutward && !projectName.trim()) { toast.error('Project name is required'); return; }
+    if (isOutward && !productionName.trim()) { toast.error('Production name is required'); return; }
     const equipmentRows = rows.filter((r) => r.equipment);
     if (isOutward ? equipmentRows.length === 0 : rows.length === 0) {
       toast.error(isOutward ? 'Add at least one equipment' : 'Add at least one item');
@@ -171,6 +175,8 @@ export function LoanNewPage() {
         direction,
         department,
         person_or_org: personOrOrg,
+        project_name: projectName,
+        production_name: productionName,
         purpose,
         location,
         loaned_date: loanedDate,
@@ -297,6 +303,12 @@ export function LoanNewPage() {
             />
             <Input label={isOutward ? 'Loaned Date' : 'Received Date'} type="date" value={loanedDate} onChange={(e) => setLoanedDate(e.target.value)} />
             <Input label={isOutward ? 'Tentative Return Date' : 'Return-by Date'} type="date" value={tentativeReturn} onChange={(e) => setTentativeReturn(e.target.value)} />
+            {isOutward && (
+              <>
+                <Input label="Project Name *" value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="Project this equipment is going out for" />
+                <Input label="Production Name *" value={productionName} onChange={(e) => setProductionName(e.target.value)} placeholder="Production this equipment is going out for" />
+              </>
+            )}
             <Input label="Purpose" value={purpose} onChange={(e) => setPurpose(e.target.value)} placeholder="e.g. Workshop, training, event" />
             <Input label="Location" value={location} onChange={(e) => setLocation(e.target.value)} placeholder={isOutward ? 'Where the equipment is used' : 'Where the equipment is kept'} />
             <Input label="Duration" value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="e.g. 3 days" />

@@ -1,18 +1,18 @@
 import { ipcMain } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../database/index';
-import { requireInventoryAccess } from './session';
+import { requireInventoryAccess, requireWriteAccess } from './session';
 import { writeAuditLog } from './audit';
 import { EquipmentCreateSchema, EquipmentUpdateSchema, AssetUpdateSchema, AssetStatusUpdateSchema } from '../../shared/schemas';
 import { pushCatalogToCloud } from '../sync/catalog-sync';
 import { pushOperationalToCloud } from '../sync/operational-sync';
-import { CAMERA_PACKAGE_BRANDS, catalogDeptHasTaxonomy, isDelistedCategoryName, opsDepartmentOf } from '../../shared/constants';
+import { CAMERA_PACKAGE_BRANDS, catalogDeptHasTaxonomy, isDelistedCategoryName, isOutsideOpsDepartment, opsDepartmentOf } from '../../shared/constants';
 import { seedEquipmentHierarchy } from '../database/migrate';
 import { sessionDepartment, categoriesForDepartment, assertEquipmentInDepartment } from './department';
 import { recomputeAvailability, insertAssetStatusLog, pushStatusLogsToCloud } from './availability';
 import { parseCsvRow, skipCsvTitleRows, splitCsvLines, normalizeCsvHeader, csvCellValue, csvRowIsBlank, csvRowLooksLikeHeaders } from './utils/csv';
 import {
-  buildSkuPrefix, formatUnitCode, nextUnitCounts,
+  buildSkuPrefix, formatUnitCode, listCodeBase, listCodeMatchesPrefix, nextUnitCounts,
   parseUnitCount, trailingUnitCount, uniqueItemCode, unitQtyFromCsvRow,
 } from '../../shared/equipment-code';
 
@@ -33,12 +33,16 @@ export function registerEquipmentHandlers(): void {
     }
   };
 
+  const touchedCategoryIds = new Set<string>();
+  const touchedSubcategoryIds = new Set<string>();
+
   const ensureCategoryId = (departmentId: string, categoryIdOrName: string): string => {
     seedEquipmentHierarchy(db);
-    const byId: any = db.prepare('SELECT id, name FROM categories WHERE id = ?').get(categoryIdOrName);
+    const byId: any = db.prepare('SELECT id, name, is_active FROM categories WHERE id = ?').get(categoryIdOrName);
     if (byId) {
-      if (!isDelistedCategoryName(byId.name)) {
-        db.prepare('UPDATE categories SET is_active = 1 WHERE id = ?').run(byId.id);
+      if (!isDelistedCategoryName(byId.name) && !byId.is_active) {
+        db.prepare("UPDATE categories SET is_active = 1, updated_at = datetime('now') WHERE id = ?").run(byId.id);
+        touchedCategoryIds.add(byId.id);
       }
       return byId.id as string;
     }
@@ -46,39 +50,77 @@ export function registerEquipmentHandlers(): void {
       throw new Error(`Category "${categoryIdOrName}" is not available.`);
     }
     const byName: any = db.prepare(
-      'SELECT id FROM categories WHERE department_id = ? AND name = ? LIMIT 1',
+      'SELECT id, is_active FROM categories WHERE department_id = ? AND name = ? LIMIT 1',
     ).get(departmentId, categoryIdOrName);
     if (byName) {
-      db.prepare('UPDATE categories SET is_active = 1 WHERE id = ?').run(byName.id);
+      if (!byName.is_active) {
+        db.prepare("UPDATE categories SET is_active = 1, updated_at = datetime('now') WHERE id = ?").run(byName.id);
+        touchedCategoryIds.add(byName.id);
+      }
       return byName.id as string;
     }
     const id = uuidv4();
     db.prepare(
       'INSERT INTO categories (id, department_id, name, display_order, is_active) VALUES (?, ?, ?, 0, 1)',
     ).run(id, departmentId, categoryIdOrName);
+    touchedCategoryIds.add(id);
     return id;
   };
 
   const ensureSubcategoryId = (categoryId: string, subcategoryIdOrName: string | null | undefined): string | null => {
     if (!subcategoryIdOrName) return null;
     seedEquipmentHierarchy(db);
-    const byId: any = db.prepare('SELECT id FROM subcategories WHERE id = ?').get(subcategoryIdOrName);
+    const byId: any = db.prepare('SELECT id, is_active FROM subcategories WHERE id = ?').get(subcategoryIdOrName);
     if (byId) {
-      db.prepare('UPDATE subcategories SET is_active = 1 WHERE id = ?').run(byId.id);
+      if (!byId.is_active) {
+        db.prepare("UPDATE subcategories SET is_active = 1, updated_at = datetime('now') WHERE id = ?").run(byId.id);
+        touchedSubcategoryIds.add(byId.id);
+      }
       return byId.id as string;
     }
     const byName: any = db.prepare(
-      'SELECT id FROM subcategories WHERE category_id = ? AND name = ? LIMIT 1',
+      'SELECT id, is_active FROM subcategories WHERE category_id = ? AND name = ? LIMIT 1',
     ).get(categoryId, subcategoryIdOrName);
     if (byName) {
-      db.prepare('UPDATE subcategories SET is_active = 1 WHERE id = ?').run(byName.id);
+      if (!byName.is_active) {
+        db.prepare("UPDATE subcategories SET is_active = 1, updated_at = datetime('now') WHERE id = ?").run(byName.id);
+        touchedSubcategoryIds.add(byName.id);
+      }
       return byName.id as string;
     }
     const id = uuidv4();
     db.prepare(
       'INSERT INTO subcategories (id, category_id, name, display_order, is_active) VALUES (?, ?, ?, 0, 1)',
     ).run(id, categoryId, subcategoryIdOrName);
+    touchedSubcategoryIds.add(id);
     return id;
+  };
+
+  // Category and subcategory rows must reach the cloud before any equipment
+  // row that references them, or the equipment upsert fails the cloud FK.
+  const pushTaxonomyThenItems = async (
+    items: any[],
+    action: 'INSERT' | 'UPDATE',
+  ): Promise<void> => {
+    const categoryIds = new Set<string>(touchedCategoryIds);
+    const subcategoryIds = new Set<string>(touchedSubcategoryIds);
+    touchedCategoryIds.clear();
+    touchedSubcategoryIds.clear();
+    for (const item of items) {
+      if (item?.category_id) categoryIds.add(item.category_id);
+      if (item?.subcategory_id) subcategoryIds.add(item.subcategory_id);
+    }
+    for (const id of categoryIds) {
+      const row: any = db.prepare('SELECT * FROM categories WHERE id = ?').get(id);
+      if (row) await pushCatalogToCloud('categories', 'UPDATE', row);
+    }
+    for (const id of subcategoryIds) {
+      const row: any = db.prepare('SELECT * FROM subcategories WHERE id = ?').get(id);
+      if (row) await pushCatalogToCloud('subcategories', 'UPDATE', row);
+    }
+    for (const item of items) {
+      if (item?.id) await pushCatalogToCloud('equipment_items', action, item);
+    }
   };
 
   const skuPrefixFor = (departmentId: string, categoryId: string, brand: string, model: string): string => {
@@ -104,45 +146,52 @@ export function registerEquipmentHandlers(): void {
       .filter((n: number | null): n is number => n != null);
   };
 
-  const findSku = (departmentId: string, categoryId: string, brand: string, model: string): any => {
+  const findSku = (departmentId: string, categoryId: string, name: string, brand: string, model: string): any => {
     return db.prepare(`
       SELECT * FROM equipment_items
       WHERE is_active = 1 AND department_id = ? AND category_id = ?
+        AND LOWER(TRIM(COALESCE(name, ''))) = LOWER(TRIM(?))
         AND LOWER(TRIM(COALESCE(brand, ''))) = LOWER(TRIM(?))
         AND LOWER(TRIM(COALESCE(model, ''))) = LOWER(TRIM(?))
       LIMIT 1
-    `).get(departmentId, categoryId, brand || '', model || '');
+    `).get(departmentId, categoryId, name || '', brand || '', model || '');
   };
 
-  const findInactiveSku = (departmentId: string, categoryId: string, brand: string, model: string): any => {
+  const findInactiveSku = (departmentId: string, categoryId: string, name: string, brand: string, model: string): any => {
     return db.prepare(`
       SELECT * FROM equipment_items
       WHERE is_active = 0 AND department_id = ? AND category_id = ?
+        AND LOWER(TRIM(COALESCE(name, ''))) = LOWER(TRIM(?))
         AND LOWER(TRIM(COALESCE(brand, ''))) = LOWER(TRIM(?))
         AND LOWER(TRIM(COALESCE(model, ''))) = LOWER(TRIM(?))
       LIMIT 1
-    `).get(departmentId, categoryId, brand || '', model || '');
+    `).get(departmentId, categoryId, name || '', brand || '', model || '');
   };
 
   const itemByCode = (code: string): any => {
     return db.prepare('SELECT * FROM equipment_items WHERE equipment_code = ? LIMIT 1').get(code);
   };
 
-  const sameBrandModel = (row: any, brand: string, model: string): boolean => {
-    const b = (v: unknown) => String(v ?? '').trim().toLowerCase();
-    return b(row?.brand) === b(brand) && b(row?.model) === b(model);
+  const sameLabel = (left: unknown, right: unknown): boolean => {
+    return String(left ?? '').trim().toLowerCase() === String(right ?? '').trim().toLowerCase();
   };
 
-  /** Reuse the SKU when brand/model match, even if category_id differs (remap / duplicate rows). */
+  /** Reuse a row only when name, brand, and model all match. A different name is a new entry. */
   const resolveExistingSku = (
-    departmentId: string, categoryId: string, brand: string, model: string, prefix: string,
+    departmentId: string, categoryId: string, name: string, brand: string, model: string, prefix: string,
   ): any => {
-    const active = findSku(departmentId, categoryId, brand, model);
+    const active = findSku(departmentId, categoryId, name, brand, model);
     if (active) return active;
-    const inactive = findInactiveSku(departmentId, categoryId, brand, model);
+    const inactive = findInactiveSku(departmentId, categoryId, name, brand, model);
     if (inactive) return inactive;
     const owner = itemByCode(prefix);
-    if (owner && owner.department_id === departmentId && sameBrandModel(owner, brand, model)) return owner;
+    if (
+      owner
+      && owner.department_id === departmentId
+      && sameLabel(owner.name, name)
+      && sameLabel(owner.brand, brand)
+      && sameLabel(owner.model, model)
+    ) return owner;
     return null;
   };
 
@@ -152,12 +201,29 @@ export function registerEquipmentHandlers(): void {
       .filter(Boolean);
   };
 
-  /** Keep an existing list code when the desired prefix belongs to another row. */
-  const itemCodeForWrite = (desired: string, existing?: { id: string; equipment_code: string } | null): string => {
-    const owner = itemByCode(desired);
-    if (!owner || owner.id === existing?.id) return desired;
-    if (existing?.equipment_code) return existing.equipment_code;
-    return uniqueItemCode(desired, usedItemCodes());
+  /**
+   * Every new list row gets a unique code. If `desired` is already taken, the
+   * code ends in ~2, ~3, … A row that already owns `desired` or `desired~n` keeps it.
+   * `reserved` collects codes assigned earlier in the same import batch.
+   */
+  const itemCodeForWrite = (
+    desired: string,
+    existing?: { id: string; equipment_code: string } | null,
+    reserved?: Set<string>,
+  ): string => {
+    const taken = new Set(usedItemCodes());
+    if (reserved) {
+      for (const code of reserved) taken.add(code);
+    }
+    const current = existing?.equipment_code || '';
+    if (current && !current.startsWith('__tmp__') && listCodeMatchesPrefix(current, desired)) {
+      reserved?.add(current);
+      return current;
+    }
+    if (current) taken.delete(current);
+    const code = uniqueItemCode(desired, taken);
+    reserved?.add(code);
+    return code;
   };
 
   const insertAsset = (params: {
@@ -288,7 +354,9 @@ export function registerEquipmentHandlers(): void {
 
   ipcMain.handle('db:equipment:getAll', (event: any) => {
     const cats = categoriesForDepartment(sessionDepartment(event));
-    const catWhere = cats ? `AND d.name IN (${cats.map(() => '?').join(', ')})` : '';
+    // d.id IS NULL keeps items whose department_id does not resolve. A missing
+    // department is not another department.
+    const catWhere = cats ? `AND (d.id IS NULL OR d.name IN (${cats.map(() => '?').join(', ')}))` : '';
 
     // Diagnostic: raw count of active items, with and without dept filter
     const rawTotal: any = db.prepare('SELECT COUNT(*) as c FROM equipment_items WHERE is_active = 1').get();
@@ -336,7 +404,7 @@ export function registerEquipmentHandlers(): void {
     `).get(id);
     if (!row) return null;
     const dept = sessionDepartment(event);
-    if (dept && opsDepartmentOf(row.department_name, row.category_name) !== dept) return null;
+    if (isOutsideOpsDepartment(dept, row.department_name, row.category_name)) return null;
     const assets = loadAssetsByEquipment([id]).get(id) || [];
     return { ...row, is_active: !!row.is_active, assets, asset: assets[0] };
   });
@@ -379,8 +447,9 @@ export function registerEquipmentHandlers(): void {
           }));
     const qty = units.length;
 
-    const existingSku = resolveExistingSku(departmentId, categoryId, input.brand, input.model, skuPrefix);
+    const existingSku = resolveExistingSku(departmentId, categoryId, input.name, input.brand, input.model, skuPrefix);
     const itemCode = itemCodeForWrite(skuPrefix, existingSku);
+    const unitPrefix = listCodeBase(itemCode);
     const assetIds: string[] = [];
     const targetId = existingSku?.id || uuidv4();
 
@@ -401,7 +470,7 @@ export function registerEquipmentHandlers(): void {
           pricingType, basePrice, input.notes || null, qty, qty, now, now);
       }
 
-      const counts = nextUnitCounts(usedCountsForPrefix(itemCode), qty);
+      const counts = nextUnitCounts(usedCountsForPrefix(unitPrefix), qty);
       for (let i = 0; i < units.length; i++) {
         const unit = units[i]!;
         const unitId = uuidv4();
@@ -409,7 +478,7 @@ export function registerEquipmentHandlers(): void {
         insertAsset({
           id: unitId,
           equipmentId: targetId,
-          unitCode: formatUnitCode(itemCode, counts[i]!),
+          unitCode: formatUnitCode(unitPrefix, counts[i]!),
           serial_number: unit.serial_number,
           asset_tag: unit.asset_tag,
           purchase_date: input.purchase_date || null,
@@ -425,12 +494,13 @@ export function registerEquipmentHandlers(): void {
 
     recomputeAvailability(db, targetId);
     const equipmentRow: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(targetId);
-    void pushCatalogToCloud('equipment_items', existingSku ? 'UPDATE' : 'INSERT', equipmentRow);
-
-    for (const aid of assetIds) {
-      const assetRow: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(aid);
-      if (assetRow) void pushOperationalToCloud('equipment_assets', 'INSERT', assetRow);
-    }
+    void (async () => {
+      await pushTaxonomyThenItems([equipmentRow], existingSku ? 'UPDATE' : 'INSERT');
+      for (const aid of assetIds) {
+        const assetRow: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(aid);
+        if (assetRow) await pushOperationalToCloud('equipment_assets', 'INSERT', assetRow);
+      }
+    })();
 
     return { ...equipmentRow, is_active: true };
   });
@@ -599,6 +669,7 @@ export function registerEquipmentHandlers(): void {
       const after: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(id);
       const prefix = skuPrefixFor(departmentId, categoryId, after.brand, after.model);
       const nextCode = itemCodeForWrite(prefix, after);
+      const unitPrefix = listCodeBase(nextCode);
       if (nextCode !== after.equipment_code) {
         db.prepare('UPDATE equipment_items SET equipment_code = ?, updated_at = datetime(\'now\') WHERE id = ?').run(nextCode, id);
         const assets: any[] = db.prepare('SELECT id, equipment_code FROM equipment_assets WHERE equipment_id = ?').all(id);
@@ -606,25 +677,26 @@ export function registerEquipmentHandlers(): void {
           const n = trailingUnitCount(a.equipment_code);
           if (n == null) continue;
           db.prepare('UPDATE equipment_assets SET equipment_code = ?, updated_at = datetime(\'now\') WHERE id = ?')
-            .run(formatUnitCode(nextCode, n), a.id);
+            .run(formatUnitCode(unitPrefix, n), a.id);
           const updated: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(a.id);
           if (updated) void pushOperationalToCloud('equipment_assets', 'UPDATE', updated);
         }
       }
 
       if (input.units !== undefined) {
-        applyUnitEdits(id, input.units, nextCode);
+        applyUnitEdits(id, input.units, unitPrefix);
       } else if (input.quantity !== undefined) {
-        reconcileUnits(id, input.quantity, nextCode);
+        reconcileUnits(id, input.quantity, unitPrefix);
       }
       recomputeAvailability(db, id);
 
       const row: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(id);
-      void pushCatalogToCloud('equipment_items', 'UPDATE', row);
       return row;
     });
 
-    return tx();
+    const row = tx();
+    void pushTaxonomyThenItems([row], 'UPDATE');
+    return row;
   });
 
   ipcMain.handle('db:equipment:updateAsset', (event: any, data: unknown) => {
@@ -868,31 +940,41 @@ export function registerEquipmentHandlers(): void {
     if (!name || !departmentName || !categoryName) return null;
 
     if (departmentName === 'Camera') {
+      if (categoryName === 'Camera Package') categoryName = 'Camera';
       const legacyCameraPackage = categoryName === 'Camera Body'
         || (categoryName === 'Camera' && (subName === 'Camera Body' || subName === 'High Speed Camera'));
       if (legacyCameraPackage) {
         if (subName === 'High Speed Camera' || subSub === 'High Speed Camera') subSub = 'High Speed';
-        else if (!subSub && subName !== 'Camera Body' && subName !== 'High Speed Camera' && subName !== 'Camera Package') subSub = subName;
-        subName = 'Camera Package';
+        else if (!subSub && subName !== 'Camera Body' && subName !== 'High Speed Camera' && subName !== 'Camera Package' && subName !== 'Camera Package Main') subSub = subName;
+        subName = 'Camera Package Main';
         categoryName = 'Camera';
-      } else if (categoryName === 'Camera Peripherals' && subName === 'Power') {
+      } else if ((categoryName === 'Camera Peripherals' || categoryName === 'Video Peripherals') && subName === 'Power') {
         categoryName = 'Power';
         if (subSub === 'AC Power Supply') { subName = 'AC Power Supply'; subSub = ''; }
         else { subName = 'Battery and Charger'; }
       } else if (categoryName === 'Lens' && subName === 'Special Lens' && subSub === 'Lens Support') {
         subName = 'Lens Support';
         subSub = '';
+      } else if (categoryName === 'Camera' && subName === 'Camera Package') {
+        subName = 'Camera Package Main';
       } else if (categoryName === 'Camera Package Component' || categoryName === 'Camera Package Components') {
         const packageBrands = new Set(CAMERA_PACKAGE_BRANDS);
-        categoryName = 'Camera Package Component';
+        categoryName = 'Camera';
         if (packageBrands.has(subName)) {
           subSub = subName;
-          subName = 'Camera Package';
-        } else if (subName !== 'Camera Package') {
-          subName = 'Camera Package';
+        } else if (packageBrands.has(subSub)) {
+          /* already a brand label */
+        } else if (subName && subName !== 'Camera Package' && subName !== 'Camera Package Component') {
+          subSub = subSub || subName;
         }
+        subName = 'Camera Package Component';
       }
+      if (categoryName === 'Camera Peripherals') categoryName = 'Video Peripherals';
       if (subSub === 'Telephoto Prime') subSub = 'Telephoto';
+      if (categoryName === 'Video Peripherals' && subName === 'Monitor') {
+        if (subSub === 'Floor') subSub = 'Floor Monitor';
+        else if (subSub === 'Overhead') subSub = 'Overhead Monitor';
+      }
     }
     if (
       (departmentName === 'Lights and Grips' && (categoryName === 'Cloth' || categoryName === 'Clamps' || categoryName === 'Stands' || categoryName === 'Poles' || categoryName === 'Power & Transport' || categoryName === 'SFX & Others' || categoryName === 'Dolllies' || categoryName === 'Dollies' || categoryName === 'Crane' || categoryName === 'Motion Control' || categoryName === 'Jib' || categoryName === 'Mounts'))
@@ -903,14 +985,17 @@ export function registerEquipmentHandlers(): void {
         subName = 'Cloth';
       } else if (categoryName === 'Power & Transport' || categoryName === 'SFX & Others' || categoryName === 'Dolllies' || categoryName === 'Dollies' || categoryName === 'Crane' || categoryName === 'Jib') {
         subSub = subSub || subName;
-        subName = categoryName === 'Dolllies' ? 'Dollies' : categoryName;
+        subName = categoryName === 'Dolllies' ? 'Dollies' : categoryName === 'Power & Transport' ? 'Power and Transport' : categoryName;
       } else if (categoryName === 'Motion Control' || categoryName === 'Mounts') {
         subName = categoryName;
       }
       departmentName = 'Lights and Grips';
       categoryName = 'Grips';
     }
-    if (departmentName === 'Lights and Grips' && categoryName === 'Grips' && subName === 'Power & Transport' && subSub === 'Power Supply') {
+    if (departmentName === 'Lights and Grips' && categoryName === 'Grips' && subName === 'Power & Transport') {
+      subName = 'Power and Transport';
+    }
+    if (departmentName === 'Lights and Grips' && categoryName === 'Grips' && subName === 'Power and Transport' && subSub === 'Power Supply') {
       subSub = 'Portable Power';
     }
     return { name, departmentName, categoryName, subName, subSub };
@@ -1020,6 +1105,7 @@ export function registerEquipmentHandlers(): void {
     const findSub = db.prepare('SELECT id FROM subcategories WHERE name = ? AND category_id = ? AND is_active = 1');
 
     const tx = db.transaction(() => {
+      const reservedCodes = new Set<string>();
       for (let i = 1; i < lines.length; i++) {
         try {
           const values = parseCsvRow(lines[i]!).map(csvCellValue);
@@ -1085,8 +1171,9 @@ export function registerEquipmentHandlers(): void {
           }
 
           const skuPrefix = skuPrefixFor(deptRow.id, cat.id, row.brand || '', row.model || '');
-          const existing = resolveExistingSku(deptRow.id, cat.id, row.brand || '', row.model || '', skuPrefix);
-          const itemCode = itemCodeForWrite(skuPrefix, existing);
+          const existing = resolveExistingSku(deptRow.id, cat.id, name, row.brand || '', row.model || '', skuPrefix);
+          const itemCode = itemCodeForWrite(skuPrefix, existing, reservedCodes);
+          const unitPrefix = listCodeBase(itemCode);
           const price = canPrice ? (parseFloat(row.base_price || '0') || 0) : 0;
           const unitQty = unitQtyFromCsvRow(row);
 
@@ -1114,14 +1201,14 @@ export function registerEquipmentHandlers(): void {
 
           // N blank units with numbered codes (…-001, …-002). Serial, supplier, and
           // delivered date stay empty so they can be filled later from Edit Details.
-          const counts = nextUnitCounts(usedCountsForPrefix(itemCode), unitQty);
+          const counts = nextUnitCounts(usedCountsForPrefix(unitPrefix), unitQty);
           for (let u = 0; u < unitQty; u++) {
             const assetId = uuidv4();
             createdAssetIds.push(assetId);
             insertAsset({
               id: assetId,
               equipmentId: eqId!,
-              unitCode: formatUnitCode(itemCode, counts[u]!),
+              unitCode: formatUnitCode(unitPrefix, counts[u]!),
               serial_number: '',
               now,
             });
@@ -1137,16 +1224,18 @@ export function registerEquipmentHandlers(): void {
       }
     });
     tx();
-    // SKUs must land before units (cloud FK). Create() already does this; import
-    // used to push only assets, so a populated cloud never saw the new items.
-    for (const itemId of touchedItemIds) {
-      const equipmentRow: any = db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(itemId);
-      if (equipmentRow) void pushCatalogToCloud('equipment_items', 'UPDATE', equipmentRow);
-    }
-    for (const aid of createdAssetIds) {
-      const assetRow: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(aid);
-      if (assetRow) void pushOperationalToCloud('equipment_assets', 'INSERT', assetRow);
-    }
+    const importedItems = [...touchedItemIds].map((itemId) => (
+      db.prepare('SELECT * FROM equipment_items WHERE id = ?').get(itemId)
+    ));
+    // Categories, then SKUs, then units. A new category has to exist in the
+    // cloud before the equipment row that points at it.
+    void (async () => {
+      await pushTaxonomyThenItems(importedItems, 'UPDATE');
+      for (const aid of createdAssetIds) {
+        const assetRow: any = db.prepare('SELECT * FROM equipment_assets WHERE id = ?').get(aid);
+        if (assetRow) await pushOperationalToCloud('equipment_assets', 'INSERT', assetRow);
+      }
+    })();
 
     // Post-import verification: confirm the items actually exist and are active
     const verifyCount: any = db.prepare('SELECT COUNT(*) as c FROM equipment_items WHERE is_active = 1').get();
@@ -1163,6 +1252,19 @@ export function registerEquipmentHandlers(): void {
     return { imported, created, updated, errors };
   });
 
+  // Same committed-shoot rule as 1 Take's equipment usage stats: a scheduled
+  // shoot counts once the request is approved, sent, or archived. Line items
+  // store the equipment name (or the package name) in description.
+  const COMMITTED_SHOOT = `(rr.status IN ('approved', 'sent') OR rr.archived_at IS NOT NULL)`;
+  const DESCRIPTION_MATCHES_EQUIPMENT = `(
+    rli.description = e.name
+    OR rli.description = (
+      SELECT pd.name FROM package_definitions pd
+      WHERE pd.main_item_id = e.id AND pd.is_active = 1
+      LIMIT 1
+    )
+  )`;
+
   ipcMain.handle('db:equipment:getUseCounts', () => {
     return db.prepare(`
       SELECT
@@ -1174,19 +1276,104 @@ export function registerEquipmentHandlers(): void {
         c.name as category_name,
         s.name as subcategory_name,
         d.name as department_name,
-        COUNT(asl.id) as use_count
+        (
+          SELECT COUNT(DISTINCT rli.day_id)
+          FROM rental_line_items rli
+          JOIN rental_requests rr ON rr.id = rli.request_id
+          JOIN rental_shoot_days rsd ON rsd.id = rli.day_id
+          WHERE ${COMMITTED_SHOOT}
+            AND ${DESCRIPTION_MATCHES_EQUIPMENT}
+        ) as use_count
       FROM equipment_items e
       JOIN departments d ON d.id = e.department_id
       JOIN categories c ON c.id = e.category_id
       LEFT JOIN subcategories s ON s.id = e.subcategory_id
-      LEFT JOIN asset_status_log asl
-        ON asl.equipment_id = e.id AND asl.new_status = 'DEPLOYED'
       WHERE e.is_active = 1
         -- Exclude zero-priced package components (billed only as part of a package).
         AND NOT (e.item_type = 'package_component' AND e.base_price = 0)
-      GROUP BY e.id
       ORDER BY use_count DESC, e.name ASC
     `).all();
+  });
+
+  ipcMain.handle('db:equipment:getUseHistory', (event: any, equipmentId: string) => {
+    assertEquipmentInDepartment(db, event, equipmentId);
+    const equipment: any = db.prepare(`
+      SELECT e.id, e.name, e.equipment_code, e.brand
+      FROM equipment_items e WHERE e.id = ?
+    `).get(equipmentId);
+    if (!equipment) return null;
+    const outings = db.prepare(`
+      SELECT
+        rsd.id,
+        rsd.shoot_date AS loaned_date,
+        rr.project_name,
+        rr.client_name AS production_name,
+        rr.request_number AS loan_number,
+        COALESCE(n.notes, '') AS notes,
+        COALESCE(n.set_number, '') AS set_number,
+        COALESCE(n.serial_number, '') AS serial_number
+      FROM rental_shoot_days rsd
+      JOIN rental_requests rr ON rr.id = rsd.request_id
+      JOIN rental_line_items rli ON rli.day_id = rsd.id
+      JOIN equipment_items e ON e.id = ?
+      LEFT JOIN equipment_outing_notes n
+        ON n.loan_id = rsd.id AND n.equipment_id = e.id
+      WHERE ${COMMITTED_SHOOT}
+        AND ${DESCRIPTION_MATCHES_EQUIPMENT}
+      GROUP BY rsd.id
+      ORDER BY rsd.shoot_date DESC, rsd.id
+    `).all(equipmentId);
+    return { equipment, outings };
+  });
+
+  ipcMain.handle('db:equipment:saveUseNote', (event: any, input: {
+    equipmentId?: string;
+    loanId?: string;
+    notes?: string;
+    setNumber?: string;
+    serialNumber?: string;
+  }) => {
+    requireWriteAccess(event);
+    const equipmentId = String(input?.equipmentId || '');
+    const loanId = String(input?.loanId || '');
+    if (!equipmentId || !loanId) throw new Error('Equipment and shoot are required.');
+    assertEquipmentInDepartment(db, event, equipmentId);
+    const shoot = db.prepare(`
+      SELECT rsd.id
+      FROM rental_shoot_days rsd
+      JOIN rental_requests rr ON rr.id = rsd.request_id
+      JOIN rental_line_items rli ON rli.day_id = rsd.id
+      JOIN equipment_items e ON e.id = ?
+      WHERE rsd.id = ?
+        AND ${COMMITTED_SHOOT}
+        AND ${DESCRIPTION_MATCHES_EQUIPMENT}
+      LIMIT 1
+    `).get(equipmentId, loanId);
+    if (!shoot) throw new Error('This equipment was not on that shoot.');
+    const existing: any = db.prepare(`
+      SELECT notes, set_number, serial_number
+      FROM equipment_outing_notes
+      WHERE equipment_id = ? AND loan_id = ?
+    `).get(equipmentId, loanId);
+    const notes = input.notes !== undefined
+      ? String(input.notes ?? '').slice(0, 2000)
+      : String(existing?.notes ?? '');
+    const setNumber = input.setNumber !== undefined
+      ? String(input.setNumber ?? '').trim().slice(0, 80)
+      : String(existing?.set_number ?? '');
+    const serialNumber = input.serialNumber !== undefined
+      ? String(input.serialNumber ?? '').trim().slice(0, 80)
+      : String(existing?.serial_number ?? '');
+    db.prepare(`
+      INSERT INTO equipment_outing_notes (id, equipment_id, loan_id, notes, set_number, serial_number, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(equipment_id, loan_id) DO UPDATE SET
+        notes = excluded.notes,
+        set_number = excluded.set_number,
+        serial_number = excluded.serial_number,
+        updated_at = datetime('now')
+    `).run(uuidv4(), equipmentId, loanId, notes, setNumber, serialNumber);
+    return { notes, set_number: setNumber, serial_number: serialNumber };
   });
 
   // ── Purge equipment list and packages only (local + cloud) ──

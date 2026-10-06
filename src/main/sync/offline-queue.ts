@@ -59,6 +59,13 @@ export function coerceForCloud(payload: Record<string, unknown>): Record<string,
   if (legacyDisplay && (typeof result.name !== 'string' || !result.name.trim())) {
     result.name = legacyDisplay;
   }
+  // Loan project/production are stored locally for use-count history. The shared
+  // loans table does not have these columns yet, and PostgREST rejects the upsert
+  // if they are sent.
+  if (typeof result.loan_number === 'string') {
+    delete result.project_name;
+    delete result.production_name;
+  }
   return result;
 }
 
@@ -115,7 +122,7 @@ export class OfflineQueue {
   }
 
   getAll(): QueuedAction[] {
-    return this.db.prepare('SELECT * FROM offline_queue ORDER BY created_at ASC').all() as QueuedAction[];
+    return this.db.prepare('SELECT * FROM offline_queue ORDER BY created_at ASC, rowid ASC').all() as QueuedAction[];
   }
 
   count(): number {

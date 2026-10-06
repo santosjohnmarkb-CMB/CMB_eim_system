@@ -3,6 +3,7 @@ import { loadSyncConfig, initSupabase, getSupabase, disconnectSupabase, saveSync
 import { offlineQueue } from './offline-queue';
 import { syncCatalogWithCloud, applyCatalogRealtimeChange } from './catalog-sync';
 import { syncOperationalWithCloud, applyOperationalRealtimeChange } from './operational-sync';
+import { syncRentalUsageFromCloud, applyRentalUsageRealtimeChange } from './rental-usage-sync';
 import { resetSchemaIssues, getSchemaIssues } from './schema-health';
 
 const REALTIME_TABLES = [
@@ -13,9 +14,11 @@ const REALTIME_TABLES = [
   'purchase_requests', 'purchase_request_items',
   'parts_catalog', 'parts_inventory', 'parts_transactions',
   'vendors', 'preventive_schedules',
+  'rental_requests', 'rental_shoot_days', 'rental_line_items',
 ];
 
 const CATALOG_TABLES = new Set(['departments', 'categories', 'subcategories', 'equipment_items', 'package_definitions', 'package_items', 'users']);
+const RENTAL_USAGE_TABLES = new Set(['rental_requests', 'rental_shoot_days', 'rental_line_items']);
 
 const ACTION_SYNC_THRESHOLD = 10;
 const HEALTH_CHECK_INTERVAL = 30_000;
@@ -224,6 +227,7 @@ class SyncManager {
       const result = await offlineQueue.replay();
       await syncCatalogWithCloud();
       await syncOperationalWithCloud();
+      await syncRentalUsageFromCloud();
       const schemaIssues = getSchemaIssues();
       this.setState({
         status: 'online',
@@ -329,6 +333,8 @@ class SyncManager {
 
             if (CATALOG_TABLES.has(table)) {
               applyCatalogRealtimeChange(table, eventType, newRecord, oldRecord);
+            } else if (RENTAL_USAGE_TABLES.has(table)) {
+              applyRentalUsageRealtimeChange(table, eventType, newRecord, oldRecord);
             } else {
               applyOperationalRealtimeChange(table, eventType, newRecord, oldRecord);
             }

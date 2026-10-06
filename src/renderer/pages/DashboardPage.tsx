@@ -11,7 +11,7 @@ import type { Department } from '../../shared/constants';
 import { REPAIR_STATUS_CONFIG, SEVERITY_CONFIG } from '../lib/constants';
 import type { DashboardStats, MaintenanceTicket, RepairStatus, EquipmentUseCount, CompletedHistoryEntry, EquipmentLoan, PurchaseRequest } from '../../shared/types';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
-import { ipcInvoke } from '../lib/ipc';
+import { ipcInvoke, ipcOn, ipcRemoveListener } from '../lib/ipc';
 
 const DEPT_ICONS: Record<Department, typeof Camera> = {
   camera: Camera,
@@ -98,7 +98,17 @@ export function DashboardPage() {
       } catch { /* ignore */ }
     }
     loadUseCounts();
-    return () => { cancelled = true; };
+    const onShootChange = (...args: unknown[]) => {
+      const table = (args[0] as { table?: string } | undefined)?.table;
+      if (table === 'rental_requests' || table === 'rental_shoot_days' || table === 'rental_line_items') {
+        void loadUseCounts();
+      }
+    };
+    ipcOn('sync:dataChanged', onShootChange);
+    return () => {
+      cancelled = true;
+      ipcRemoveListener('sync:dataChanged', onShootChange);
+    };
   }, []);
 
   useEffect(() => {
@@ -657,7 +667,7 @@ export function DashboardPage() {
 
             const subcategoryGroups = groupByCategoryThenSubcategory(deptCounts, DEPARTMENT_CONFIG[dept].categories)
               .flatMap((group) => group.subcategories.map((sub) => ({
-                label: `${group.label} · ${sub.label}`,
+                label: group.label === sub.label ? group.label : `${group.label} · ${sub.label}`,
                 items: sub.items.slice().sort((a, b) => b.use_count - a.use_count).slice(0, 5),
               })));
 
@@ -696,7 +706,7 @@ export function DashboardPage() {
                 })}
 
                 <button
-                  onClick={() => navigate('/equipment/use-count')}
+                  onClick={() => navigate(`/equipment/use-count/${dept}`)}
                   className="text-xs text-primary-400 hover:text-primary-300 transition-colors font-medium"
                 >
                   View Complete List →

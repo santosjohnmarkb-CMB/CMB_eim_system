@@ -8,7 +8,7 @@ import { ArchiveListButton } from '../common/ArchiveListButton';
 import { LoadingSpinner } from '../common/LoadingSpinner';
 import { SEVERITY_CONFIG, COMPLETION_OUTCOME_CONFIG } from '../../lib/constants';
 import { printHtml, escapeHtml } from '../../lib/print';
-import { DEPARTMENT_CONFIG, opsDepartmentOf } from '../../../shared/constants';
+import { DEPARTMENT_CONFIG, matchesOpsDepartment } from '../../../shared/constants';
 import type { Department } from '../../../shared/constants';
 import type { CompletedHistoryEntry } from '../../../shared/types';
 
@@ -78,10 +78,14 @@ export function CompletedTicketsTab() {
   const deptEntries = useMemo(() => {
     return entries.filter((e) => {
       if (e.list_archived_at) return false;
-      const dept = opsDepartmentOf(e.department_name, e.category_name);
-      return dept === activeDept;
+      return matchesOpsDepartment(
+        activeDept,
+        e.department_name,
+        e.category_name,
+        visibleDepts.length === 1 && visibleDepts[0] === activeDept,
+      );
     });
-  }, [entries, activeDept]);
+  }, [entries, activeDept, visibleDepts]);
 
   const buildListBody = () => {
     const rows = deptEntries.map((entry, idx) => {
@@ -125,7 +129,12 @@ export function CompletedTicketsTab() {
             const active = activeDept === dept;
             const count = entries.filter((e) => {
               if (e.list_archived_at) return false;
-              return opsDepartmentOf(e.department_name, e.category_name) === dept;
+              return matchesOpsDepartment(
+                dept,
+                e.department_name,
+                e.category_name,
+                visibleDepts.length === 1 && visibleDepts[0] === dept,
+              );
             }).length;
             return (
               <button

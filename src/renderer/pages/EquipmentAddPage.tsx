@@ -17,7 +17,7 @@ import {
 } from '../lib/catalogHierarchy';
 import { CatalogCombobox } from '../components/common/CatalogCombobox';
 import { Badge } from '../components/common/Badge';
-import { buildSkuPrefix, formatUnitCode, nextUnitCounts, trailingUnitCount } from '../../shared/equipment-code';
+import { buildSkuPrefix, formatUnitCode, listCodeBase, listCodeMatchesPrefix, nextUnitCounts, parseUnitCount, uniqueItemCode } from '../../shared/equipment-code';
 import { unitActionLabel } from '../../shared/equipment-unit';
 
 const PRICING_TYPE_OPTIONS: { value: string; label: string }[] = [
@@ -159,16 +159,32 @@ export function EquipmentAddPage() {
       brand: form.brand,
       model: form.model,
     });
+    const same = (left: string | null | undefined, right: string | null | undefined) =>
+      (left || '').trim().toLowerCase() === (right || '').trim().toLowerCase();
     const existing = items.find((i) =>
       i.department_id === form.department_id
       && i.category_id === form.category_id
-      && (i.brand || '').trim().toLowerCase() === (form.brand || '').trim().toLowerCase()
-      && (i.model || '').trim().toLowerCase() === (form.model || '').trim().toLowerCase(),
+      && same(i.name, form.name)
+      && same(i.brand, form.brand)
+      && same(i.model, form.model)
     );
-    const used = (existing?.assets || []).map((a) => trailingUnitCount(a.equipment_code) ?? 0).filter((n) => n > 0);
-    const counts = nextUnitCounts(used, units.length);
-    return { prefix, counts, appending: Boolean(existing) };
-  }, [selectedDept?.name, selectedCat?.name, form.brand, form.model, form.department_id, form.category_id, items, units.length]);
+    const usedCodes = items.map((i) => i.equipment_code).filter(Boolean);
+    const listCode = existing && listCodeMatchesPrefix(existing.equipment_code, prefix)
+      ? existing.equipment_code
+      : uniqueItemCode(prefix, existing ? usedCodes.filter((c) => c !== existing.equipment_code) : usedCodes);
+    const base = listCodeBase(listCode);
+    const usedCounts = items.flatMap((i) => (i.assets || [])
+      .map((a) => parseUnitCount(a.equipment_code, base))
+      .filter((n): n is number => n != null));
+    const counts = nextUnitCounts(usedCounts, units.length);
+    return {
+      listCode,
+      base,
+      counts,
+      appending: Boolean(existing && listCode === existing.equipment_code),
+      collided: listCode !== prefix,
+    };
+  }, [selectedDept?.name, selectedCat?.name, form.brand, form.model, form.name, form.department_id, form.category_id, items, units.length]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -263,11 +279,13 @@ export function EquipmentAddPage() {
           <Input label="Model" value={form.model} onChange={(e) => set('model', e.target.value)} />
           <div className="col-span-2">
             <p className="text-xs font-medium text-surface-400 mb-1">Equipment code</p>
-            <p className="font-mono text-sm text-surface-200">{codePreview.prefix}</p>
+            <p className="font-mono text-sm text-surface-200">{codePreview.listCode}</p>
             <p className="text-xs text-surface-500 mt-0.5">
               {codePreview.appending
-                ? `This brand/model already exists — new units continue the count (${formatUnitCode(codePreview.prefix, codePreview.counts[0] || 1)} …).`
-                : 'Generated from department, category, brand, and model. Each unit gets a count suffix.'}
+                ? `This item already exists — new units continue the count (${formatUnitCode(codePreview.base, codePreview.counts[0] || 1)} …).`
+                : codePreview.collided
+                  ? 'Another item already uses that code, so this one gets a number on the end. Each unit still gets its own count.'
+                  : 'Generated from department, category, brand, and model. Each unit gets a count suffix.'}
             </p>
           </div>
           <Input label="Quantity" type="number" min={1} value={form.quantity} onChange={(e) => setQuantity(e.target.value)} onBlur={normalizeQuantity} />
@@ -308,7 +326,7 @@ export function EquipmentAddPage() {
                 <tr key={idx} className="border-b border-surface-800/60">
                   <td className="py-2 pr-3 text-surface-500">{idx + 1}</td>
                   <td className="py-2 pr-3 font-mono text-xs text-surface-300 whitespace-nowrap">
-                    {formatUnitCode(codePreview.prefix, codePreview.counts[idx] || idx + 1)}
+                    {formatUnitCode(codePreview.base, codePreview.counts[idx] || idx + 1)}
                   </td>
                   <td className="py-2 pr-3">
                     <input value={u.serial_number} onChange={(e) => setUnit(idx, 'serial_number', e.target.value)} className="w-full px-2.5 py-1.5 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100" placeholder="Serial" />

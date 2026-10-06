@@ -183,17 +183,17 @@ function localRowsForCatalogPush(db: any, table: CatalogTable): any[] {
         WHERE p.is_active = 1
       `).all();
     case 'subcategories':
+      // Inactive rows are included so a local hide/rename reaches the cloud.
+      // Pushing only active rows left the old cloud name in place.
       return db.prepare(`
         SELECT s.* FROM subcategories s
-        JOIN categories c ON c.id = s.category_id AND c.is_active = 1
-        JOIN departments d ON d.id = c.department_id AND d.is_active = 1
-        WHERE s.is_active = 1
+        JOIN categories c ON c.id = s.category_id
+        JOIN departments d ON d.id = c.department_id
       `).all();
     case 'categories':
       return db.prepare(`
         SELECT c.* FROM categories c
-        JOIN departments d ON d.id = c.department_id AND d.is_active = 1
-        WHERE c.is_active = 1
+        JOIN departments d ON d.id = c.department_id
       `).all();
     case 'departments':
       return db.prepare(`
@@ -299,6 +299,134 @@ function adoptCloudCatalogIds(db: any, cloudIds: Map<CatalogTable, Set<string>>)
   }
 }
 
+/**
+ * After a rename, two local rows can share a department+name (one inactive).
+ * The cloud unique (department, name) / (category, name) indexes reject that.
+ * Keep a row the cloud already has when possible, move children onto it, and
+ * drop the duplicate so the later push can update that one id.
+ */
+function collapseDuplicateTaxonomy(
+  db: any,
+  preferCategoryIds: Set<string>,
+  preferSubcategoryIds: Set<string>,
+): void {
+  const collapse = (
+    rows: Array<{ id: string; is_active: number }>,
+    keyOf: (row: any) => string,
+    prefer: Set<string>,
+    onDupe: (keeper: string, dupe: string) => void,
+    activate: (id: string) => void,
+  ) => {
+    const groups = new Map<string, Array<{ id: string; is_active: number }>>();
+    for (const row of rows) {
+      const list = groups.get(keyOf(row)) ?? [];
+      list.push(row);
+      groups.set(keyOf(row), list);
+    }
+    for (const group of groups.values()) {
+      if (group.length < 2) continue;
+      const keeper = group.find((row) => prefer.has(row.id))?.id ?? group[0]!.id;
+      if (group.some((row) => row.is_active)) activate(keeper);
+      for (const row of group) {
+        if (row.id === keeper) continue;
+        onDupe(keeper, row.id);
+      }
+    }
+  };
+
+  db.pragma('foreign_keys = OFF');
+  try {
+    const cats = db.prepare(
+      `SELECT id, department_id, name, is_active FROM categories ORDER BY is_active DESC, display_order, id`,
+    ).all() as Array<{ id: string; department_id: string; name: string; is_active: number }>;
+    const remapSubCat = db.prepare('UPDATE subcategories SET category_id = ? WHERE category_id = ?');
+    const remapItemCat = db.prepare('UPDATE equipment_items SET category_id = ? WHERE category_id = ?');
+    const deleteCat = db.prepare('DELETE FROM categories WHERE id = ?');
+    const activateCat = db.prepare('UPDATE categories SET is_active = 1 WHERE id = ?');
+    collapse(
+      cats,
+      (c) => `${c.department_id}::${c.name}`,
+      preferCategoryIds,
+      (keeper, dupe) => {
+        remapSubCat.run(keeper, dupe);
+        remapItemCat.run(keeper, dupe);
+        deleteCat.run(dupe);
+      },
+      (id) => activateCat.run(id),
+    );
+
+    const subs = db.prepare(
+      `SELECT id, category_id, name, is_active FROM subcategories ORDER BY is_active DESC, display_order, id`,
+    ).all() as Array<{ id: string; category_id: string; name: string; is_active: number }>;
+    const remapItemSub = db.prepare('UPDATE equipment_items SET subcategory_id = ? WHERE subcategory_id = ?');
+    const deleteSub = db.prepare('DELETE FROM subcategories WHERE id = ?');
+    const activateSub = db.prepare('UPDATE subcategories SET is_active = 1 WHERE id = ?');
+    collapse(
+      subs,
+      (s) => `${s.category_id}::${s.name}`,
+      preferSubcategoryIds,
+      (keeper, dupe) => {
+        remapItemSub.run(keeper, dupe);
+        deleteSub.run(dupe);
+      },
+      (id) => activateSub.run(id),
+    );
+  } finally {
+    db.pragma('foreign_keys = ON');
+  }
+}
+
+function planNamedPush(
+  localRows: any[],
+  pulledById: Map<string, any>,
+  keyOf: (row: any) => string,
+): { first: any[]; last: any[]; removeIds: string[] } {
+  const localIds = new Set(localRows.map((row) => String(row.id)));
+  const removeIds = [...pulledById.keys()].filter((id) => !localIds.has(id));
+  const blocking = new Set(removeIds.map((id) => keyOf(pulledById.get(id))));
+  const first: any[] = [];
+  const last: any[] = [];
+  for (const row of localRows) {
+    if (blocking.has(keyOf(row))) last.push(row);
+    else first.push(row);
+  }
+  return { first, last, removeIds };
+}
+
+async function upsertCatalogRows(table: CatalogTable, rows: any[]): Promise<void> {
+  if (rows.length > 0) await upsertManyResilient(table, rows);
+}
+
+async function removeCatalogIds(table: 'categories' | 'subcategories', ids: string[]): Promise<void> {
+  for (const id of ids) {
+    try {
+      await cloudService.remove(table, id);
+    } catch (err: any) {
+      console.warn(`[CatalogSync] Could not remove ${table}/${id}: ${err?.message ?? err}`);
+    }
+  }
+}
+
+function equipmentRowsForPush(
+  db: any,
+  pulled: Map<string, { category_id: string | null; subcategory_id: string | null }>,
+): any[] {
+  const active = localRowsForCatalogPush(db, 'equipment_items');
+  const seen = new Set(active.map((row: any) => String(row.id)));
+  if (pulled.size === 0) return active;
+  const extras = db.prepare(
+    `SELECT * FROM equipment_items WHERE equipment_code NOT LIKE '__tmp__%'`,
+  ).all() as any[];
+  const moved = extras.filter((row) => {
+    if (seen.has(String(row.id))) return false;
+    const prev = pulled.get(String(row.id));
+    if (!prev) return false;
+    return prev.category_id !== row.category_id
+      || (prev.subcategory_id ?? null) !== (row.subcategory_id ?? null);
+  });
+  return [...active, ...moved];
+}
+
 async function upsertManyResilient(table: CatalogTable, rows: any[]): Promise<void> {
   if (rows.length === 0) return;
   const payload = rows.map((r) => toCatalogCloudRecord(table, r));
@@ -330,6 +458,9 @@ export async function syncCatalogWithCloud(): Promise<void> {
 
   const db = getDatabase();
   const cloudIds = new Map<CatalogTable, Set<string>>();
+  const pulledCategoryById = new Map<string, any>();
+  const pulledSubcategoryById = new Map<string, any>();
+  const pulledEquipmentTaxonomy = new Map<string, { category_id: string | null; subcategory_id: string | null }>();
 
   // Pull first so this machine learns other EIM installs' ids, then rewrite
   // taxonomy/codes locally and push the full catalog. 1 Take is pull-only and
@@ -347,6 +478,20 @@ export async function syncCatalogWithCloud(): Promise<void> {
       ) {
         console.warn(`[CatalogSync] Cloud ${table} is pre-department schema — skipping pull`);
         continue;
+      }
+
+      if (table === 'categories') {
+        for (const row of rowsToApply) if (row?.id) pulledCategoryById.set(String(row.id), row);
+      } else if (table === 'subcategories') {
+        for (const row of rowsToApply) if (row?.id) pulledSubcategoryById.set(String(row.id), row);
+      } else if (table === 'equipment_items') {
+        for (const row of rowsToApply) {
+          if (!row?.id) continue;
+          pulledEquipmentTaxonomy.set(String(row.id), {
+            category_id: row.category_id ?? null,
+            subcategory_id: row.subcategory_id ?? null,
+          });
+        }
       }
 
       if (rowsToApply.length > 0) {
@@ -385,16 +530,43 @@ export async function syncCatalogWithCloud(): Promise<void> {
     console.warn('[CatalogSync] Catalog canonicalize failed:', err);
   }
 
-  // EIM is the catalog source of truth. Push every valid local row — not just
-  // ids the cloud is missing — so 1 Take receives taxonomy remaps, SKU prefixes,
-  // quantity snapshots, and package edits.
-  for (const table of CATALOG_TABLES) {
+  try {
+    collapseDuplicateTaxonomy(
+      db,
+      new Set(pulledCategoryById.keys()),
+      new Set(pulledSubcategoryById.keys()),
+    );
+  } catch (err) {
+    console.warn('[CatalogSync] Catalog name collapse failed:', err);
+  }
+
+  // EIM is the catalog source of truth. Categories and subcategories are pushed
+  // active and inactive. A renamed row can share its new name with a cloud row
+  // we just folded away, so that cloud id is removed before the rename upsert.
+  const catKey = (row: any) => `${row?.department_id}::${row?.name}`;
+  const subKey = (row: any) => `${row?.category_id}::${row?.name}`;
+  const categories = planNamedPush(localRowsForCatalogPush(db, 'categories'), pulledCategoryById, catKey);
+  const subcategories = planNamedPush(localRowsForCatalogPush(db, 'subcategories'), pulledSubcategoryById, subKey);
+
+  const pushSteps: Array<{ table: CatalogTable; run: () => Promise<void> }> = [
+    { table: 'departments', run: () => upsertCatalogRows('departments', localRowsForCatalogPush(db, 'departments')) },
+    { table: 'categories', run: () => upsertCatalogRows('categories', categories.first) },
+    { table: 'subcategories', run: () => upsertCatalogRows('subcategories', subcategories.first) },
+    { table: 'equipment_items', run: () => upsertCatalogRows('equipment_items', equipmentRowsForPush(db, pulledEquipmentTaxonomy)) },
+    { table: 'subcategories', run: () => removeCatalogIds('subcategories', subcategories.removeIds) },
+    { table: 'subcategories', run: () => upsertCatalogRows('subcategories', subcategories.last) },
+    { table: 'categories', run: () => removeCatalogIds('categories', categories.removeIds) },
+    { table: 'categories', run: () => upsertCatalogRows('categories', categories.last) },
+    { table: 'package_definitions', run: () => upsertCatalogRows('package_definitions', localRowsForCatalogPush(db, 'package_definitions')) },
+    { table: 'package_items', run: () => upsertCatalogRows('package_items', localRowsForCatalogPush(db, 'package_items')) },
+    { table: 'users', run: () => upsertCatalogRows('users', localRowsForCatalogPush(db, 'users')) },
+  ];
+  for (const step of pushSteps) {
     try {
-      const localRows = localRowsForCatalogPush(db, table);
-      if (localRows.length > 0) await upsertManyResilient(table, localRows);
+      await step.run();
     } catch (err) {
-      recordSchemaError(table, err);
-      console.error(`[CatalogSync] Failed to push ${table}:`, err);
+      recordSchemaError(step.table, err);
+      console.error(`[CatalogSync] Failed to push ${step.table}:`, err);
     }
   }
 }

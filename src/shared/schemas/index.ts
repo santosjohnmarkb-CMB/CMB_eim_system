@@ -257,6 +257,8 @@ export const LoanCreateSchema = z.object({
   direction: z.enum(['OUTWARD', 'INWARD']).default('OUTWARD'),
   department: z.enum(['camera', 'lights_grips']),
   person_or_org: z.string().min(1).max(200),
+  project_name: z.string().max(200).default(''),
+  production_name: z.string().max(200).default(''),
   purpose: z.string().max(2000).default(''),
   location: z.string().max(200).default(''),
   loaned_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -289,6 +291,8 @@ export const LoanCreateSchema = z.object({
 // intentionally excluded since they affect numbering and inventory accounting.
 export const LoanUpdateSchema = z.object({
   person_or_org: z.string().min(1).max(200),
+  project_name: z.string().max(200).default(''),
+  production_name: z.string().max(200).default(''),
   purpose: z.string().max(2000).default(''),
   location: z.string().max(200).default(''),
   loaned_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),

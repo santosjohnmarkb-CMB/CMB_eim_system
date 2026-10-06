@@ -2,6 +2,9 @@ import {
   catalogDepartmentNames,
   catalogDeptHasTaxonomy,
   categoriesInCatalogDept,
+  defaultCategoryRank,
+  isCameraPackageComponent,
+  listSectionForCatalogDepts,
   subcategoriesInCategory,
   subSubsFor,
   EQUIPMENT_HIERARCHY,
@@ -359,7 +362,9 @@ export function groupByCategoryThenSubcategory<T extends { category_name?: strin
 ): HierarchyGroups<T>[] {
   const byCat = new Map<string, Map<string, T[]>>();
   for (const item of items) {
-    const cat = item.category_name || 'Other';
+    const cat = isCameraPackageComponent(item.category_name, item.subcategory_name)
+      ? 'Camera Package Component'
+      : (item.category_name || 'Other');
     const sub = item.subcategory_name || 'Other';
     let subs = byCat.get(cat);
     if (!subs) {
@@ -370,8 +375,12 @@ export function groupByCategoryThenSubcategory<T extends { category_name?: strin
     if (list) list.push(item);
     else subs.set(sub, [item]);
   }
+  const section = listSectionForCatalogDepts(catalogDeptNames);
   return Array.from(byCat.keys())
-    .sort((a, b) => categoryRank(catalogDeptNames, a) - categoryRank(catalogDeptNames, b) || a.localeCompare(b))
+    .sort((a, b) =>
+      defaultCategoryRank(section, a) - defaultCategoryRank(section, b)
+      || categoryRank(catalogDeptNames, a) - categoryRank(catalogDeptNames, b)
+      || a.localeCompare(b))
     .map((category) => {
       const subs = byCat.get(category)!;
       return {

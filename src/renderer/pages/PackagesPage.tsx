@@ -151,7 +151,7 @@ export function PackagesPage() {
                 <Download size={14} /> Template
               </Button>
               <Button variant="secondary" size="sm" onClick={handleUploadCsv} loading={isImporting}>
-                <Upload size={14} /> Upload CSV
+                <Upload size={14} /> Import
               </Button>
               <Button size="sm" onClick={() => setShowCreate(true)}>
                 <Plus size={14} /> Create Package
